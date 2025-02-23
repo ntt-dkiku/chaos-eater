@@ -1,0 +1,1008 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ChaosEater: Fully Automating Chaos Engineering with Large Language Models</title>
+    <link rel="icon" type="image/png" href="static/images/chaoseater_icon.png">
+    <style>
+        :root {
+            --primary-color: #4a5568;
+            --secondary-color: #2d3748;
+            --text-color: #ffffff;
+            --text-secondary: #cbd5e0;
+            --accent-color: rgb(112, 201, 112);
+            --accent-color-light: color-mix(in srgb, var(--accent-color), white 30%);
+            --accent-color-dark: color-mix(in srgb, var(--accent-color), black 10%);
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            /* background: rgba(16, 16, 16, 0.877); */
+            /* background: rgba(0, 0, 0, 0.877); */
+            background: rgba(1, 8, 4, 0.884);
+            /* background: linear-gradient(rgba(0, 0, 0, 0.877), rgba(0, 0, 0, 0.765)); */
+            /* linear-gradient(rgb(46, 69, 46), 1%, var(--secondary-color)); */
+            color: var(--text-color);
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 0 1rem;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        
+        header {
+            text-align: center;
+            padding: 2rem 1rem;
+            margin-bottom: -20px;
+        }
+
+        .main-title {
+            font-size: 2.5rem;
+            margin-bottom: 5px;
+            word-wrap: break-word;
+            display: flex;
+            align-items: center;
+            font-weight: bold;
+            justify-content: center;
+        }
+
+        .subtitle {
+            font-size: 1.2rem;
+            font-weight: bold;
+            margin-top: 0;
+            margin-bottom: 0rem;
+        }
+
+        h1 {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .developer {
+            font-size: 1rem;
+            color: var(--text-secondary);
+            cursor: pointer;
+            display: inline-block;
+            position: relative;
+            transition: background-color 0.3s, transform 0.3s;
+        }
+
+        .developer:hover {
+            transform: translateY(-1.5px);
+            color: var(--accent-color);
+        }
+
+        .arrow-icon {
+            font-size: 16px;
+            margin-left: 5px;
+            display: inline-block;
+            transition: transform 0.3s ease;
+        }
+
+        .arrow-icon.rotate {
+            transform: rotate(180deg);
+        }
+
+        main {
+            flex-grow: 1;
+            padding: 2rem 1rem;
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        
+        h3 {
+            margin-top: 0;
+            margin-bottom: 0.3em;
+        }
+
+        .content {
+            /* background-color: rgba(255, 255, 255, 0.1); */
+            border: 0.1px solid rgba(255, 255, 255, 0.269);
+            /* border-color: red; */
+            border-radius: 1rem;
+            padding: 1rem 2em;
+            display: block;;
+            font-size: 20px;
+        }
+
+        .tabs {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            justify-content: center;
+        }
+
+        .tab {
+            background: rgba(255, 255, 255, 0.1);
+            border: none;
+            color: var(--text-color);
+            cursor: pointer;
+            font-size: 20px;
+            padding: 0.5rem 1rem;
+            border-radius: 0.25rem;
+            transition: background-color 0.3s, transform 0.3s;
+        }
+
+        .tab:hover {
+            background-color: var(--accent-color);
+            transform: translateY(-3px);
+        }
+
+        .tab.active {
+            background-color: var(--accent-color);
+            border-radius: 0.25rem;
+        }
+
+        .tab-content {
+            /* background-color: rgba(255, 255, 255, 0.1); */
+            /* border: 0.1px solid rgba(255, 255, 255, 0.269);
+            border-radius: 0.5rem; */
+            padding: 1rem 2em;
+            font-size: 20px;
+            opacity: 0;
+            overflow: hidden;
+            visibility: hidden;
+            position: absolute;
+            transition: opacity 1.3s ease-in-out, visibility 0s ease;
+        }
+
+        .tab-content.active {
+            opacity: 1;
+            border: 0.1px solid rgba(255, 255, 255, 0.269);
+            border-radius: 0.5rem;
+            visibility: visible;
+            position: static;
+            transition: opacity 1.3s ease, visibility 0s ease;
+        }
+
+        footer {
+            text-align: center;
+            padding: 1rem;
+            color: var(--text-secondary);
+        }
+
+        .social-icons {
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+            margin-top: 0.1rem;
+            /* margin-bottom: 10px; */
+            overflow: visible;
+            max-height: 0;
+            transition: max-height 0.3s ease-out, opacity 0.3s ease-out;
+            opacity: 0;
+        }
+
+        .link-icons {
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+            margin-top: 0.5rem;
+            overflow: hidden;
+            max-height: 50px;
+            opacity: 1;
+        }
+
+        .icon {
+            width: 30px;
+            height: 30px;
+            margin-right: 2px;
+        }
+
+        .fas-icon {
+            width: 24px;
+            height: 24px;
+            margin-right: 1px;
+        }
+
+        .social-icons.show {
+            max-height: 50px;
+            opacity: 1;
+        }
+
+        .social-icons a {
+            color: var(--text-secondary);
+            transition: color 0.3s, transform 0.3s;
+        }
+
+        .social-icons a:hover {
+            color: var(--accent-color);
+            transform: translateY(-3px);
+        }
+
+        .social-icons svg {
+            width: 24px;
+            height: 24px;
+        }
+
+        /* Link buttons */
+        .icon-buttons {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            margin-top: 15px;
+        }
+
+        /* Style of each button */
+        .icon-button {
+            display: flex;
+            align-items: center;
+            padding: 0.5rem 1rem;
+            background-color: rgba(255, 255, 255, 0.1);
+            color: #ffffff;
+            border-radius: 30px;
+            text-decoration: none;
+            font-size: 16px;
+            transition: background-color 0.3s, transform 0.3s;
+        }
+
+        .icon-button svg {
+            width: 24px;
+            height: 24px;
+            margin-right: 8px;
+        }
+
+        .icon-button:hover {
+            background-color: var(--accent-color);
+            transform: translateY(-3px);
+        }
+        
+        .demo-button {
+            background-color: rgba(255, 255, 255, 0.1);
+            color: #ffffff;
+        }
+
+        .demo-button:hover {
+            color: #333;
+            background-color: #f9d71c;
+            transform: translateY(-3px);
+        }
+
+        /* sections */
+        .section {
+            text-align: center;
+            font-size: 35px;
+            margin-top: 20px;
+            margin-bottom: 20px;
+        }
+
+        /* code block */
+        .code-container {
+            position: relative;
+            /* background-color: rgba(255, 255, 255, 0.1); */
+            border: 0.1px solid rgba(255, 255, 255, 0.269);
+            border-radius: 8px;
+            padding: 20px;
+            font-size: 20px;
+        }
+
+        pre {
+            /* background-color: rgba(255, 255, 255, 0.1); */
+            background-color: rgba(255, 255, 255, 0.064);
+            color: #f8f8f2;
+            padding: 15px;
+            border-radius: 8px;
+            font-size: 18px;
+            overflow: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            /* margin-top: 0px;
+            margin-bottom: 0px; */
+        }
+
+        .copy-button {
+            position: absolute;
+            top: 80px;
+            right: 30px;
+            background-color: rgba(255, 255, 255, 0.1);
+            border: none;
+            color: #f8f8f2;
+            padding: 5px 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s, transform 0.3s;
+        }
+
+        .copy-button:hover {
+            background-color: var(--accent-color);
+            transform: translateY(-3px);
+        }
+
+        pre code {
+            font-family: 'Cascadia Code', Courier, monospace;
+        }
+
+        inline-code {
+            font-family: 'Cascadia Code', Courier, monospace;
+            font-size: 0.9em;
+            background-color: rgba(255, 255, 255, 0.137);
+            color: white;
+            border-radius: 4px;
+            padding: 2px 4px;
+            margin: 0;
+            white-space: nowrap;
+        }
+
+        .copy-message {
+            position: absolute;
+            top: 25px;
+            right: 20px;
+            background-color: var(--accent-color); /* Message background color */
+            color: #f8f8f2; /* Message text color */
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 14px;
+            opacity: 0; /* Initially hidden */
+            transition: opacity 0.3s ease-in-out; /* Fade-in and fade-out */
+        }
+
+        .copy-message.show {
+            opacity: 1; /* Show state */
+        }
+
+        /* centered images */
+        .center-image {
+            display: block;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        /* link */
+        .custom-link {
+            color: var(--accent-color);
+            text-decoration: none;
+            transition: color 0.3s;
+        }
+
+        .custom-link:visited {
+            color: var(--accent-color-dark);
+        }
+
+        .custom-link:active {
+            color: var(--accent-color-light);
+        }
+
+        .custom-link:hover {
+            color: var(--accent-color-light);
+        }
+
+        /* fade-in */
+        .fade-in-title {
+            animation: scrollAnime2 linear;
+            animation-timeline: view();
+            animation-range: entry();
+        }
+
+        @keyframes scrollAnime2 {
+            0% {
+                opacity: 0;
+            }
+            55% {
+                opacity: 1;
+            }
+            100% {
+                opacity: 1;
+            }
+        }
+
+        .fade-in {
+            animation: scrollAnime linear;
+            animation-timeline: view();
+            animation-range: entry();
+        }
+
+        @keyframes scrollAnime {
+            0% {
+                opacity: 0;
+            }
+            35% {
+                opacity: 1;
+            }
+            100% {
+                opacity: 1;
+            }
+        }
+
+        .underline {
+            display: inline-block;
+            position: relative;
+        }
+
+        .underline::after {
+            content: "";
+            position: absolute;
+            bottom: 20px;
+            left: 0;
+            transform-origin: left;
+            width: var(--underline-width, 0%);
+            height: 2px;
+            background: white;
+            transition: width 0.1s ease-in-out;
+        }
+
+        /* Hambuger menu */
+        .menu {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+            z-index: 9999;
+        }
+        .hamburger {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            width: 30px;
+            height: 25px;
+            cursor: pointer;
+        }
+        .hamburger div {
+            height: 4px;
+            background-color: white;
+            border-radius: 2px;
+        }
+        .menu-content {
+            position: fixed;
+            top: 0;
+            right: 0;
+            height: 100%;
+            width: 250px;
+            background: rgba(1, 8, 4, 0.5);
+            transform: translateX(100%);
+            transition: transform 0.3s ease;
+            z-index: 9998;
+        }
+        .menu-content.active {
+            transform: translateX(0);
+        }
+        .menu-content ul {
+            list-style: none;
+            padding: 30px;
+            margin: 0;
+        }
+        .menu-content ul li {
+            margin: 10px 0;
+        }
+        .menu-content ul li a {
+            text-decoration: none;
+            color: white;
+            font-size: 18px;
+            display: inline-block;
+            transition: transform 0.3s ease, color 0.3s ease;
+        }
+        .menu-content ul li a:hover {
+            transform: translateY(-3px);
+            color: var(--accent-color);
+        }
+
+        @media (max-width: 640px) {
+            .container {
+                max-width: 100%;
+                padding: 0 0.5rem;
+            }
+            main {
+                max-width: 100%;
+                padding: 0 0.5rem;
+                box-sizing: border-box;
+                margin: 0 auto;
+            }
+        }
+        @media (min-width: 640px) {
+            h1 {
+                font-size: 2.5rem;
+            }
+        }
+    </style>
+    <link rel="stylesheet" href="static/css/fontawesome.all.min.css">
+    <script defer src="static/js/fontawesome.all.min.js"></script>
+    <script src="https://kit.fontawesome.com/cb74c5ab15.js" crossorigin="anonymous"></script>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-2EEDKGSBYP"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+    
+      gtag('config', 'G-2EEDKGSBYP');
+    </script>
+</head>
+<body>
+    <div class="menu">
+        <div class="hamburger" id="hamburger">
+            <div></div>
+            <div></div>
+            <div></div>
+        </div>
+    </div>
+    
+    <div class="menu-content" id="menuContent">
+        <ul>
+            <li><a href="#Title"><b>Title</b></a></li>
+            <li><a href="#Background"><b>Background</b></a></li>
+            <li><a href="#ChaosEater"><b>Proposed System</b></a></li>
+            <li><a href="#Examples"><b>Examples</b></a></li>
+            <li><a href="#Discussion"><b>Discussion</b></a></li>
+            <li><a href="#Citation"><b>Citation</b></a></li>
+        </ul>
+    </div>
+    <header id="Title">
+        <div class="container">
+            <h1 class="main-title">
+                <img src="static/images/chaoseater_icon.png" width="70px" style="margin-right: 10px;">   <span style="font-variant: small-caps;">ChaosEater</span>
+            </h1>  
+            <p class="subtitle">Fully Automating Chaos Engineering with Large Language Models</p>
+            <p class="developer" id="developer-name">
+              developed by Daisuke Kikuta
+              <span class="arrow-icon" id="arrow-icon">▼</span>
+            </p>
+
+            <div class="social-icons" id="social-icons">
+                <a href="mailto:daisuke.kikuta@ntt.com" aria-label="mail">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 22 22" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    </svg>
+                </a>
+                <a href="https://www.linkedin.com/in/daisuke-kikuta-b454661a2" target="_blank" rel="noopener noreferrer" aria-label="LinkedIn">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
+                    </svg>
+                </a>
+                <a href="https://twitter.com/oookiku_rd" target="_blank" rel="noopener noreferrer" aria-label="X (Twitter)">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+                    </svg>
+                </a>
+                <a href="https://scholar.google.com/citations?hl=en&user=0jYdmCMAAAAJ" target="_blank" rel="noopener noreferrer" aria-label="Other works">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 512 512">
+                        <!--!Font Awesome Free 6.6.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2024 Fonticons, Inc.-->
+                        <path d="M390.9 298.5c0 0 0 .1 .1 .1c9.2 19.4 14.4 41.1 14.4 64C405.3 445.1 338.5 512 256 512s-149.3-66.9-149.3-149.3c0-22.9 5.2-44.6 14.4-64h0c1.7-3.6 3.6-7.2 5.6-10.7c4.4-7.6 9.4-14.7 15-21.3c27.4-32.6 68.5-53.3 114.4-53.3c33.6 0 64.6 11.1 89.6 29.9c9.1 6.9 17.4 14.7 24.8 23.5c5.6 6.6 10.6 13.8 15 21.3c2 3.4 3.8 7 5.5 10.5zm26.4-18.8c-30.1-58.4-91-98.4-161.3-98.4s-131.2 40-161.3 98.4L0 202.7 256 0 512 202.7l-94.7 77.1z"/>
+                    </svg>
+                </a>
+            </div>
+
+            <div class="icon-buttons">
+              <!-- Hugging face -->
+              <a href="https://huggingface.co/spaces/oookiku/chaos-eater" class="icon-button demo-button" target="_blank">
+                  <span class="icon">
+                    <img src="static/images/hf-logo.svg" alt="Hugging Face" width="30" height="30">
+                  </span>
+                  <span>
+                  Demo
+                  </span>
+              </a>
+              
+              <!-- GitHub -->
+              <a href="https://github.com/ntt-dkiku/chaos-eater" class="icon-button" target="_blank">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 .296C5.373.296 0 5.669 0 12.296c0 5.289 3.438 9.769 8.207 11.362.599.111.793-.26.793-.579 0-.287-.011-1.043-.016-2.048-3.338.725-4.042-1.61-4.042-1.61-.545-1.382-1.33-1.75-1.33-1.75-1.087-.744.082-.729.082-.729 1.2.085 1.833 1.233 1.833 1.233 1.069 1.832 2.805 1.303 3.491.996.108-.775.418-1.303.76-1.604-2.664-.303-5.467-1.335-5.467-5.93 0-1.31.469-2.381 1.235-3.221-.124-.304-.535-1.526.118-3.178 0 0 1.008-.323 3.3 1.23a11.514 11.514 0 013.006-.405c1.02.005 2.047.138 3.005.405 2.292-1.553 3.298-1.23 3.298-1.23.655 1.652.243 2.874.12 3.178.77.84 1.233 1.911 1.233 3.221 0 4.608-2.806 5.624-5.477 5.921.429.369.813 1.099.813 2.215 0 1.599-.014 2.889-.014 3.281 0 .321.192.694.799.577 4.762-1.592 8.193-6.073 8.193-11.36C24 5.67 18.627.296 12 .296z"/>
+                </svg>
+                Code
+              </a>
+
+              <!-- arXiv -->
+              <a href="https://arxiv.org/abs/2501.11107" class="icon-button" target="_blank">
+                  <span class="fas-icon">
+                    <i class="fas fa-file-pdf fa-lg"></i>
+                  </span>
+                  Paper
+              </a>
+          </div>
+          <br>
+          <br>
+          <img src="static/images/chaoseater_arch.png" style="width: 100%; height: auto;">
+        </div>
+    </header>
+    <main>
+        <!-- Background -->
+        <h2 id="Background" class="section fade-in-title">Background</h2>
+        <div class="content fade-in">
+          <p>
+            <a href="https://arxiv.org/abs/1702.05843" class="custom-link" target="_blank">Chaos Engineering</a> (CE) is an engineering technique aimed at improving the resiliency of distributed systems. 
+            It involves artificially injecting specific failures into a distributed system and observing its behavior in response.
+            Based on the observation, the system can be proactively reconfigured to handle those failures.
+            Systematically, these CE operations are organized into a CE cycle consisting of four phases:
+          </p>
+          <ol>
+            <li><strong>Hypothesis:</strong> Define steady states (i.e., normal behavior) of the system and injected failures. Then, make a hypothesis that the steady states are maintained in the system even when the failures occur.</li>
+            <li><strong>Experiment:</strong> Inject the failures into the system while logging the system's response behavior.</li>
+            <li><strong>Analysis:</strong> Analyze the logged data and check if the hypothesis is satisfied. If so, this CE cycle is finished here. If not, move to (4).</li>
+            <li><strong>Improvement:</strong> Reconfigure the system to satisfy the hypothesis. The reconfigured system is tested again in (2) and (3), i.e., repeat (2) to (4) until the hypothesis is satisfied.</li>
+          </ol>
+          <p>
+            Recent CE tools, such as <a href="https://github.com/Netflix/chaosmonkey" class="custom-link" target="_blank">Chaos Monkey</a> and <a href="https://github.com/Netflix/chaosmonkey" class="custom-link" target="_blank">Chaos Mesh</a>, realize the automated execution of predefined CE experiments.
+            Moreover, monitoring tools, such as <a href="https://github.com/prometheus/prometheus" class="custom-link" target="_blank">Prometheus</a> and <a href="https://github.com/grafana/k6" class="custom-link" target="_blank">k6</a>, enable automating metric collection and threshold-based testing during chaos experiments.
+            However, generative tasks, such as defining these experiments and reconfiguring the system after the experiments, still remain manual.
+            To reduce the costs of these manual operations, we propose <span style="font-variant: small-caps;">ChaosEater</span>, a system for automating the entire CE cycle with Large Language Models (LLMs).
+          </p>
+          <br>
+          <img src="static/images/ce_cycle.png" style="width: 80%; height: auto;" class="center-image">
+          <div style="text-align: center;">
+            <div style="display: inline-block; text-align: left;">
+                Figure 1: The systematic CE cycle. Existing tools partially automate the experiment and analysis, 
+                <br>
+                whereas hypothesis and improvement remain manual. <span style="font-variant: small-caps;">ChaosEater</span> automates all of them.
+            </div>
+          </div> 
+        </div>
+
+        <!-- ChaosEater -->
+        <br><br>
+        <h2 id="ChaosEater" class="section fade-in-title">Proposed System: <span style="font-variant: small-caps;">ChaosEater</span></h2>
+        <div id="Overview" class="content fade-in">
+            <p>
+                <span style="font-variant: small-caps;">ChaosEater</span> is the first LLM-based system designed to fully automate the systematic CE cycle. <br>
+                Its three key features to achieve fully automated CE are as follows:
+            </p>
+            <div class="underline"><h2>1. Infrastructure as Code x LLMs for Software Engineering</h2></div>
+            <div>
+                In modern software systems, the entire system configuration can be managed as code through <a href="https://en.wikipedia.org/wiki/Infrastructure_as_code" class="custom-link" target="_blank">Infrastructure as Code</a> (IaC).
+                Additionally, existing CE tools enable the code-based management of failure injection.
+                Therefore, CE for software systems is considered as one of the Software Engineering (SE) tasks.
+                Meanwhile, LLMs have achieved significant success in SE tasks, such as code generation and debugging.
+                Given the compatibility between IaC and LLMs for SE, we propose applying LLMs to CE for software systems.
+                In particular, we here focus on <a href="https://github.com/kubernetes/kubernetes" class="custom-link" target="_blank">Kubernetes</a> (K8s) systems as software systems.
+            </div>
+            <br>
+
+            <div class="underline"><h2>2. Agentic Workflow for Chaos Engineering</h2></div>
+            <div>
+                Agentic Workflows, which define task flows (transitions) among multiple LLM agents, have been actively designed in various fields.
+                Similarly, we design a novel agentic workflow for CE according to the systematic CE cycle (Figure 2).
+                When a user's K8s system is provided as input, the workflow allows each LLM agent to autonomously perform hypothesis formulation, chaos experiments using Chaos Mesh, result analysis, and system reconfiguration. 
+                As a result, we obtain a K8s system reconfigured to satisfy the hypothesis as the final output. 
+                This is the first attempt to design an agentic workflow for FULLY automating the systematic CE cycle.
+            </div>
+            <br>
+            <div class="underline"><h2>3. New components: VaC, Interfaces between LLMs and CE tools</h2></div>
+            <div>
+                We propose not only the novel workflow and instruction prompts for LLM agents but also component technologies essential for full CE automation, 
+                such as unit test-based hypothesis validation and integration with existing CE tools.
+                For the former, we introduce a novel concept called Validation as Code (VaC). 
+                Instead of having the LLM validate hypotheses by inspecting logs on the spot, it generates unit test code during hypothesis formulation, which is then used to validate the hypothesis during chaos experiments.
+                By explicitly representing and fixing the validation process through code, this approach ensures transparency and consistency in LLMs' decision-making.
+                For the latter, we develop interfaces to bridge LLMs with existing CE tools, such as a rule-based algorithm that converts LLM's experimental plans into <a href="https://chaos-mesh.org/docs/create-chaos-mesh-workflow/" class="custom-link" target="_blank">Chaos Mesh workflow manifests</a> for scheduling complex chaos experiments.
+            </div>
+            <br><br>
+            <img src="static/images/chaoseater_arch.png" style="width: 100%; height: auto;">
+            <div style="text-align: center;">
+                <div style="display: inline-block; text-align: left;">
+                    Figure 2: The agentic workflow of <span style="font-variant: small-caps;">ChaosEater</span> and its input and output.
+                    <br>
+                    The internal agents autonomously complete the systematic CE cycle using CE tools.
+                </div>
+            </div>
+        </div>
+
+        <!-- Example -->
+        <br><br>
+        <h2 id="Examples" class="section fade-in-title">Examples</h2>
+        <div class="tabs fade-in-title">
+            <button class="tab active" data-tab="Nginx"><span style="font-variant: small-caps;">Nginx</span></button>
+            <button class="tab" data-tab="Sockshop"><span style="font-variant: small-caps;">SockShop</span></button>
+        </div>
+
+        <div id="Nginx" class="tab-content active fade-in">
+          <!-- Nginx -->
+          <div class="underline"><h2>Example #1: <span style="font-variant: small-caps;">Nginx</span></h2></div>
+          <div style="position: relative; width: 100%; padding-bottom: 56.25%; height: 0; margin: 20px 0;">
+            <iframe 
+                src="https://www.youtube.com/embed/VIDEO_ID" 
+                title="Nginx demo"
+                frameborder="0"
+                style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;"
+                allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                allowfullscreen>
+            </iframe>
+          </div>
+          <div>
+            <h3>System description</h3>
+            <span style="font-variant: small-caps;">Nginx</span> is a small-scale system that consists of two K8s manifests (i.e., two resources): <inline-code>pod.yaml</inline-code> and <inline-code>service.yaml</inline-code>.
+            The former defines a <inline-code>Pod</inline-code> resource including a Nginx container, and the latter defines <inline-code>Service</inline-code> resource routing TCP traffic to the <inline-code>Pod</inline-code>.
+          </div>
+          <p>
+            <h3>Problem setting</h3>
+            To verify whether <span style="font-variant: small-caps;">ChaosEater</span> can improve the system when there are resiliency issues, we intentionally configure the resource with a non-resilient setting; we set the <inline-code>Pod</inline-code>'s <inline-code>restartPolicy</inline-code> to <inline-code>Never</inline-code> in <inline-code>pod.yaml</inline-code>.
+            With this configuration, once the <inline-code>Pod</inline-code> goes down, it will never restart, resulting in extended service outages.
+            we validate whether <span style="font-variant: small-caps;">ChaosEater</span> correctly identifies and addresses this resiliency issue through a reasonable CE cycle.
+          </p>
+          <p>
+            <h3>Results</h3>
+            Given the <span style="font-variant: small-caps;">Nginx</span>, <span style="font-variant: small-caps;">ChaosEater</span> defined "The <inline-code>Pod</inline-code> should be running at least 90% of the time during the check period" as one of the steady states during the hypothesis phase.
+            It then generated a failure scenario for a cyberattack, where the <inline-code>Pod</inline-code> would go down after a network delay.
+            <p>
+              In the experiment phase, <span style="font-variant: small-caps;">ChaosEater</span> executed the chaos experiment to validate the steady states and successfully discovered that the <inline-code>Pod</inline-code> had not restarted after its failure.
+            </p>
+            <p>
+              In the analysis and improvement phases, <span style="font-variant: small-caps;">ChaosEater</span> analyzed the results and identified that the issue was caused by the <inline-code>restartPolicy</inline-code> being set to <line-code>Never</line-code>.
+              It then replaced the <inline-code>Pod</inline-code> resource with a <inline-code>Depolyment</inline-code> resource with three replicas.
+            <p>
+              Finally, <span style="font-variant: small-caps;">ChaosEater</span> re-executed the chaos experiment on the reconfigured <span style="font-variant: small-caps;">Nginx</span> and confirmed that the hypothesis was satisfied.
+            </p>
+            <p>
+                The cost and time for this CE cycle were approximately 0.21 USD and 11 minutes, respectively.
+            </p>
+          </p>
+        </div>
+
+        <div id="Sockshop" class="tab-content fade-in">
+          <!-- Sock shop -->
+          <div class="underline"><h2>Example #2: <span style="font-variant: small-caps;">SockShop</span></h2></div>
+          <div style="position: relative; width: 100%; padding-bottom: 56.25%; height: 0; margin: 20px 0;">
+            <iframe 
+                src="https://www.youtube.com/embed/VIDEO_ID" 
+                title="Nginx demo"
+                frameborder="0"
+                style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;"
+                allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                allowfullscreen>
+            </iframe>
+          </div>
+          <p>
+            <h3>System description</h3>
+            <a href="https://github.com/microservices-demo/microservices-demo" class="custom-link" target="_blank"><span style="font-variant: small-caps;">SockShop</span></a> is a practical and large-scale e-commerce system that consists of 29 manifests,
+            which define the resources and databases for front-end pages, user information, order, payment, shipping, and so on.
+            The number of replicas of all the <inline-code>Deployment</inline-code> resources is originally set to one.
+            However, this setting could lead to downtime of the single replica when it goes down.
+          </p>
+          <p> 
+            <h3>Problem setting</h3>
+            To narrow down this original resiliency issue to a single point, we increase the replicas for <inline-code>Deployment</inline-code> resources other than <inline-code>front-end-dep.yaml</inline-code> to two,
+            while keeping a single replica for <inline-code>front-end-dep.yaml</inline-code>.
+            This RELATIVELY reduces the redundancy/resiliency of the front-end resource. We validate whether <span style="font-variant: small-caps;">ChaosEater</span> correctly identifies and addresses this resiliency issue through a reasonable CE cycle.
+          </p>
+          <p>
+            <h3>Results</h3>
+            Given the <span style="font-variant: small-caps;">SockShop</span> with adjusted replica counts, <span style="font-variant: small-caps;">ChaosEater</span> defined "<inline-code>front-end</inline-code> resources are always in the <inline-code>Ready</inline-code> state" as one of the steady states during the hypothesis phase.
+            It then generated a failure scenario for a Black Friday sale, where the <inline-code>front-end</inline-code> resource would go down after an increase in CPU usage of the <inline-code>carts-db</inline-code> resource due to excessive access.
+            <p>
+              In the experiment phase, <span style="font-variant: small-caps;">ChaosEater</span> executed the chaos experiment to validate the steady states and successfully discovered the existence of downtime after the <inline-code>front-end</inline-code> resource failure.
+            </p>
+            <p>
+              In the analysis and improvement phases, <span style="font-variant: small-caps;">ChaosEater</span> analyzed the results and identified that the downtime was caused by the replica count of the <inline-code>front-end</inline-code> resource being set to 1.
+              It then increased the replica count of the <inline-code>front-end</inline-code> resource to 2.<br>
+            <p>
+              Finally, <span style="font-variant: small-caps;">ChaosEater</span> re-executed the chaos experiment on the reconfigured <span style="font-variant: small-caps;">SockShop</span> and confirmed that the hypothesis was satisfied.
+            </p>
+            <p>
+                The cost and time for this CE cycle were approximately 0.84 USD and 25 minutes, respectively.
+            </p>
+          </p>
+        </div>
+
+        <!-- Discussion -->
+        <br><br>
+        <h2 id="Discussion" class="section fade-in-title">Discussion</h2>
+        <div class="content fade-in">
+            <div class="underline broader"><h2>Broader Impacts</h2></div>
+            <div>
+                In recent years, the creation of software applications from natural language (text2app) using LLMs has been actively explored. 
+                However, most text2app systems give little consideration to the resiliency of the underlying system infrastructure of their generated applications.
+                We believe that <span style="font-variant: small-caps;">ChaosEater</span> can effectively address this issue.
+                By seamlessly integrating <span style="font-variant: small-caps;">ChaosEater</span> with these text2app systems, it becomes possible to automatically build resilient application systems in an end-to-end manner.
+            </div>
+            <p>
+                Moreover, the outputs of <span style="font-variant: small-caps;">ChaosEater</span> can also serve as training materials (including both good and bad practices) for the Chaos Game Day, a hands-on training exercise for CE engineers.
+            </p>
+            <!-- limitation -->
+            <div class="underline limitations"><h2>Limitations</h2></div>
+            <div>
+                The current <span style="font-variant: small-caps;">ChaosEater</span> mainly has three limitations:
+                <ol>
+                    <li>
+                        <strong>Deployed environment</strong>:
+                        Although CE is ideally conducted in actual production environments, <span style="font-variant: small-caps;">ChaosEater</span> is currently only supported in development environments.
+                    </li>
+                    <br>
+                    <li> 
+                        <strong>Limited to K8s manifest reconfiguration</strong>:
+                        Software systems consist of not only K8s manifests but also other types of codebases, such as HTML/CSS/JS and Python.
+                        To optimally improve system resiliency, reconfiguration of all types of codebases is necessary.
+                        However, <span style="font-variant: small-caps;">ChaosEater</span> currently supports reconfiguring only K8s manifests.
+                    </li>
+                    <br>
+                    <li>
+                        <strong>Vulnerability discovery</strong>:
+                        In case studies, <span style="font-variant: small-caps;">ChaosEater</span> succesfully improved systems with somewhat obvious resiliency issues. 
+                        However, for systems that already possess a certain level of resiliency, <span style="font-variant: small-caps;">ChaosEater</span> fails to find new hidden issues through a CE cycle.
+                        This is a challenging task even for skilled engineers. Therefore, <span style="font-variant: small-caps;">ChaosEater</span> is currently capable of performing only at a level comparable to or lower than that of engineers.
+                        <!-- To find issues in such systems, it is necessary to conduct multiple CE cycles for more complex systems over extended operational periods. -->
+                    </li>
+                </ol>
+            </div>
+            <!-- Future directions -->
+            <div class="underline"><h2>Future Directions</h2></div>
+            <div>
+                Given the current limitations above, we share some future directions for <span style="font-variant: small-caps;">ChaosEater</span>:
+                <ol>
+                    <li>
+                        <strong>Production deployment and security</strong>:
+                        If <span style="font-variant: small-caps;">ChaosEater</span> is deployed in production environments, further research on security will be necessary.
+                        This includes controlling more carefully the impact range of artificial failures (i.e., blast radius),
+                        preventing <span style="font-variant: small-caps;">ChaosEater</span> from being misused as a proxy to attack production services,
+                        and proposing emergency response measures, such as a higher-level monitoring system that continuously monitors <span style="font-variant: small-caps;">ChaosEater</span> and can intervene if necessary.
+                    </li>
+                    <br>
+                    <li>
+                        <strong>LLMs x Graphs</strong>:
+                        When reconfiguring systems across multiple types of code, it is essential to consider their dependencies.
+                        To achieve this, LLMs must have the capability to recoginize the complex dependencies as a graph.
+                        We belive that leveraging recent advancements in LLMs x Graphs could effectively address this challenge.
+                    </li>
+                    <br>
+                    <li> 
+                        <strong>Fully automation of long-term multiple CE cycles</strong>:
+                        To overcome the third limitation, it is necessary to conduct multiple CE cycles for more complex systems over extended operational periods.
+                        By using <span style="font-variant: small-caps;">ChaosEater</span>'s output as input for the next CE cycle, we can automate multiple CE cycles even with the current <span style="font-variant: small-caps;">ChaosEater</span>. 
+                        However, we additionally need to develop techniques to manage the long-term history of the continuous CE cycles.
+                    </li>
+                    <br>
+                    <li>
+                        <strong>Evaluation frameworks</strong>:
+                        As there are currently no datasets and benchmarks for CE, we will consturct them to enable more solid validation of <span style="font-variant: small-caps;">ChaosEater</span>.
+                        Besides, we plan to propose new metrics for quantiatively evaluating CE cycles conducted by <span style="font-variant: small-caps;">ChaosEater</span>.
+                        This is not easy because, even in cases where no improvements are made, CE cycles can still provide valuable insights.
+                        Therefore, the quality of CE cycles should not be judged solely based on whether improvements were made; 
+                        metrics that consider its philosophical aspects are also necessary.
+                    </li>
+                </ol>
+            </div>
+        </div>
+
+        <!-- Citation -->
+        <br>
+        <h2 id="Citation" class="section fade-in-title">Citation</h2>
+        <!-- <div class="content"> -->
+        <div class="code-container fade-in">
+          If you find this work useful, please cite our paper as follows:
+          <pre><code id="code-block">
+@misc{dkiku2025chaoseater,
+    title={ChaosEater: Fully Automating Chaos Engineering with Large Language Models}, 
+    author={Daisuke Kikuta and Hiroki Ikeuchi and Kengo Tajiri and Yuusuke Nakano},
+    year={2025},
+    eprint={2501.11107},
+    archivePrefix={arXiv},
+    primaryClass={cs.SE},
+    url={https://arxiv.org/abs/2501.11107}, 
+}
+          </code></pre>
+          <!-- Copy button -->
+          <button class="copy-button" onclick="copyToClipboard()">Copy</button>
+          <!-- Copy success message -->
+          <div class="copy-message" id="copy-message">Copied!</div>
+        </div>
+      <!-- </div> -->
+    </main>
+
+    <footer>
+        <p>&copy; 2025 NTT Corporation. All rights reserved.</p>
+    </footer>
+
+    <script>
+        //----------------------
+        // tab & toggle control
+        //----------------------
+        document.addEventListener('DOMContentLoaded', () => {
+            const tabs = document.querySelectorAll('.tab');
+            const tabContents = document.querySelectorAll('.tab-content');
+            const developerName = document.getElementById('developer-name');
+            const socialIcons = document.getElementById('social-icons');
+            const arrowIcon = document.getElementById('arrow-icon');
+
+            const updateUnderlinePositions = () => {
+                targetPositions.forEach(target => {
+                    const rect = target.element.getBoundingClientRect();
+                    target.top = rect.top + window.scrollY;
+                });
+            };
+            tabs.forEach(tab => {
+                tab.addEventListener('click', () => {
+                    const tabId = tab.getAttribute('data-tab');
+
+                    tabs.forEach(t => t.classList.remove('active'));
+                    tabContents.forEach(content => content.classList.remove('active'));
+                    tabContents.forEach(content => content.classList.remove('fade-in'));
+
+                    tab.classList.add('active');
+                    document.getElementById(tabId).classList.add('active');
+
+                    const underlineElements = document.getElementById(tabId).querySelectorAll('.underline');
+                    underlineElements.forEach(element => {
+                        element.style.setProperty('--underline-width', '100%');
+                    });
+                    updateUnderlinePositions(); // for applying underlines into switched tabs
+                    
+                    setTimeout(() => {
+                        requestAnimationFrame(() => {
+                            document.getElementById(tabId).classList.add('fade-in');
+                        });
+                    }, 1000); // 1s
+                });
+            });
+
+            developerName.addEventListener('click', () => {
+                socialIcons.classList.toggle('show');
+                arrowIcon.classList.toggle('rotate');
+            });
+        });
+
+        //-------------------
+        // clipboard control
+        //-------------------
+        function copyToClipboard() {
+            const codeBlock = document.getElementById("code-block").innerText;
+            navigator.clipboard.writeText(codeBlock)
+                .then(() => {
+                    // Show the copy success message
+                    const copyMessage = document.getElementById("copy-message");
+                    copyMessage.classList.add("show");
+
+                    // Hide the message after a few seconds
+                    setTimeout(() => {
+                        copyMessage.classList.remove("show");
+                    }, 2000); // Hide after 2 seconds
+                })
+                .catch((error) => {
+                    console.error("Failed to copy to clipboard: ", error);
+                });
+        }
+
+        //-------------------
+        // underline control
+        //-------------------
+        const offset = 400;
+        const targets = document.querySelectorAll('.underline');
+        const targetPositions = Array.from(targets).map(target => ({
+            element: target,
+            top: target.getBoundingClientRect().top + window.scrollY
+        }));
+        window.addEventListener('scroll', () => {
+            const scrollY = window.scrollY;
+            const windowHeight = window.innerHeight;
+            targetPositions.forEach(({ element, top }) => {
+                let maxPercentage = 100;
+                let coef = 3
+                if (element.classList.contains('broader')) {
+                    maxPercentage = 200;
+                    coef = 6
+                } else if (element.classList.contains('limitations')) {
+                    maxPercentage = 60;
+                }
+                if (scrollY > top - windowHeight + offset && scrollY < top) {
+                    const progress = (scrollY - (top - windowHeight + offset)) / windowHeight;
+                    const widthPercentage = Math.min(progress * coef * 100, maxPercentage);
+                    element.style.setProperty('--underline-width', `${widthPercentage}%`);
+                } else if (scrollY >= top) {
+                    element.style.setProperty('--underline-width', `${maxPercentage}%`);
+                } else {
+                    element.style.setProperty('--underline-width', '0%');
+                }
+            });
+        });
+        // initialization
+        targets.forEach(target => {
+            target.style.setProperty('--underline-width', '0%');
+        });
+
+        //------------------------
+        // Hamburger menu control
+        //------------------------
+        const hamburger = document.getElementById('hamburger');
+        const menuContent = document.getElementById('menuContent');
+
+        hamburger.addEventListener('click', () => {
+            menuContent.classList.toggle('active');
+        });
+    </script>
+</body>
+</html>
