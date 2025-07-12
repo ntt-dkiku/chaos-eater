@@ -1,4 +1,4 @@
-# <img src="docs/static/images/chaoseater_icon.png" align="left" width="90px"> ChaosEater: Fully Automating Chaos Engineering with Large Language Models 
+# ChaosEater: Fully Automating Chaos Engineering with Large Language Models 
 
 <p>
   This repo is the official implementation of "ChaosEater: Fully Automating Chaos Engineering with Large Language Models".
@@ -161,12 +161,12 @@ Clone this repository and move there.
 git clone xxxxx && cd chaos-eater 
 ```
 ### 1. Install environment
-Install dependency tools in local using [create_environment.sh](./create_environment.sh). The installed tools include ```kubectl```, ```kind```, ```krew```, ```kubectl-graph```, ```skaffold```. Note that tools that are already installed in local will be skipped.
+Install dependency tools in local using [create_environment.sh](create_environment.sh). The installed tools include ```kubectl```, ```kind```, ```krew```, ```kubectl-graph```, ```skaffold```. Note that tools that are already installed in local will be skipped.
 ```
 ./create_environment.sh
 ```
 ### 2. Create a kind cluster and the ChaosEater container
-Create a kind cluster and the ChaosEater container using [create_kind_cluster.sh](./create_kind_cluster.sh). You may change the cluster name and the port number of the ChaosEater app with the the ```-n,--name <your-favorite-name>``` and ```-p,--port <port>``` options, respectively.
+Create a kind cluster and the ChaosEater container using [create_kind_cluster.sh](create_kind_cluster.sh). You may change the cluster name and the port number of the ChaosEater app with the the ```-n,--name <your-favorite-name>``` and ```-p,--port <port>``` options, respectively.
 ```
 ./create_kind_cluster.sh -n chaos-eater-cluster -p <port>
 ```
@@ -285,7 +285,7 @@ Input format
 As input, ChaosEater currently supports only a zipped Skaffold project folder, which involves of a Skaffold configuration file and K8s manifests.
 The Skaffold configuration file must be placed in the root directory of the folder.
 The K8s manifests can be placed anywhere, but ensure that their relative paths are correctly specified in the ```manifests``` section of the Skaffold configuration file.
-More specifically, please refer to our example folders: [nginx](./examples/nginx), [sock shop](./examples/sock-shop-2).
+More specifically, please refer to our example folders: [nginx](examples/nginx), [sock shop](examples/sock-shop-2).
 </details>
 
 ## 💡 Examples
@@ -298,7 +298,7 @@ More specifically, please refer to our example folders: [nginx](./examples/nginx
 
 #### System description  
 Nginx is a small-scale system that consists of two K8s manifests (i.e., two resources): pod.yaml and service.yaml. The former defines a Pod resource including a Nginx container, and the latter defines Service resource routing TCP traffic to the Pod.
-You can find the manifests at [examples/nginx](./examples/nginx).
+You can find the manifests at [examples/nginx](examples/nginx).
 
 #### Problem setting 
 To verify whether ChaosEater can improve the system when there are resiliency issues, we intentionally configure the resource with a non-resilient setting; we set the Pod's restartPolicy to Never in pod.yaml. With this configuration, once the Pod goes down, it will never restart, resulting in extended service outages. we validate whether ChaosEater correctly identifies and addresses this resiliency issue through a reasonable CE cycle.
@@ -320,7 +320,7 @@ The cost and time for this CE cycle were approximately 0.21 USD and 11 minutes, 
 
 #### System description  
 SockShop is a practical and large-scale e-commerce system that consists of 29 manifests, which define the resources and databases for front-end pages, user information, order, payment, shipping, and so on. The number of replicas of all the Deployment resources is originally set to one. However, this setting could lead to downtime of the single replica when it goes down.
-You can find the manifests at [examples/sock-shop-2](./examples/sock-shop-2).
+You can find the manifests at [examples/sock-shop-2](examples/sock-shop-2).
 
 #### Problem setting  
 To narrow down this original resiliency issue to a single point, we increase the replicas for Deployment resources other than front-end-dep.yaml to two, while keeping a single replica for front-end-dep.yaml. This RELATIVELY reduces the redundancy/resiliency of the front-end resource. We validate whether ChaosEater correctly identifies and addresses this resiliency issue through a reasonable CE cycle.
