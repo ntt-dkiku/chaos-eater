@@ -1,4 +1,4 @@
-# <img src="./docs/static/images/chaoseater_icon.png" align="left" width="90px"> ChaosEater: Fully Automating Chaos Engineering with Large Language Models 
+# <img src="docs/static/images/chaoseater_icon.png" align="left" width="90px"> ChaosEater: Fully Automating Chaos Engineering with Large Language Models 
 
 <p>
   This repo is the official implementation of "ChaosEater: Fully Automating Chaos Engineering with Large Language Models".
@@ -8,7 +8,7 @@
   The operations assigned to LLM agents include several software engineering tasks, such as requirement definitions, test planning, and debugging.
 </p>
 
-<img src="./docs/static/images/chaoseater_arch.png">
+<img src="docs/static/images/chaoseater_arch.png">
 
 > [!WARNING]  
 > This system is an experimental implementation and is not for product environments.
@@ -203,7 +203,7 @@ If you are working on a remote server, don't forget to set up fort forwarding, e
 </details>
 
 ## 🕹️ GUI usage
-<img src="./docs/static/images/gui_preview.png">
+<img src="docs/static/images/gui_preview.png">
 
 The ChaosEater app provides a Graphical User Interface (GUI) like a chatbot.
 At a minimum, all you need to do is upload the K8s system files via the file uploader.
