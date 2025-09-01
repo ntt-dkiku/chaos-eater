@@ -104,6 +104,12 @@ def find_message_logs(root: str = "."):
                 logs[entry] = target
     return logs
 
+def create_cycle_dir(cycle_name: str):
+    os.makedirs(f"{WORK_DIR}/{cycle_name}/outputs", exist_ok=False)
+    with open(f"{WORK_DIR}/{cycle_name}/outputs/message_log.pkl", "wb") as f:
+        pickle.dump([], f)
+
+
 def main():
     #---------------------------
     # initialize session states
@@ -160,7 +166,7 @@ def main():
         #------------------
         # general settings
         #------------------
-        with st.expander("General settings", expanded=False):
+        with st.expander("General settings", expanded=True):
             #-----------------
             # model selection
             #-----------------
@@ -225,6 +231,18 @@ def main():
             max_num_steadystates = st.number_input("Max. number of steady states", 3)
             max_retries = st.number_input("Max retries", 3)
 
+        #---------------------------
+        # usage: tokens and billing
+        #---------------------------
+        with st.expander("Usage", expanded=True):
+            st.session_state.usage_displayer = StreamlitUsageDisplayCallback(model_name)
+        
+        #-----------------
+        # command history
+        #-----------------
+        if not st.session_state.is_first_run:
+            st.write("Command history")
+        
         #-------------------
         # history of cycles
         #-------------------
@@ -240,9 +258,7 @@ def main():
             with col2:
                 if st.button("New cycles", use_container_width=True):
                     st.session_state.selected_cycle = new_cycle_name
-                    os.makedirs(f"{WORK_DIR}/{new_cycle_name}/outputs", exist_ok=False)
-                    with open(f"{WORK_DIR}/{new_cycle_name}/outputs/message_log.pkl", "wb") as f:
-                        pickle.dump([], f)
+                    create_cycle_dir(new_cycle_name)
                     st.rerun()
 
             # created cycles
@@ -274,20 +290,6 @@ def main():
             st.session_state.is_first_run = True
         st.session_state.selected_cycle = name
         st.rerun()
-
-    with st.sidebar:
-        #---------------------------
-        # usage: tokens and billing
-        #---------------------------
-        with st.expander("Usage", expanded=True):
-            st.session_state.usage_displayer = StreamlitUsageDisplayCallback(model_name)
-        
-        #-----------------
-        # command history
-        #-----------------
-        if not st.session_state.is_first_run:
-            st.write("Command history")
-
 
     #------------------------
     # initialize chaos eater
@@ -520,6 +522,10 @@ def main():
                     if prompt:
                         st.session_state.input.ce_instructions = prompt
                         st.session_state.submit = True
+                    if st.session_state.selected_cycle == "":
+                        cycle_datetime = f"cycle_{get_timestamp()}"
+                        st.session_state.selected_cycle = cycle_datetime
+                        create_cycle_dir(cycle_datetime)
                     st.rerun()
                 input = st.session_state.input
                 if prompt:
@@ -546,11 +552,10 @@ def main():
                 stop_resume_button.button("⏹ Stop", use_container_width=True, key="stop")
 
                 # response
-                cycles_name = st.session_state.selected_cycle or new_cycle_name
                 with st.chat_message("assistant", avatar=CHAOSEATER_ICON):
                     output = st.session_state.chaoseater.run_ce_cycle(
                         input=input,
-                        work_dir=f"{WORK_DIR}/{cycles_name}",
+                        work_dir=f"{WORK_DIR}/{st.session_state.selected_cycle}",
                         kube_context=cluster_name,
                         is_new_deployment=is_new_deployment,
                         clean_cluster_before_run=clean_cluster_before_run,
@@ -564,14 +569,14 @@ def main():
                     os.makedirs("./temp", exist_ok=True) 
                     zip_path = f"./temp/{os.path.basename(output_dir)}.zip"
                     print(type_cmd(f"zip -r {zip_path} {output_dir}"))
-                    with st.columns(3)[1]:
-                        with open(zip_path, "rb") as fp:
-                            btn = st.download_button(
-                                label="Download output (.zip)",
-                                data=fp,
-                                file_name=f"{os.path.basename(zip_path)}",
-                                mime=f"output/zip"
-                            )
+                    with open(zip_path, "rb") as fp:
+                        btn = st.download_button(
+                            label="Download output (.zip)",
+                            data=fp,
+                            file_name=f"{os.path.basename(zip_path)}",
+                            mime=f"output/zip"
+                        )
+                stop_resume_button.write()
             else:
                 with st.chat_message("assistant", avatar=CHAOSEATER_ICON):
                     st.session_state.message_logger.write("Please input your k8s mainfests!")
