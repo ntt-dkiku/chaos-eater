@@ -3,6 +3,7 @@ import time
 import yaml
 import zipfile
 import subprocess
+import pickle
 from pathlib import Path
 
 import streamlit as st
@@ -227,24 +228,25 @@ def main():
         #-------------------
         # history of cycles
         #-------------------
-        clicked_cycle = None
         with st.expander("### Cycles", expanded=True):
-            # new cycle
+            # create new cycle
             col1, col2 = st.columns(2)
             with col1:
                 new_cycle_name = st.text_input(
                     "Create new cycles",
-                    value=f"cycle_{get_timestamp()}",
+                    value="cycles_1",
                     label_visibility="collapsed"
                 )
             with col2:
                 if st.button("New cycles", use_container_width=True):
-                    st.session_state.is_first_run = True
-                    st.session_state.message_logger = StreamlitLogger()
-                    st.session_state.usage_displayer = StreamlitUsageDisplayCallback(model_name)
                     st.session_state.selected_cycle = new_cycle_name
+                    os.makedirs(f"{WORK_DIR}/{new_cycle_name}/outputs", exist_ok=False)
+                    with open(f"{WORK_DIR}/{new_cycle_name}/outputs/message_log.pkl", "wb") as f:
+                        pickle.dump([], f)
                     st.rerun()
-            # past cycles
+
+            # created cycles
+            clicked_cycle = None
             logs = find_message_logs(WORK_DIR)
             sorted_logs = sorted(
                 logs.items(),
@@ -262,10 +264,15 @@ def main():
 
     if clicked_cycle:
         name, path = clicked_cycle
-        st.session_state.message_logger = StreamlitLogger.load(path)
-        st.session_state.usage_displayer.load(Path(path).with_name("output.json"))
+        if os.path.exists(Path(path).with_name("output.json")):
+            st.session_state.message_logger = StreamlitLogger.load(path)
+            st.session_state.usage_displayer.load(Path(path).with_name("output.json"))
+            st.session_state.is_first_run = False
+        else:
+            st.session_state.message_logger = StreamlitLogger()
+            st.session_state.usage_displayer = StreamlitUsageDisplayCallback(model_name)
+            st.session_state.is_first_run = True
         st.session_state.selected_cycle = name
-        st.session_state.is_first_run = False
         st.rerun()
 
     with st.sidebar:
@@ -517,7 +524,6 @@ def main():
                 input = st.session_state.input
                 if prompt:
                     input.ce_instructions = prompt
-                # st.session_state.input = None
                 st.session_state.submit = False
                 st.session_state.resume = False
 
@@ -540,10 +546,11 @@ def main():
                 stop_resume_button.button("⏹ Stop", use_container_width=True, key="stop")
 
                 # response
+                cycles_name = st.session_state.selected_cycle or new_cycle_name
                 with st.chat_message("assistant", avatar=CHAOSEATER_ICON):
                     output = st.session_state.chaoseater.run_ce_cycle(
                         input=input,
-                        work_dir=f"{WORK_DIR}/cycle_{get_timestamp()}",
+                        work_dir=f"{WORK_DIR}/{cycles_name}",
                         kube_context=cluster_name,
                         is_new_deployment=is_new_deployment,
                         clean_cluster_before_run=clean_cluster_before_run,
