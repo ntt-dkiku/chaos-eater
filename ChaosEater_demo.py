@@ -19,7 +19,7 @@ from chaos_eater.utils.k8s import remove_all_resources_by_namespace
 from chaos_eater.utils.schemas import File
 from chaos_eater.utils.constants import CHAOSEATER_IMAGE_PATH, CHAOSEATER_LOGO_PATH, CHAOSEATER_ICON, CHAOSEATER_IMAGE
 from chaos_eater.utils.exceptions import ModelNotFoundError
-from chaos_eater.utils.streamlit import StreamlitLogger, StreamlitUsageDisplayCallback, StreamlitInterruptCallback
+from chaos_eater.utils.streamlit import StreamlitLogger, StreamlitUsageDisplayCallback
 
 
 # for debug
@@ -122,6 +122,10 @@ def main():
         st.session_state.input = None
     if "submit" not in st.session_state:
         st.session_state.submit = False
+    if "resume" not in st.session_state:
+        st.session_state.resume = False
+    if "stop" not in st.session_state:
+        st.session_state.stop = False
     if "model_name" not in st.session_state:
         st.session_state.model_name = "openai/gpt-4o-2024-08-06"
     if "seed" not in st.session_state:
@@ -132,7 +136,7 @@ def main():
         st.session_state.message_logger = StreamlitLogger()
     if "selected_cycle" not in st.session_state:
         st.session_state.selected_cycle = ""
-
+    
     #--------------
     # CSS settings
     #--------------
@@ -152,11 +156,10 @@ def main():
     #---------
     st.logo(CHAOSEATER_LOGO_PATH)
     with st.sidebar:
-        #----------
-        # settings
-        #----------
-        stop_button = st.empty()
-        with st.expander("General settings", expanded=True):
+        #------------------
+        # general settings
+        #------------------
+        with st.expander("General settings", expanded=False):
             #-----------------
             # model selection
             #-----------------
@@ -193,7 +196,7 @@ def main():
             #-------------------
             # cluster selection
             #-------------------
-            avail_cluster_list = app_utils.get_available_clusters()
+            avail_cluster_list = app_utils.get_available_clusters(st.session_state.session_id)
             FULL_CAP_MSG = "No clusters available right now. Please wait until a cluster becomes available."
             if len(avail_cluster_list) == 0:
                 avail_cluster_list = (FULL_CAP_MSG,)
@@ -225,7 +228,23 @@ def main():
         # history of cycles
         #-------------------
         clicked_cycle = None
-        with st.expander("Cycles", expanded=True):
+        with st.expander("### Cycles", expanded=True):
+            # new cycle
+            col1, col2 = st.columns(2)
+            with col1:
+                new_cycle_name = st.text_input(
+                    "Create new cycles",
+                    value=f"cycle_{get_timestamp()}",
+                    label_visibility="collapsed"
+                )
+            with col2:
+                if st.button("New cycles", use_container_width=True):
+                    st.session_state.is_first_run = True
+                    st.session_state.message_logger = StreamlitLogger()
+                    st.session_state.usage_displayer = StreamlitUsageDisplayCallback(model_name)
+                    st.session_state.selected_cycle = new_cycle_name
+                    st.rerun()
+            # past cycles
             logs = find_message_logs(WORK_DIR)
             sorted_logs = sorted(
                 logs.items(),
@@ -462,12 +481,33 @@ def main():
     #--------------
     st.session_state.message_logger.display_history()
 
+    #--------------------------
+    # place stop/resume button
+    #--------------------------
+    with bottom():
+        with st.columns(3)[1]:
+            stop_resume_button = st.empty()
+
+    #------------------------
+    # resume a stopped cycle
+    #------------------------
+    if "stop" in st.session_state:
+        if st.session_state.stop:
+            if stop_resume_button.button("⏹ Resume", key="resume", use_container_width=True):
+                st.session_state.stop = False
+                st.rerun()
+
     #--------------
     # current chat
     #--------------
-    if (prompt := st.chat_input(placeholder="Input instructions for your Chaos Engineering", key="chat_input")) or st.session_state.submit:        
+    prompt = st.chat_input(
+        placeholder="Input instructions for your Chaos Engineering",
+        key="chat_input"
+    )
+    if prompt or st.session_state.submit or st.session_state.resume:        
         if "chaoseater" in st.session_state and cluster_name != FULL_CAP_MSG:
             if st.session_state.input:
+                # refresh the screen at the first run
                 if st.session_state.is_first_run:
                     st.session_state.is_first_run = False
                     if prompt:
@@ -477,14 +517,17 @@ def main():
                 input = st.session_state.input
                 if prompt:
                     input.ce_instructions = prompt
-                st.session_state.input = None
+                # st.session_state.input = None
                 st.session_state.submit = False
-                #-------------
-                # user inputs
-                #-------------
+                st.session_state.resume = False
+
+                #---------------------
+                # display user inputs
+                #---------------------
                 with st.chat_message("user"):
                     st.session_state.message_logger.write("##### Your instructions for Chaos Engineering:", role="user")
                     st.session_state.message_logger.write(input.ce_instructions, role="user")
+                
                 #---------------------
                 # chaoseater response
                 #---------------------
@@ -492,9 +535,11 @@ def main():
                 if len(avail_cluster_list) > 0 and avail_cluster_list[0] != FULL_CAP_MSG:
                     r = redis.Redis(host='localhost', port=6379, db=0)
                     r.hset("cluster_usage", st.session_state.session_id, cluster_name)
+                
                 # display stop button
-                if stop_button.button("⏹ Stop", use_container_width=True):
-                    st.session_state.stop = True
+                stop_resume_button.button("⏹ Stop", use_container_width=True, key="stop")
+
+                # response
                 with st.chat_message("assistant", avatar=CHAOSEATER_ICON):
                     output = st.session_state.chaoseater.run_ce_cycle(
                         input=input,
@@ -505,10 +550,7 @@ def main():
                         clean_cluster_after_run=clean_cluster_after_run,
                         max_num_steadystates=max_num_steadystates,
                         max_retries=max_retries,
-                        callbacks=[
-                            st.session_state.usage_displayer,
-                            StreamlitInterruptCallback()
-                        ]
+                        callbacks=[st.session_state.usage_displayer]
                     )
                     # download output
                     output_dir = output.work_dir

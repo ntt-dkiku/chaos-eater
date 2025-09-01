@@ -315,12 +315,23 @@ def monitor_session(session_id: str) -> None:
         r.hdel("cluster_usage", session_id)
         return
 
-def get_available_clusters() -> Tuple[str]:
+def get_available_clusters(session_id: str) -> Tuple[str]:
     # get the cluster list
     cluster_str = type_cmd("kubectl config get-contexts | awk 'NR>1 {print $2}'", widget=False)
     cluster_list = tuple(cluster_str.strip().split("\n"))
+
     # get the available cluster list
     r = redis.Redis(host='localhost', port=6379, db=0)
     cluster_usage = r.hgetall("cluster_usage")
     used_cluster_list = tuple(v.decode() for v in cluster_usage.values())
-    return tuple(set(cluster_list) - set(used_cluster_list))
+    
+    # cluster used by this session
+    my_cluster = cluster_usage.get(session_id.encode())
+    my_cluster = my_cluster.decode() if my_cluster else None
+
+    # available clusters = unused ones + my own
+    available = set(cluster_list) - set(used_cluster_list)
+    if my_cluster:
+        available.add(my_cluster)
+
+    return tuple(sorted(available))
