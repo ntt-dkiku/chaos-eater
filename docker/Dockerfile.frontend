@@ -1,0 +1,71 @@
+# Dockerfile
+FROM node:18-alpine
+
+WORKDIR /app
+
+# package.jsonを作成
+RUN echo '{\
+  "name": "chaos-eater-frontend",\
+  "version": "0.1.0",\
+  "private": true,\
+  "dependencies": {\
+    "react": "^18.2.0",\
+    "react-dom": "^18.2.0",\
+    "lucide-react": "^0.263.1",\
+    "react-scripts": "5.0.1"\
+  },\
+  "scripts": {\
+    "start": "react-scripts start",\
+    "build": "react-scripts build"\
+  },\
+  "browserslist": {\
+    "production": [">0.2%", "not dead", "not op_mini all"],\
+    "development": ["last 1 chrome version", "last 1 firefox version", "last 1 safari version"]\
+  }\
+}' > package.json
+
+# 依存関係をインストール
+RUN npm install
+
+# publicディレクトリとindex.htmlを作成
+RUN mkdir -p public && \
+    echo '<!DOCTYPE html>\
+<html lang="en">\
+<head>\
+  <meta charset="utf-8" />\
+  <meta name="viewport" content="width=device-width, initial-scale=1" />\
+  <title>ChaosEater</title>\
+  <link rel="icon" href="%PUBLIC_URL%/favicon.ico" /> \
+</head>\
+<body style="margin: 0; padding: 0;">\
+  <div id="root"></div>\
+</body>\
+</html>' > public/index.html
+
+# srcディレクトリを作成
+RUN mkdir -p src
+
+# App.jsxをコピー
+COPY ../chaos_eater/frontend/app.jsx /app/src/App.jsx
+
+# publicをコピー
+COPY ../public/chaoseater_icon.png /app/public/chaoseater_icon.png
+COPY ../public/chaoseater_logo.png /app/public/chaoseater_logo.png
+
+# index.jsxを作成
+RUN echo 'import React from "react";\
+import ReactDOM from "react-dom/client";\
+import App from "./App";\
+\
+const root = ReactDOM.createRoot(document.getElementById("root"));\
+root.render(<App />);' > src/index.jsx
+
+# ポート3000を公開
+EXPOSE 3000
+
+# 環境変数設定
+ENV DISABLE_ESLINT_PLUGIN=true
+ENV SKIP_PREFLIGHT_CHECK=true
+
+# 開発サーバーを起動
+CMD ["npm", "start"]

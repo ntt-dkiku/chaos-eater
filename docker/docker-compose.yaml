@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  chaos-eater-backend:
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile_llm
+    container_name: chaos-eater-api
+    network_mode: host
+    # ports:
+    #   - "8000:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - PATH=/root/.krew/bin:${PATH}
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ..:/app/
+      - ~/.kube/config:/root/.kube/config:ro
+      - /usr/local/bin/kubectl:/usr/local/bin/kubectl:ro
+      - /usr/local/bin/skaffold:/usr/local/bin/skaffold:ro
+      - /usr/local/bin/kind:/usr/local/bin/kind:ro
+      - ~/.krew/bin/kubectl-graph:/root/.krew/bin/kubectl-graph:ro
+      # for dood
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: uvicorn chaos_eater.frontend.api:app --host 0.0.0.0 --port 8000 --reload
+  
+  chaos-eater-frontend:
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile.frontend
+    container_name: chaos-eater-gui
+    ports:
+      - "3000:3000"
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+      - WDS_SOCKET_PORT=3000
+    networks:
+      - chaos-network
+    depends_on:
+      - chaos-eater-backend
+    stdin_open: true
+    tty: true
+
+  redis:
+    image: redis:7-alpine
+    container_name: chaos-eater-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - chaos-network
+    volumes:
+      - redis-data:/data
+
+networks:
+  chaos-network:
+    driver: bridge
+
+volumes:
+  redis-data:
