@@ -4,8 +4,11 @@ FROM node:18-alpine
 WORKDIR /app
 
 # install dependencies based on package.json
-COPY ../chaos_eater/frontend ./
+COPY ../chaos_eater/frontend/package*.json ./
 RUN npm install
+
+# copy remaining source code
+COPY ../chaos_eater/frontend ./
 
 # port settings
 EXPOSE 3000
