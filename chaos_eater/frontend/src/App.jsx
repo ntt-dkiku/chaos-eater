@@ -346,7 +346,8 @@ export default function ChaosEaterApp() {
                       color: '#e5e7eb', 
                       fontSize: '14px',
                       outline: 'none',
-                      transition: 'border-color 0.2s ease'
+                      transition: 'border-color 0.2s ease',
+                      boxSizing: 'border-box',
                     }}
                     value={formData.apiKey}
                     onChange={(e) => setFormData({...formData, apiKey: e.target.value})}
