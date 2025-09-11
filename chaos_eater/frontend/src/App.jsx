@@ -113,6 +113,96 @@ export default function ChaosEaterApp() {
     'custom'
   ];
 
+  //--------------------------------------------------------------
+  // cluster management
+  //--------------------------------------------------------------
+  // cluster list
+  const [clusters, setClusters] = useState({
+    all: [], used: [], available: [], mine: null,
+  });
+  const [clustersLoading, setClustersLoading] = useState(false);
+  const [clustersError, setClustersError] = useState(null);
+
+  // store session id in local（if you are in the same tab just keep using the same id）
+  const sessionIdRef = useRef(
+    typeof window !== 'undefined'
+      ? (localStorage.getItem('ce_session_id') ||
+        (localStorage.setItem('ce_session_id', crypto.randomUUID()), localStorage.getItem('ce_session_id')))
+      : null
+  );
+
+  // helper functions
+  async function fetchJSON(path, init = {}) {
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json', ...(init.headers || {}) },
+      ...init,
+    });
+    if (!res.ok) {
+      const t = await res.text().catch(() => '');
+      throw new Error(t || `HTTP ${res.status}`);
+    }
+    return res.headers.get('content-type')?.includes('application/json')
+      ? res.json()
+      : res.text();
+  }
+    
+  // get clusters（/clusters?session_id=...）
+  const loadClusters = async () => {
+    try {
+      setClustersLoading(true);
+      setClustersError(null);
+      const q = encodeURIComponent(sessionIdRef.current || '');
+      const data = await fetchJSON(`/clusters?session_id=${q}`);
+      setClusters(data);
+      // apply it if you already claimed one and the form is unset
+      if (!formData.cluster && data.mine) {
+        setFormData(prev => ({ ...prev, cluster: data.mine }));
+      }
+    } catch (e) {
+      setClustersError(e.message || String(e));
+    } finally {
+      setClustersLoading(false);
+    }
+  };
+  
+  // 1st time & periodic update（30s）
+  useEffect(() => {
+    loadClusters();
+    const id = setInterval(loadClusters, 30000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const claimCluster = async (preferred) => {
+    const body = { session_id: sessionIdRef.current, preferred };
+    const data = await fetchJSON(`/clusters/claim`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    setFormData(prev => ({ ...prev, cluster: data.cluster }));
+    setNotification({ type: 'success', message: `Cluster claimed: ${data.cluster}` });
+    await loadClusters();
+  };
+  
+  const releaseCluster = async () => {
+    try {
+      await fetchJSON(`/clusters/release`, {
+        method: 'POST',
+        body: JSON.stringify({ session_id: sessionIdRef.current }),
+      });
+    } catch (_) { }
+  };
+  
+  // release the cluster by closing tab or transitioning the screen 
+  useEffect(() => {
+    const handler = () => { navigator.sendBeacon?.(`${API_BASE}/clusters/release`,
+      new Blob([JSON.stringify({ session_id: sessionIdRef.current })], { type: 'application/json' })
+    ); };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, []);
+    
   // Mouse tracking for eyes
   useEffect(() => {
     const handleMouseMove = (e) => {
@@ -145,7 +235,7 @@ export default function ChaosEaterApp() {
         setVisible(false);
         // wait for fade-out (0.5s) before removing
         setTimeout(() => setNotification(null), 500);
-      }, 5000);
+      }, 3000);
     }
     return () => {
       if (hideTimerRef.current) {
@@ -337,7 +427,7 @@ export default function ChaosEaterApp() {
 
     // 1. prepare request body for /jobs
     const payload = {
-      project_path: 'examples/nginx',
+      project_path: backendProjectPath,
       kube_context: formData.cluster,
       project_name: formData.projectName || 'chaos-project',
       work_dir: null,
@@ -602,11 +692,58 @@ export default function ChaosEaterApp() {
                     transition: 'border-color 0.2s ease'
                   }}
                   value={formData.cluster}
-                  onChange={(e) => setFormData({...formData, cluster: e.target.value})}
+                  onChange={async (e) => {
+                    const val = e.target.value;
+                    if (!val) return;
+                    try {
+                      await claimCluster(val);
+                    } catch (err) {
+                      setNotification({ type: 'error', message: `Claim failed: ${err.message || err}` });
+                    }
+                  }}
                   onFocus={(e) => e.target.style.borderColor = '#374151'}
                   onBlur={(e) => e.target.style.borderColor = '#1f2937'}
+                  disabled={clustersLoading}
                 >
-                  <option value="" style={{ backgroundColor: '#0a0a0a' }}>No clusters available right now. Please wait...</option>
+                  {clustersLoading && (
+                    <option value="" style={{ backgroundColor: '#0a0a0a' }}>
+                      Loading clusters...
+                    </option>
+                  )}
+                  {!clustersLoading && clustersError && (
+                    <option value="" style={{ backgroundColor: '#0a0a0a' }}>
+                      Failed to load clusters: {clustersError}
+                    </option>
+                  )}
+                  {!clustersLoading && !clustersError && clusters.available.length === 0 && (
+                    <option value="" style={{ backgroundColor: '#0a0a0a' }}>
+                      No clusters available
+                    </option>
+                  )}
+                  {/* 自分のを先頭グループに（あれば） */}
+                  {clusters.mine && (
+                    <optgroup label="My reserved">
+                      <option value={clusters.mine}>{clusters.mine}</option>
+                    </optgroup>
+                  )}
+                  {/* 空き（自分のを除く） */}
+                  {clusters.available.filter(c => c !== clusters.mine).length > 0 && (
+                    <optgroup label="Available">
+                      {clusters.available.filter(c => c !== clusters.mine).map(c => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {/* 参考情報として All（選択不可） */}
+                  {clusters.all.length > 0 && (
+                    <optgroup label="All (disabled)">
+                      {clusters.all.map(c => (
+                        <option key={`all-${c}`} value="" disabled>
+                          {c}{clusters.used.includes(c) ? ' (in use)' : ''}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
               </div>
               

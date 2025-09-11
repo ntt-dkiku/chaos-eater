@@ -675,6 +675,91 @@ async def upload_project_zip(
     # Return the project_path (absolute path on server)
     return {"project_path": str(proj_dir)}
 
+# ---------------------------------------------------------------------
+# Get cluster list
+# ---------------------------------------------------------------------
+import os
+from typing import Optional, List, Dict, Any
+from kubernetes.config import list_kube_config_contexts
+from redis.asyncio import Redis
+
+# redis client
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+redis: Redis = Redis.from_url(REDIS_URL, decode_responses=True)
+USAGE_HASH = "cluster_usage"  # { session_id: context_name }
+
+# helper functions
+def list_kind_contexts() -> List[str]:
+    contexts, active = list_kube_config_contexts()
+    names = [c["name"] for c in (contexts or [])]
+    return sorted([n for n in names if n.startswith("kind-")])
+
+async def compute_available(session_id: Optional[str]) -> Dict[str, Any]:
+    all_ctx = set(list_kind_contexts())
+
+    usage: Dict[str, str] = await redis.hgetall(USAGE_HASH)  # {sid: ctx}
+    used_ctx = set(usage.values())
+
+    mine = usage.get(session_id) if session_id else None
+    available = (all_ctx - used_ctx) | ({mine} if mine else set())
+
+    return {
+        "all": sorted(all_ctx),
+        "used": sorted(used_ctx),
+        "mine": mine,
+        "available": sorted(available),
+    }
+
+# endpoints
+@app.get("/clusters")
+async def list_clusters(session_id: Optional[str] = None):
+    """
+    kind のコンテキスト一覧。
+    - available: 未使用 + 自分が確保済みのもの
+    - used: 他セッションが使用中のもの
+    - mine: 自分の確保済み（なければ null）
+    """
+    return await compute_available(session_id)
+
+class ClaimBody(BaseModel):
+    session_id: str
+    preferred: Optional[str] = None
+
+@app.post("/clusters/claim")
+async def claim_cluster(body: ClaimBody):
+    """
+    Claim a cluster (one per session).
+    - If 'preferred' is available, assign that cluster.
+    - If no preferred cluster is provided, automatically assign the first available one.
+    """
+    info = await compute_available(body.session_id)
+    available = info["available"]
+    mine = info["mine"]
+
+    # If the session already owns a cluster, return it as-is
+    if mine:
+        return {"cluster": mine, "already_owned": True}
+
+    # If 'preferred' is provided and available, assign it
+    if body.preferred and body.preferred in available:
+        await redis.hset(USAGE_HASH, body.session_id, body.preferred)
+        return {"cluster": body.preferred, "already_owned": False}
+
+    # Otherwise, pick the first available cluster
+    if not available:
+        raise HTTPException(409, "No clusters available")
+    chosen = available[0]
+    await redis.hset(USAGE_HASH, body.session_id, chosen)
+    return {"cluster": chosen, "already_owned": False}
+
+class ReleaseBody(BaseModel):
+    session_id: str
+
+@app.post("/clusters/release")
+async def release_cluster(body: ReleaseBody):
+    removed = await redis.hdel(USAGE_HASH, body.session_id)
+    return {"released": bool(removed)}
+
 
 # ---------------------------------------------------------------------
 # Main
