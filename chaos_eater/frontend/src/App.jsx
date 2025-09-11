@@ -24,6 +24,7 @@ import {
   PanelLeftOpen,
   PanelLeftClose
 } from 'lucide-react';
+import './App.css';
 
 export default function ChaosEaterApp() {
   // === API constants & helpers ===
