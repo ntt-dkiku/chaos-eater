@@ -1,0 +1,689 @@
+import os
+import time
+import uuid
+import asyncio
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Any
+from enum import Enum
+from contextlib import asynccontextmanager
+import logging
+from pathlib import Path
+
+import uvicorn
+import yaml
+from fastapi import FastAPI, HTTPException, Depends, Query, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field, model_validator
+
+from ..chaos_eater import ChaosEater, ChaosEaterInput, ChaosEaterOutput
+from ..ce_tools.ce_tool import CEToolType, CETool
+from ..utils.llms import load_llm
+from ..utils.functions import MessageLogger
+
+
+# ---------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("chaos_eater_api")
+
+
+# ---------------------------------------------------------------------
+# Models
+# ---------------------------------------------------------------------
+class JobStatus(str, Enum):
+    PENDING   = "pending"
+    RUNNING   = "running"
+    COMPLETED = "completed"
+    FAILED    = "failed"
+    CANCELLED = "cancelled"
+
+
+class ChaosEaterJobRequest(BaseModel):
+    """
+    Either provide:
+      - project_path: server-local path to a folder containing skaffold.yaml
+    OR
+      - input_data: a JSON shape compatible with ChaosEaterInput(**input_data)
+
+    Exactly one of {project_path, input_data} must be provided.
+    """
+    # One-of:
+    project_path: Optional[str] = Field(None, description="Local folder containing skaffold.yaml")
+    input_data: Optional[Dict[str, Any]] = Field(None, description="ChaosEaterInput data")
+
+    # Optional extra for project_path flows:
+    ce_instructions: Optional[str] = Field(None, description="Instructions to inject into the built input")
+
+    # Common CE params:
+    kube_context: str = Field(..., description="Kubernetes context")
+    project_name: str = Field(default="chaos-eater", description="Project name")
+    work_dir: Optional[str] = Field(None, description="Working directory")
+    clean_cluster_before_run: bool = Field(default=True)
+    clean_cluster_after_run: bool = Field(default=True)
+    is_new_deployment: bool = Field(default=True)
+    max_num_steadystates: int = Field(default=2, ge=1, le=10)
+    max_retries: int = Field(default=3, ge=0, le=10)
+    namespace: str = Field(default="chaos-eater", description="K8s namespace")
+
+    @model_validator(mode="after")
+    def _require_exactly_one(self):
+        if bool(self.project_path) == bool(self.input_data):
+            raise ValueError("Provide exactly one of {project_path, input_data}.")
+        return self
+
+
+class JobInfo(BaseModel):
+    job_id: str
+    status: JobStatus
+    created_at: datetime
+    updated_at: datetime
+    progress: Optional[str] = None
+    error: Optional[str] = None
+    result: Optional[Dict[str, Any]] = None
+
+
+class JobResponse(BaseModel):
+    job_id: str
+    status: JobStatus
+    message: str
+
+
+# ---------------------------------------------------------------------
+# Helpers for project_path loading
+# ---------------------------------------------------------------------
+def _is_binary_bytes(b: bytes) -> bool:
+    # Simple heuristic; replace with your project's util if you have one
+    textchars = bytearray({7, 8, 9, 10, 12, 13, 27} | set(range(0x20, 0x100)) - {0x7F})
+    return bool(b.translate(None, textchars))
+
+
+def _read_text_or_binary(fp: Path) -> str | bytes:
+    data = fp.read_bytes()
+    if _is_binary_bytes(data):
+        return data  # return bytes
+    return data.decode("utf-8", errors="replace")
+
+
+def _enforce_allowed_base(root: Path):
+    """
+    Optional safety: limit accessible project paths to an allowed base.
+    Set ALLOWED_PROJECT_BASE=/abs/path to enable.
+    """
+    base = os.getenv("ALLOWED_PROJECT_BASE", "").strip()
+    if not base:
+        return
+    base_path = Path(base).resolve()
+    root_resolved = root.resolve()
+    try:
+        root_resolved.relative_to(base_path)
+    except ValueError:
+        raise PermissionError(f"project_path is outside allowed base: {base_path}")
+
+
+def build_input_from_project_path(project_path: str, override_instructions: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Build a dict compatible with ChaosEaterInput(**...) by reading:
+      - skaffold.yaml
+      - manifests.rawYaml entries
+    under the given project folder.
+    """
+    root = Path(project_path).expanduser().resolve()
+    if not root.exists() or not root.is_dir():
+        raise FileNotFoundError(f"Project path not found or not a directory: {root}")
+
+    _enforce_allowed_base(root)
+
+    # 1) locate skaffold.yaml (prefer root/skaffold.yaml; fallback to first match)
+    skaffold_file = root / "skaffold.yaml"
+    if not skaffold_file.exists():
+        matches = list(root.rglob("skaffold.yaml"))
+        if not matches:
+            raise FileNotFoundError(f"skaffold.yaml not found under: {root}")
+        skaffold_file = matches[0]
+
+    skaffold_content = _read_text_or_binary(skaffold_file)
+    if isinstance(skaffold_content, bytes):
+        raise ValueError("skaffold.yaml appears to be binary; expected text.")
+
+    try:
+        sk = yaml.safe_load(skaffold_content) or {}
+    except Exception as e:
+        raise ValueError(f"Failed to parse skaffold.yaml: {e}")
+
+    # 2) collect k8s YAMLs from manifests.rawYaml
+    manifests = (sk.get("manifests") or {})
+    raw_list = manifests.get("rawYaml") or []
+    if not isinstance(raw_list, list) or not raw_list:
+        raise ValueError("skaffold.yaml has no manifests.rawYaml list.")
+
+    files: List[Dict[str, Any]] = []
+    for rel in raw_list:
+        rel_path = Path(rel)
+        abs_path = (skaffold_file.parent / rel_path).resolve()
+        if not abs_path.exists() or not abs_path.is_file():
+            raise FileNotFoundError(f"Referenced manifest not found: {rel} (resolved to {abs_path})")
+        content = _read_text_or_binary(abs_path)
+        files.append({
+            "path": str(abs_path),
+            "content": content,                 # Union[str, bytes] supported by your File schema
+            "work_dir": str(root),
+            "fname": str(abs_path.relative_to(root))
+        })
+
+    ce_input = {
+        "skaffold_yaml": {
+            "path": str(skaffold_file),
+            "content": skaffold_content,
+            "work_dir": str(root),
+            "fname": str(skaffold_file.relative_to(root))
+        },
+        "files": files,
+        "ce_instructions": override_instructions or ""
+    }
+    return ce_input
+
+
+# ---------------------------------------------------------------------
+# Job Manager
+# ---------------------------------------------------------------------
+class JobManager:
+    """In-memory job registry. For production, consider a persistent store."""
+    def __init__(self):
+        self.jobs: Dict[str, JobInfo] = {}
+        self.tasks: Dict[str, asyncio.Task] = {}
+        self.chaos_eaters: Dict[str, ChaosEater] = {}
+        self.lock = asyncio.Lock()
+
+    async def create_job(self, _: ChaosEaterJobRequest) -> str:
+        job_id = str(uuid.uuid4())
+        async with self.lock:
+            self.jobs[job_id] = JobInfo(
+                job_id=job_id,
+                status=JobStatus.PENDING,
+                created_at=datetime.now(),
+                updated_at=datetime.now(),
+                progress="Job created",
+            )
+        return job_id
+
+    async def get_job(self, job_id: str) -> Optional[JobInfo]:
+        return self.jobs.get(job_id)
+
+    async def list_jobs(self, status: Optional[JobStatus] = None) -> List[JobInfo]:
+        jobs = list(self.jobs.values())
+        if status:
+            jobs = [job for job in jobs if job.status == status]
+        return jobs
+
+    async def cancel_job(self, job_id: str) -> bool:
+        # Note: If work is running inside a thread via run_in_executor, this is best-effort.
+        task = self.tasks.get(job_id)
+        if task and not task.done():
+            task.cancel()
+            async with self.lock:
+                if job_id in self.jobs:
+                    self.jobs[job_id].status = JobStatus.CANCELLED
+                    self.jobs[job_id].updated_at = datetime.now()
+                    self.jobs[job_id].progress = "Job cancelled (best-effort)"
+            return True
+        return False
+
+    async def update_job_progress(self, job_id: str, progress: str):
+        async with self.lock:
+            if job_id in self.jobs:
+                self.jobs[job_id].progress = progress
+                self.jobs[job_id].updated_at = datetime.now()
+
+    async def cleanup_old_jobs(self, hours: int = 24):
+        cutoff = datetime.now() - timedelta(hours=hours)
+        async with self.lock:
+            stale = [
+                job_id for job_id, job in self.jobs.items()
+                if job.created_at < cutoff and job.status in {JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED}
+            ]
+            for job_id in stale:
+                self.jobs.pop(job_id, None)
+                self.chaos_eaters.pop(job_id, None)
+                t = self.tasks.pop(job_id, None)
+                if t and not t.done():
+                    t.cancel()
+
+
+# ---------------------------------------------------------------------
+# API Callback (thread-safe progress updates)
+# ---------------------------------------------------------------------
+class APICallback:
+    """
+    ChaosEater invokes callbacks from a worker thread (run_in_executor).
+    We bridge to the main asyncio loop via run_coroutine_threadsafe.
+    """
+    def __init__(self, job_manager: JobManager, job_id: str, loop: asyncio.AbstractEventLoop):
+        self.job_manager = job_manager
+        self.job_id = job_id
+        self.loop = loop
+
+    def _push(self, msg: str):
+        fut = asyncio.run_coroutine_threadsafe(
+            self.job_manager.update_job_progress(self.job_id, msg), self.loop
+        )
+        try:
+            fut.result(timeout=5)
+        except Exception as e:
+            logger.warning(f"Progress push failed: {e}")
+
+    def _push_event(self, event: dict):
+        # Thread-safe fire-and-forget structured event
+        event.setdefault("ts", time.time())
+        fut = asyncio.run_coroutine_threadsafe(
+            self.job_manager.add_event(self.job_id, event), self.loop
+        )
+        try:
+            fut.result(timeout=5)
+        except Exception as e:
+            logger.warning(f"Event push failed: {e}")
+
+    def on_stream(self, channel: str, event: dict) -> None:
+        """Generic streaming hook used by agents."""
+        # Enrich + forward as a structured event
+        payload = dict(event)
+        payload.setdefault("channel", channel)
+        payload.setdefault("ts", time.time())
+        fut = asyncio.run_coroutine_threadsafe(
+            self.job_manager.add_event(self.job_id, payload),
+            self.loop
+        )
+        try:
+            fut.result(timeout=5)
+        except Exception:
+            pass
+
+    # ---- ChaosEaterCallback interface ----
+    def on_preprocess_start(self):        self._push("Phase 0: Preprocessing started")
+    def on_preprocess_end(self, _):       self._push("Phase 0: Preprocessing completed")
+    def on_hypothesis_start(self):        self._push("Phase 1: Hypothesis started")
+    def on_hypothesis_end(self, _):       self._push("Phase 1: Hypothesis completed")
+    def on_experiment_plan_start(self):   self._push("Phase 2: Experiment planning started")
+    def on_experiment_plan_end(self, _):  self._push("Phase 2: Experiment planning completed")
+    def on_experiment_start(self):        self._push("Phase 2: Experiment execution started")
+    def on_experiment_end(self):          self._push("Phase 2: Experiment execution completed")
+    def on_analysis_start(self):          self._push("Phase 3: Analysis started")
+    def on_analysis_end(self, _):         self._push("Phase 3: Analysis completed")
+    def on_improvement_start(self):       self._push("Phase 4: Improvement started")
+    def on_improvement_end(self, _):      self._push("Phase 4: Improvement completed")
+    def on_experiment_replan_start(self): self._push("Experiment replanning started")
+    def on_experiment_replan_end(self, _):self._push("Experiment replanning completed")
+    def on_postprocess_start(self):       self._push("Phase EX: Postprocessing started")
+    def on_postprocess_end(self, _):      self._push("Phase EX: Postprocessing completed")
+
+
+# ---------------------------------------------------------------------
+# Background runner
+# ---------------------------------------------------------------------
+async def run_chaos_eater_cycle(
+    job_id: str,
+    job_manager: JobManager,
+    request: ChaosEaterJobRequest,
+    llm,
+    ce_tool
+):
+    try:
+        async with job_manager.lock:
+            job_manager.jobs[job_id].status = JobStatus.RUNNING
+            job_manager.jobs[job_id].updated_at = datetime.now()
+
+        # Logger without Streamlit
+        message_logger = MessageLogger()
+
+        # Instance
+        chaos_eater = ChaosEater(
+            llm=llm,
+            ce_tool=ce_tool,
+            message_logger=message_logger,
+            work_dir=request.work_dir or "sandbox",
+            namespace=request.namespace
+        )
+        job_manager.chaos_eaters[job_id] = chaos_eater
+
+        # Thread-safe callback
+        loop = asyncio.get_running_loop()
+        callback = APICallback(job_manager, job_id, loop)
+
+        # Build/convert input
+        if request.input_data:
+            ce_input = ChaosEaterInput(**request.input_data)
+        else:
+            # project_path flow already validated by request model
+            built = build_input_from_project_path(request.project_path, override_instructions=request.ce_instructions)
+            ce_input = ChaosEaterInput(**built)
+
+        # Run CE in thread pool (avoid blocking the event loop)
+        runner_loop = asyncio.get_event_loop()
+        result: ChaosEaterOutput = await runner_loop.run_in_executor(
+            None,
+            chaos_eater.run_ce_cycle,
+            ce_input,
+            request.kube_context,
+            request.work_dir,
+            request.project_name,
+            request.clean_cluster_before_run,
+            request.clean_cluster_after_run,
+            request.is_new_deployment,
+            request.max_num_steadystates,
+            request.max_retries,
+            [callback],
+        )
+
+        async with job_manager.lock:
+            job_manager.jobs[job_id].status = JobStatus.COMPLETED
+            job_manager.jobs[job_id].updated_at = datetime.now()
+            job_manager.jobs[job_id].result = result.dict()
+            job_manager.jobs[job_id].progress = "Cycle completed successfully"
+
+    except asyncio.CancelledError:
+        async with job_manager.lock:
+            job_manager.jobs[job_id].status = JobStatus.CANCELLED
+            job_manager.jobs[job_id].updated_at = datetime.now()
+            job_manager.jobs[job_id].progress = "Job cancelled (best-effort)"
+        raise
+    except Exception as e:
+        logger.exception(f"Job {job_id} failed")
+        async with job_manager.lock:
+            job_manager.jobs[job_id].status = JobStatus.FAILED
+            job_manager.jobs[job_id].updated_at = datetime.now()
+            job_manager.jobs[job_id].error = str(e)
+            job_manager.jobs[job_id].progress = f"Job failed: {e}"
+    finally:
+        job_manager.tasks.pop(job_id, None)
+
+
+# ---------------------------------------------------------------------
+# Globals & DI
+# ---------------------------------------------------------------------
+job_manager = JobManager()
+_LLM = None
+_CE_TOOL = None
+
+
+def get_job_manager() -> JobManager:
+    return job_manager
+
+
+def get_llm():
+    if _LLM is None:
+        raise HTTPException(status_code=500, detail="LLM not configured")
+    return _LLM
+
+
+def get_ce_tool():
+    if _CE_TOOL is None:
+        raise HTTPException(status_code=500, detail="CE tool not configured")
+    return _CE_TOOL
+
+
+# ---------------------------------------------------------------------
+# Lifespan (startup/shutdown)
+# ---------------------------------------------------------------------
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Starting ChaosEater API...")
+    global _LLM, _CE_TOOL
+
+    # Configure from environment (align with your GUI's load_llm usage)
+    model_name = os.getenv("CE_MODEL", "openai/gpt-4o-2024-08-06")
+    temperature = float(os.getenv("CE_TEMPERATURE", "0.0"))
+    port = int(os.getenv("CE_PORT", "8000"))
+    seed = int(os.getenv("CE_SEED", "42"))
+
+    # Initialize runtime dependencies
+    _LLM = load_llm(model_name=model_name, temperature=temperature, port=port, seed=seed)
+    _CE_TOOL = CETool.init(CEToolType.chaosmesh)
+
+    cleanup_task = asyncio.create_task(periodic_cleanup())
+    try:
+        yield
+    finally:
+        logger.info("Shutting down ChaosEater API...")
+        cleanup_task.cancel()
+        for task in list(job_manager.tasks.values()):
+            task.cancel()
+        await asyncio.gather(*job_manager.tasks.values(), return_exceptions=True)
+
+
+async def periodic_cleanup():
+    while True:
+        try:
+            await asyncio.sleep(3600)
+            await job_manager.cleanup_old_jobs(hours=24)
+        except asyncio.CancelledError:
+            break
+
+
+# ---------------------------------------------------------------------
+# FastAPI app
+# ---------------------------------------------------------------------
+from fastapi.middleware.cors import CORSMiddleware
+
+app = FastAPI(
+    title="ChaosEater API",
+    description="API for running Chaos Engineering experiments",
+    version="1.1.0",
+    lifespan=lifespan,
+)
+
+# (optional) CORS if your GUI runs on another origin
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+)
+
+# ---------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------
+@app.post("/jobs", response_model=JobResponse)
+async def create_job(
+    request: ChaosEaterJobRequest,
+    job_mgr: JobManager = Depends(get_job_manager),
+    llm_inst=Depends(get_llm),
+    ce_tool_inst=Depends(get_ce_tool),
+):
+    job_id = await job_mgr.create_job(request)
+    task = asyncio.create_task(
+        run_chaos_eater_cycle(job_id, job_mgr, request, llm_inst, ce_tool_inst)
+    )
+    job_mgr.tasks[job_id] = task
+    return JobResponse(job_id=job_id, status=JobStatus.PENDING, message=f"Job {job_id} created successfully")
+
+
+@app.get("/jobs/{job_id}", response_model=JobInfo)
+async def get_job(job_id: str, job_mgr: JobManager = Depends(get_job_manager)):
+    job = await job_mgr.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    return job
+
+
+@app.get("/jobs", response_model=List[JobInfo])
+async def list_jobs(
+    status: Optional[JobStatus] = Query(None, description="Filter by status"),
+    job_mgr: JobManager = Depends(get_job_manager),
+):
+    return await job_mgr.list_jobs(status)
+
+
+@app.delete("/jobs/{job_id}")
+async def cancel_job(job_id: str, job_mgr: JobManager = Depends(get_job_manager)):
+    job = await job_mgr.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    if job.status != JobStatus.RUNNING:
+        raise HTTPException(status_code=400, detail=f"Job {job_id} is not running (status: {job.status})")
+    cancelled = await job_mgr.cancel_job(job_id)
+    if cancelled:
+        return {"message": f"Job {job_id} cancelled (best-effort)."}
+    raise HTTPException(status_code=400, detail=f"Failed to cancel job {job_id}")
+
+
+@app.get("/jobs/{job_id}/logs")
+async def get_job_logs(job_id: str, job_mgr: JobManager = Depends(get_job_manager)):
+    job = await job_mgr.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    if job.status != JobStatus.COMPLETED:
+        raise HTTPException(status_code=400, detail=f"Job {job_id} is not completed (status: {job.status})")
+
+    # NOTE: ChaosEater saves message log to <work_dir>/outputs/message_log.pkl
+    if job.result and "work_dir" in job.result:
+        log_file = os.path.join(job.result["work_dir"], "outputs", "message_log.pkl")
+        if os.path.exists(log_file):
+            return FileResponse(log_file, media_type="application/octet-stream", filename="message_log.pkl")
+    raise HTTPException(status_code=404, detail="Log file not found")
+
+
+@app.get("/jobs/{job_id}/output")
+async def get_job_output(job_id: str, job_mgr: JobManager = Depends(get_job_manager)):
+    job = await job_mgr.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    if job.status != JobStatus.COMPLETED:
+        raise HTTPException(status_code=400, detail=f"Job {job_id} is not completed (status: {job.status})")
+
+    # NOTE: ChaosEater saves output.json to <work_dir>/outputs/output.json
+    if job.result and "work_dir" in job.result:
+        output_json = os.path.join(job.result["work_dir"], "outputs", "output.json")
+        if os.path.exists(output_json):
+            return FileResponse(output_json, media_type="application/json", filename="output.json")
+    raise HTTPException(status_code=404, detail="Output file not found")
+
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+
+
+@app.websocket("/jobs/{job_id}/stream")
+async def websocket_endpoint(websocket: WebSocket, job_id: str, job_mgr: JobManager = Depends(get_job_manager)):
+    await websocket.accept()
+    try:
+        job = await job_mgr.get_job(job_id)
+        if not job:
+            await websocket.send_json({"error": f"Job {job_id} not found"})
+            return
+
+        last_progress = None
+        while True:
+            # 1. send new events, if any
+            new_events, last_event_idx = await job_mgr.get_events_since(job_id, last_event_idx)
+            for ev in new_events:
+                # Each event is a standalone message
+                await websocket.send_json({
+                    "job_id": job_id,
+                    "type": "event",
+                    "event": ev
+                })
+
+            # 2. send progress change
+            job = await job_mgr.get_job(job_id)
+            if not job:
+                break
+            if job.progress != last_progress:
+                await websocket.send_json({
+                    "job_id": job_id,
+                    "status": job.status,
+                    "progress": job.progress,
+                    "updated_at": job.updated_at.isoformat()
+                })
+                last_progress = job.progress
+
+            # 3. terminal
+            if job.status in {JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED}:
+                await websocket.send_json({
+                    "job_id": job_id,
+                    "status": job.status,
+                    "message": "Job finished",
+                    "result": job.result if job.status == JobStatus.COMPLETED else None,
+                    "error": job.error if job.status == JobStatus.FAILED else None,
+                })
+                break
+
+            await asyncio.sleep(1)
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket disconnected for job {job_id}")
+    except Exception:
+        logger.exception(f"WebSocket error for job {job_id}")
+        try:
+            await websocket.send_json({"error": "WebSocket internal error"})
+        except Exception:
+            pass
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+# ---------------------------------------------------------------------
+# Project upload
+# ---------------------------------------------------------------------
+import tempfile
+import shutil
+import zipfile
+from pathlib import Path
+from fastapi import UploadFile, File
+
+# Where to store temp projects
+TEMP_BASE = Path(os.getenv("CE_TEMP_BASE", "/tmp/chaos-eater")).resolve()
+TEMP_BASE.mkdir(parents=True, exist_ok=True)
+
+def _safe_temp_project_dir() -> Path:
+    # Create a unique directory under TEMP_BASE
+    return Path(tempfile.mkdtemp(prefix="proj_", dir=str(TEMP_BASE)))
+
+def _unzip_to_dir(zip_fp: Path, dest_dir: Path):
+    with zipfile.ZipFile(zip_fp, "r") as zf:
+        zf.extractall(dest_dir)
+
+@app.post("/upload", summary="Upload project zip and get a project_path")
+async def upload_project_zip(
+    file: UploadFile = File(..., description="Project zip containing skaffold.yaml etc."),
+):
+    # Create a unique working dir
+    proj_dir = _safe_temp_project_dir()
+    zip_path = proj_dir / "project.zip"
+
+    # Save uploaded zip
+    with zip_path.open("wb") as f:
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            f.write(chunk)
+
+    # Extract it into the same folder
+    try:
+        _unzip_to_dir(zip_path, proj_dir)
+    except zipfile.BadZipFile:
+        shutil.rmtree(proj_dir, ignore_errors=True)
+        raise HTTPException(status_code=400, detail="Invalid zip file")
+
+    # Optional: remove zip after extract
+    zip_path.unlink(missing_ok=True)
+
+    # Return the project_path (absolute path on server)
+    return {"project_path": str(proj_dir)}
+
+
+# ---------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------
+if __name__ == "__main__":
+    uvicorn.run(
+        "chaos_eater_api:app",
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", "8000")),
+        reload=True,
+        log_level="info",
+    )

@@ -26,7 +26,43 @@ import {
 } from 'lucide-react';
 
 export default function ChaosEaterApp() {
+  // === API constants & helpers ===
+  // Pick API base from window or env; fall back to localhost.
+  const API_BASE =
+    (typeof window !== 'undefined' && window.NEXT_PUBLIC_CE_API) ||
+    process.env.NEXT_PUBLIC_CE_API ||
+    'http://localhost:8000';
+  
+  // Build WS URL that matches API_BASE protocol/host.
+  const wsUrl = (path) => {
+    try {
+      const u = new URL(API_BASE);
+      u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
+      u.pathname = path;
+      return u.toString();
+    } catch {
+      // Fallback: naïve replace
+      return API_BASE.replace(/^http/, 'ws') + path;
+    }
+  };
+
+  // Turn File objects into {name, content, size} (text) keeping paths if folder upload used.
+  const readAsTextWithPath = (file) => {
+    new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) =>
+        resolve({
+          name: file.webkitRelativePath || file.name,
+          content: e.target.result,
+          size: file.size,
+        });
+        reader.readAsText(file);
+    });
+  };
+
+  // ---------------------------------------------------------
   // State management
+  // ---------------------------------------------------------
   const [sidebarWidth, setSidebarWidth] = useState(320);
   const [isResizing, setIsResizing] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -53,13 +89,22 @@ export default function ChaosEaterApp() {
     maxRetries: 3,
   });
   
+  // file uploading
   const [uploadedFiles, setUploadedFiles] = useState([]);
+  const [backendProjectPath, setBackendProjectPath] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+
   const [notification, setNotification] = useState(null);
   const [hoveredExample, setHoveredExample] = useState(null);
   const fileInputRef = useRef(null);
   const logoRef = useRef(null);
-
+  // Streaming/chat states
+  const [messages, setMessages] = useState([]); // [{role: 'assistant'|'user', content: string}]
+  const [jobId, setJobId] = useState(null);
+  const wsRef = useRef(null);
+  const hideTimerRef = useRef(null);
+  const [visible, setVisible] = useState(false);
+  // model list
   const models = [
     'openai/gpt-4o-2024-08-06',
     'google/gemini-1.5-pro-latest',
@@ -90,6 +135,26 @@ export default function ChaosEaterApp() {
     return () => window.removeEventListener('mousemove', handleMouseMove);
   }, []);
 
+  // hide notification a few seconds later
+  useEffect(() => {
+    // auto-dismiss after 3s whenever notification changes
+    if (notification) {
+      setVisible(true);
+      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = setTimeout(() => {
+        setVisible(false);
+        // wait for fade-out (0.5s) before removing
+        setTimeout(() => setNotification(null), 500);
+      }, 5000);
+    }
+    return () => {
+      if (hideTimerRef.current) {
+        clearTimeout(hideTimerRef.current);
+        hideTimerRef.current = null;
+      }
+    };
+  }, [notification]);
+
   // Handle sidebar resize
   const startResizing = React.useCallback(() => {
     setIsResizing(true);
@@ -117,7 +182,9 @@ export default function ChaosEaterApp() {
     };
   }, [resize, stopResizing]);
 
+  //--------
   // Styles
+  //--------
   const styles = {
     exampleCard: (isHovered) => ({
       padding: '24px',
@@ -144,25 +211,69 @@ export default function ChaosEaterApp() {
     })
   };
 
-  const handleFileUpload = (event) => {
-    const files = Array.from(event.target.files);
-    const filePromises = files.map(file => {
-      return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          resolve({
-            name: file.name,
-            content: e.target.result,
-            size: file.size
-          });
-        };
-        reader.readAsText(file);
+  //----------------
+  // file uploading
+  //----------------  
+  async function uploadZipToBackend(file) {
+    const form = new FormData();
+    form.append('file', file);
+  
+    const res = await fetch(`${API_BASE}/upload`, {
+      method: 'POST',
+      body: form
+    });
+  
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error(`Upload failed: ${t || res.statusText}`);
+    }
+    const json = await res.json();
+    if (!json?.project_path) throw new Error('Server did not return project_path');
+    return json.project_path;
+  }
+
+  const handleFileUpload = async (event) => {
+    const files = Array.from(event.target?.files || event.dataTransfer?.files || []);
+    // const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+    try {
+      // If user selected a zip, upload it right now
+      if (
+        files.length === 1 &&
+        (files[0].type?.includes('zip') || files[0].name.toLowerCase().endsWith('.zip'))
+      ) {
+        const projectPath = await uploadZipToBackend(files[0]);
+        setBackendProjectPath(projectPath);
+        setNotification({ type: 'success', message: 'File Uploaded!' });
+        // Also show in the UI that a zip was chosen
+        setUploadedFiles([{ name: files[0].name, size: files[0].size, content: '(zip uploaded to server)' }]);
+        return;
+      }
+  
+      // Otherwise, read the loose files into memory for optional zipping later
+      const filePromises = files.map(file => {
+        return new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            resolve({
+              name: file.name,
+              content: e.target.result,
+              size: file.size
+            });
+          };
+          reader.readAsText(file);
+        });
       });
-    });
-    
-    Promise.all(filePromises).then(results => {
+
+      const results = await Promise.all(filePromises);
       setUploadedFiles(prev => [...prev, ...results]);
-    });
+      setNotification({ type: 'info', message: 'Files loaded. Click Send to start.' });
+    } catch (err) {
+      console.error(err);
+      setNotification({ type: 'error', message: err.message || 'Upload failed' });
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
   const handleDragOver = (e) => {
@@ -210,17 +321,106 @@ export default function ChaosEaterApp() {
     }
   };
 
+  //------------------------------------------------------------
+  // run ce cycle
+  //------------------------------------------------------------
   const handleSubmit = async () => {
-    if (uploadedFiles.length === 0 && !formData.instructions) {
+    if (!formData.cluster) {
+      setNotification({ type: 'error', message: 'Please select a cluster' });
+      return;
+    }
+    if (uploadedFiles.length === 0 && !formData.instructions.trim()) {
       setNotification({ type: 'error', message: 'Please upload files or provide instructions' });
       return;
     }
-    
     setIsLoading(true);
-    setTimeout(() => {
+
+    // 1. prepare request body for /jobs
+    const payload = {
+      project_path: 'examples/nginx',
+      kube_context: formData.cluster,
+      project_name: formData.projectName || 'chaos-project',
+      work_dir: null,
+      clean_cluster_before_run: formData.cleanBefore,
+      clean_cluster_after_run: formData.cleanAfter,
+      is_new_deployment: formData.newDeployment,
+      max_num_steadystates: formData.maxSteadyStates,
+      max_retries: formData.maxRetries,
+      namespace: 'chaos-eater'
+    };
+
+    try {
+      // 2. create job
+      const resp = await fetch(`${API_BASE}/jobs`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(formData.apiKey ? { 'x-api-key': formData.apiKey } : {}),
+          ...(formData.model ? { 'x-model': formData.model } : {}),
+        },
+        body: JSON.stringify(payload),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        throw new Error(data.detail || data.message || 'Failed to create job');
+      }
+      setJobId(data.job_id);
+
+      // 3. show user instruction as a chat message
+      if (formData.instructions.trim()) {
+        setMessages((m) => [...m, { role: 'user', content: formData.instructions.trim() }]);
+      }
+
+      setNotification({ type: 'success', message: `Job created: ${data.job_id}` });
+
+      // 4. connect WebSocket for streaming
+      const socket = new WebSocket(wsUrl(`/jobs/${data.job_id}/stream`));
+      wsRef.current = socket;
+
+      socket.onopen = () => {
+        setMessages((m) => [...m, { role: 'assistant', content: 'Connected. Streaming started…' }]);
+      };
+      socket.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          // Prioritize richer fields if provided by backend (phase, agent, partial)
+          if (msg.partial) {
+            // Append partials into last assistant message (stream effect)
+            setMessages((prev) => {
+              const out = [...prev];
+              const last = out[out.length - 1];
+              if (last && last.role === 'assistant') {
+                last.content = `${last.content}\n${msg.partial}`;
+              } else {
+                out.push({ role: 'assistant', content: msg.partial });
+              }
+              return out;
+            });
+            return;
+          }
+          // Fallback to generic progress/status
+          const content =
+            msg.rich ||
+            msg.message ||
+            msg.progress ||
+            (msg.status ? `Status: ${msg.status}` : JSON.stringify(msg));
+          setMessages((m) => [...m, { role: 'assistant', content }]);
+        } catch {
+          setMessages((m) => [...m, { role: 'assistant', content: event.data }]);
+        }
+      };
+      socket.onerror = () => {
+        setMessages((m) => [...m, { role: 'assistant', content: 'WebSocket error' }]);
+      };
+      socket.onclose = () => {
+        setMessages((m) => [...m, { role: 'assistant', content: 'Stream closed' }]);
+        setIsLoading(false);
+      };
+    } catch (err) {
+      console.error(err);
+      setNotification({ type: 'error', message: String(err.message || err) });
       setIsLoading(false);
-      setNotification({ type: 'success', message: 'Chaos experiment started successfully!' });
-    }, 2000);
+    }
   };
 
   const [uploadHovered, setUploadHovered] = useState(false);
@@ -228,7 +428,7 @@ export default function ChaosEaterApp() {
   const [buttonHovered, setButtonHovered] = useState({});
 
   return (
-    <div style={{ display: 'flex', height: '100vh', backgroundColor: '#0a0a0a', color: '#e5e7eb', position: 'relative' }}>
+    <div style={{ display: 'flex', height: '100vh', backgroundColor: '#0a0a0a', color: '#e5e7eb', position: 'relative' }}>      
       {/* Sidebar */}
       <div style={{ 
         width: sidebarOpen ? `${sidebarWidth}px` : '0px',
@@ -584,7 +784,7 @@ export default function ChaosEaterApp() {
         )}
       </div>
 
-      {/* Compact Sidebar Toggle (open) — sidebarOpen が false のときだけ */}
+      {/* Compact Sidebar Toggle (open) */}
       {!sidebarOpen && (
         <button
           aria-label="Open sidebar"
@@ -906,78 +1106,107 @@ export default function ChaosEaterApp() {
             </div>
             
             {/* Lower section - Controls */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '8px 12px',
-              backgroundColor: '#1a1a1a',
-              borderRadius: '0 0 8px 8px'
-            }}>
-              {/* Left side - File upload button */}
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                style={{
-                  width: '32px',
-                  height: '32px',
-                  padding: '0',
-                  backgroundColor: 'transparent',
-                  border: 'none',
-                  borderRadius: '6px',
-                  color: '#9ca3af',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  transition: 'all 0.2s ease'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#374151';
-                  e.currentTarget.style.color = '#84cc16';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                  e.currentTarget.style.color = '#9ca3af';
-                }}
-                title="Add files"
-              >
-                <Paperclip size={18} />
-              </button>
-              
-              {/* Right side - Send button */}
-              <button
-                onClick={handleSubmit}
-                disabled={isLoading}
-                style={{
-                  width: '32px',
-                  height: '32px',
-                  padding: '0',
-                  backgroundColor: '#84cc16',
-                  border: 'none',
-                  borderRadius: '6px',
-                  color: '#000000',
-                  cursor: isLoading ? 'not-allowed' : 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  transition: 'all 0.2s ease',
-                  opacity: isLoading ? 0.6 : 1,
-                  boxShadow: '0 2px 8px rgba(132, 204, 22, 0.3)'
-                }}
-                onMouseEnter={(e) => {
-                  if (!isLoading) {
-                    e.currentTarget.style.backgroundColor = '#a3d635';
-                    e.currentTarget.style.transform = 'scale(1.05)';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = '#84cc16';
-                  e.currentTarget.style.transform = 'scale(1)';
-                }}
-                title="Send (Enter to submit)"
-              >
-                {isLoading ? <Loader size={16} className="animate-spin" /> : <Send size={16} />}
-              </button>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '8px 12px',
+                backgroundColor: '#1a1a1a',
+                borderRadius: '0 0 8px 8px',
+              }}
+            >
+              {/* Left group */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  style={{
+                    width: 32,
+                    height: 32,
+                    padding: 0,
+                    backgroundColor: 'transparent',
+                    border: 'none',
+                    borderRadius: 6,
+                    color: '#9ca3af',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    transition: 'all 0.2s ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#374151';
+                    e.currentTarget.style.color = '#84cc16';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                    e.currentTarget.style.color = '#9ca3af';
+                  }}
+                  title="Add files"
+                >
+                  <Paperclip size={18} />
+                </button>
+              </div>
+
+              {/* Right group: [toast][Send] */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {notification && (
+                  <div
+                    style={{
+                      backgroundColor:
+                        notification.type === 'error' ? '#7f1d1d' : '#84cc16',
+                      color:
+                        notification.type === 'error' ? '#e5e7eb' : '#000000',
+                      border: 'none',
+                      borderRadius: 6,
+                      padding: '6px 10px',
+                      fontSize: 13,
+                      opacity: visible ? 1 : 0,
+                      transition: 'opacity 0.5s ease',
+                      whiteSpace: 'nowrap',
+                      maxWidth: 360,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                  >
+                    {notification.message}
+                  </div>
+                )}
+
+                <button
+                  onClick={handleSubmit}
+                  disabled={isLoading}
+                  style={{
+                    width: 32,
+                    height: 32,
+                    padding: 0,
+                    backgroundColor: '#84cc16',
+                    border: 'none',
+                    borderRadius: 6,
+                    color: '#000000',
+                    cursor: isLoading ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    transition: 'all 0.2s ease',
+                    opacity: isLoading ? 0.6 : 1,
+                    boxShadow: '0 2px 8px rgba(132, 204, 22, 0.3)',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isLoading) {
+                      e.currentTarget.style.backgroundColor = '#a3d635';
+                      e.currentTarget.style.transform = 'scale(1.05)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#84cc16';
+                    e.currentTarget.style.transform = 'scale(1)';
+                  }}
+                  title="Send (Enter to submit)"
+                >
+                  {isLoading ? <Loader size={16} className="animate-spin" /> : <Send size={16} />}
+                </button>
+              </div>
             </div>
           </div>
         </div>
