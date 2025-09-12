@@ -452,54 +452,32 @@ export default function ChaosEaterApp() {
       }
       setJobId(data.job_id);
 
+      // display dialog
+      setPanelVisible(true);
+      setMessages([]);
+
       // 3. show user instruction as a chat message
       if (formData.instructions.trim()) {
-        setMessages((m) => [...m, { role: 'user', content: formData.instructions.trim() }]);
+        setMessages((m) => [...m, { type: 'text', role: 'user', content: formData.instructions.trim() }]);
       }
 
       setNotification({ type: 'success', message: `Job created: ${data.job_id}` });
-
+      
       // 4. connect WebSocket for streaming
       const socket = new WebSocket(wsUrl(`/jobs/${data.job_id}/stream`));
       wsRef.current = socket;
 
       socket.onopen = () => {
-        setMessages((m) => [...m, { role: 'assistant', content: 'Connected. Streaming started…' }]);
+        setMessages((m) => [...m, { type: 'status', role: 'assistant', content: 'Connected. Streaming started…' }]);
       };
       socket.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data);
-          // Prioritize richer fields if provided by backend (phase, agent, partial)
-          if (msg.partial) {
-            // Append partials into last assistant message (stream effect)
-            setMessages((prev) => {
-              const out = [...prev];
-              const last = out[out.length - 1];
-              if (last && last.role === 'assistant') {
-                last.content = `${last.content}\n${msg.partial}`;
-              } else {
-                out.push({ role: 'assistant', content: msg.partial });
-              }
-              return out;
-            });
-            return;
-          }
-          // Fallback to generic progress/status
-          const content =
-            msg.rich ||
-            msg.message ||
-            msg.progress ||
-            (msg.status ? `Status: ${msg.status}` : JSON.stringify(msg));
-          setMessages((m) => [...m, { role: 'assistant', content }]);
-        } catch {
-          setMessages((m) => [...m, { role: 'assistant', content: event.data }]);
-        }
+        handleWsPayload(event.data, setMessages);
       };
       socket.onerror = () => {
-        setMessages((m) => [...m, { role: 'assistant', content: 'WebSocket error' }]);
+        setMessages((m) => [...m, { type: 'status', role: 'assistant', content: 'WebSocket error' }]);
       };
       socket.onclose = () => {
-        setMessages((m) => [...m, { role: 'assistant', content: 'Stream closed' }]);
+        setMessages((m) => [...m, { type: 'status', role: 'assistant', content: 'Stream closed' }]);
         setIsLoading(false);
       };
     } catch (err) {
@@ -564,6 +542,185 @@ export default function ChaosEaterApp() {
     return res.json(); // { provider, configured }
   }
 
+    //----------------
+  // dialog display
+  //----------------
+  // Normalize to a lightweight shape for rendering (type is 'text' | 'code' | 'subheader' | 'status')
+  const normalize = (msg) => ({ type: msg.type || 'text', role: msg.role || 'assistant', content: msg.content || msg.text || '', language: msg.language });
+  // Toggle for showing the log/message panel
+  const [panelVisible, setPanelVisible] = useState(false);
+
+  // For appending partial chunks
+  function appendAssistantPartial(setter, chunk) {
+    setter(prev => {
+      const out = [...prev];
+      const last = out[out.length - 1];
+      if (last && last.role === 'assistant' && (last.type === 'text' || !last.type)) {
+        // Append to the tail
+        last.content = `${last.content || ''}${chunk}`;
+        return out;
+      }
+      // If the last item isn't assistant text, create a new one
+      out.push({ type: 'text', role: 'assistant', content: chunk });
+      return out;
+    });
+  }
+
+  // Apply one WebSocket payload into messages
+  function handleWsPayload(payload, setMessages) {
+    // payload should be a string
+    let msg;
+    try { msg = JSON.parse(payload); } catch { 
+      setMessages(m => [...m, { type: 'text', role: 'assistant', content: String(payload) }]);
+      return;
+    }
+
+    // (1) Preferred event wrapper (backend sends {type:"event", event:{...}})
+    if (msg?.type === 'event' && msg.event) {
+      const ev = msg.event;
+
+      // Streaming partial
+      if (ev.type === 'partial' && ev.partial) {
+        appendAssistantPartial(setMessages, ev.partial);
+        return;
+      }
+
+      // Normal write/code/subheader
+      if (ev.type === 'write') {
+        setMessages(m => [...m, { type: 'text', role: ev.role || 'assistant', content: ev.text || '' }]);
+        return;
+      }
+      if (ev.type === 'code') {
+        setMessages(m => [...m, { type: 'code', role: ev.role || 'assistant', content: ev.code || '', language: ev.language }]);
+        return;
+      }
+      if (ev.type === 'subheader') {
+        setMessages(m => [...m, { type: 'subheader', role: ev.role || 'assistant', content: ev.text || '' }]);
+        return;
+      }
+
+      // For unexpected shapes, stringify and show as-is
+      setMessages(m => [...m, { type: 'text', role: 'assistant', content: JSON.stringify(ev) }]);
+      return;
+    }
+
+    // (2) Legacy/generic shape (top-level partial/progress, etc.)
+    if (msg.partial) {
+      appendAssistantPartial(setMessages, msg.partial);
+      return;
+    }
+
+    // status/progress (fallback compatible with existing onmessage)
+    const content = msg.rich || msg.message || msg.progress || (msg.status ? `Status: ${msg.status}` : null);
+    if (content != null) {
+      setMessages(m => [...m, { type: 'status', role: 'assistant', content }]);
+      return;
+    }
+
+    // Otherwise, show raw JSON
+    setMessages(m => [...m, { type: 'text', role: 'assistant', content: JSON.stringify(msg) }]);
+  }
+
+  function MessagesPanel({ messages }) {
+    const containerRef = useRef(null);
+    const endRef = useRef(null);
+  
+    // autoscroll to bottom
+    useEffect(() => {
+      if (!containerRef.current) return;
+      endRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [messages]);
+  
+    const renderMsg = (m, i) => {
+      const type = m.type || 'text';
+      const roleColor = m.role === 'user' ? '#60a5fa' : '#e5e7eb';
+  
+      if (type === 'subheader') {
+        return (
+          <div key={i} style={{ margin: '12px 0', padding: '8px 0', borderBottom: '1px solid #374151', color: '#e5e7eb', fontWeight: 600 }}>
+            {m.content}
+          </div>
+        );
+      }
+  
+      if (type === 'code') {
+        return (
+          <div key={i} style={{ margin: '8px 0' }}>
+            <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 4 }}>{m.language || 'code'}</div>
+            <pre style={{
+              margin: 0,
+              padding: '12px',
+              backgroundColor: '#0b0b0b',
+              border: '1px solid #1f2937',
+              borderRadius: 6,
+              overflowX: 'auto',
+              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+              fontSize: 13,
+              lineHeight: '1.5',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+            }}>
+              <code>{m.content}</code>
+            </pre>
+          </div>
+        );
+      }
+  
+      if (type === 'status') {
+        return (
+          <div key={i} style={{ margin: '6px 0', fontSize: 12, color: '#9ca3af' }}>
+            {m.content}
+          </div>
+        );
+      }
+  
+      // default: text
+      return (
+        <div key={i} style={{ margin: '6px 0', color: roleColor, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+          {m.content}
+        </div>
+      );
+    };
+  
+    return (
+      <div
+        ref={containerRef}
+        style={{
+          width: '100%',
+          maxWidth: '768px',
+          padding: '16px',
+          backgroundColor: 'transparent',
+          borderRadius: 8,
+          border: 'none',
+          color: '#e5e7eb',
+          fontSize: '16px',
+          fontFamily: 'inherit',
+          resize: 'none',
+          outline: 'none',
+          transition: 'all 0.2s ease',
+          lineHeight: '24px',
+          boxSizing: 'border-box',
+          minHeight: '32px',
+          overflow: 'hidden',
+          border: '1px solid #374151',
+        }}
+      >
+        {messages.length === 0 ? (
+          <div style={{ color: '#6b7280', fontSize: 14 }}>dialog will be displayed here</div>
+        ) : (
+          messages.map(renderMsg)
+        )}
+        <div ref={endRef} />
+      </div>
+    );
+  }
+  
+  useEffect(() => {
+    return () => {
+      try { wsRef.current?.close(); } catch {}
+    };
+  }, []);
+  
 
   //
   //
@@ -1088,133 +1245,145 @@ export default function ChaosEaterApp() {
         marginLeft: sidebarOpen ? '0' : '0',
         transition: 'margin-left 0.3s ease'
       }}>
-        {/* Animated Logo with Eye */}
-        <div 
-          ref={logoRef}
-          style={{
-            width: '200px',
-            height: '200px',
-            position: 'relative',
-            marginBottom: '0px',
-            marginTop: '150px'
-          }}
-        >
-          {/* ChaosEater icon */}
-          <img
-            src="/chaoseater_icon.png"
-            style={{
-              position: 'absolute',
-              width: '80%',
-              height: '80%',
-              top: '10%',
-              left: '10%',
-              objectFit: 'contain',
-              animation: 'rotate 30s linear infinite'
-            }}
-            onError={(e) => {
-              e.target.style.display = 'none';
-              e.target.nextSibling.style.display = 'flex';
-            }}
-          />
-          
-          {/* Simple Eye overlay - centered */}
-          <div style={{
-            position: 'absolute',
-            top: '50%',
-            left: '50%',
-            transform: 'translate(-50%, -50%)',
-            width: '40px',
-            height: '40px',
-            backgroundColor: '#ffffff',
-            borderRadius: '50%',
-            overflow: 'hidden'
-          }}>
-            {/* Black pupil that follows mouse */}
-            <div style={{
-              position: 'absolute',
-              width: '20px',
-              height: '20px',
-              backgroundColor: '#000000',
-              borderRadius: '50%',
-              top: '50%',
-              left: '50%',
-              transform: `translate(calc(-50% + ${mousePosition.x}px), calc(-50% + ${mousePosition.y}px))`,
-              transition: 'transform 0.1s ease-out'
-            }}>
-              {/* White highlight dot in upper right */}
+        {panelVisible ? (
+          <>
+            {/* dialog */}
+            <MessagesPanel messages={messages} />
+
+            {/* Spacer to push chatbox down */}
+            <div style={{ flex: 1 }}></div>
+          </>
+        ) : (
+          <>
+            {/* Animated Logo with Eye */}
+            <div 
+              ref={logoRef}
+              style={{
+                width: '200px',
+                height: '200px',
+                position: 'relative',
+                marginBottom: '0px',
+                marginTop: '150px'
+              }}
+            >
+              {/* ChaosEater icon */}
+              <img
+                src="/chaoseater_icon.png"
+                style={{
+                  position: 'absolute',
+                  width: '80%',
+                  height: '80%',
+                  top: '10%',
+                  left: '10%',
+                  objectFit: 'contain',
+                  animation: 'rotate 30s linear infinite'
+                }}
+                onError={(e) => {
+                  e.target.style.display = 'none';
+                  e.target.nextSibling.style.display = 'flex';
+                }}
+              />
+              
+              {/* Simple Eye overlay - centered */}
               <div style={{
                 position: 'absolute',
-                width: '6px',
-                height: '6px',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                width: '40px',
+                height: '40px',
                 backgroundColor: '#ffffff',
                 borderRadius: '50%',
-                top: '3px',
-                right: '3px'
-              }} />
+                overflow: 'hidden'
+              }}>
+                {/* Black pupil that follows mouse */}
+                <div style={{
+                  position: 'absolute',
+                  width: '20px',
+                  height: '20px',
+                  backgroundColor: '#000000',
+                  borderRadius: '50%',
+                  top: '50%',
+                  left: '50%',
+                  transform: `translate(calc(-50% + ${mousePosition.x}px), calc(-50% + ${mousePosition.y}px))`,
+                  transition: 'transform 0.1s ease-out'
+                }}>
+                  {/* White highlight dot in upper right */}
+                  <div style={{
+                    position: 'absolute',
+                    width: '6px',
+                    height: '6px',
+                    backgroundColor: '#ffffff',
+                    borderRadius: '50%',
+                    top: '3px',
+                    right: '3px'
+                  }} />
+                </div>
+              </div>
+
+              {/* CSS animation for rotation */}
+              <style dangerouslySetInnerHTML={{__html: `
+                @keyframes rotate {
+                  from {
+                    transform: rotate(0deg);
+                  }
+                  to {
+                    transform: rotate(-360deg);
+                  }
+                }
+              `}} />
             </div>
-          </div>
+            
+            {/* Title */}
+            <h1 style={{ fontSize: '30px', fontWeight: 'bold', fontWeight: '300', margin: '0 0 48px' }}>
+              Let's dive into <span style={{ color: '#84cc16', fontWeight: '600' }}>Chaos</span> together :)
+            </h1>
+        
+            {/* Spacer to push chatbox down */}
+            <div style={{ flex: 1 }}></div>
 
-          {/* CSS animation for rotation */}
-          <style dangerouslySetInnerHTML={{__html: `
-            @keyframes rotate {
-              from {
-                transform: rotate(0deg);
-              }
-              to {
-                transform: rotate(-360deg);
-              }
-            }
-          `}} />
-        </div>
-        
-        {/* Title */}
-        <h1 style={{ fontSize: '30px', fontWeight: 'bold', fontWeight: '300', margin: '0 0 48px' }}>
-          Let's dive into <span style={{ color: '#84cc16', fontWeight: '600' }}>Chaos</span> together :)
-        </h1>
-        
-        {/* Spacer to push chatbox down */}
-        <div style={{ flex: 1 }}></div>
+            {/* Example Cards */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, 1fr)',
+              gap: '16px',
+              marginBottom: '28px',
+              width: '100%',
+              maxWidth: '768px'
+            }}>
+              <div
+                onClick={() => loadExample('nginx')}
+                onMouseEnter={() => setHoveredExample('nginx')}
+                onMouseLeave={() => setHoveredExample(null)}
+                style={styles.exampleCard(hoveredExample === 'nginx')}
+              >
+                <div style={styles.exampleTitle(hoveredExample === 'nginx')}>example#1:</div>
+                <div style={styles.exampleDesc(hoveredExample === 'nginx')}>Nginx w/ detailed CE instructions</div>
+              </div>
+              
+              <div
+                onClick={() => loadExample('nginxLimited')}
+                onMouseEnter={() => setHoveredExample('nginxLimited')}
+                onMouseLeave={() => setHoveredExample(null)}
+                style={styles.exampleCard(hoveredExample === 'nginxLimited')}
+              >
+                <div style={styles.exampleTitle(hoveredExample === 'nginxLimited')}>example#2:</div>
+                <div style={styles.exampleDesc(hoveredExample === 'nginxLimited')}>Nginx w/ limited experiment duration</div>
+              </div>
+              
+              <div
+                onClick={() => loadExample('sockshop')}
+                onMouseEnter={() => setHoveredExample('sockshop')}
+                onMouseLeave={() => setHoveredExample(null)}
+                style={styles.exampleCard(hoveredExample === 'sockshop')}
+              >
+                <div style={styles.exampleTitle(hoveredExample === 'sockshop')}>example#3:</div>
+                <div style={styles.exampleDesc(hoveredExample === 'sockshop')}>Sock shop w/ limited experiment duration</div>
+              </div>
+            </div>
+          </>
+        )}
 
-        {/* Example Cards */}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
-          gap: '16px',
-          marginBottom: '28px',
-          width: '100%',
-          maxWidth: '768px'
-        }}>
-          <div
-            onClick={() => loadExample('nginx')}
-            onMouseEnter={() => setHoveredExample('nginx')}
-            onMouseLeave={() => setHoveredExample(null)}
-            style={styles.exampleCard(hoveredExample === 'nginx')}
-          >
-            <div style={styles.exampleTitle(hoveredExample === 'nginx')}>example#1:</div>
-            <div style={styles.exampleDesc(hoveredExample === 'nginx')}>Nginx w/ detailed CE instructions</div>
-          </div>
-          
-          <div
-            onClick={() => loadExample('nginxLimited')}
-            onMouseEnter={() => setHoveredExample('nginxLimited')}
-            onMouseLeave={() => setHoveredExample(null)}
-            style={styles.exampleCard(hoveredExample === 'nginxLimited')}
-          >
-            <div style={styles.exampleTitle(hoveredExample === 'nginxLimited')}>example#2:</div>
-            <div style={styles.exampleDesc(hoveredExample === 'nginxLimited')}>Nginx w/ limited experiment duration</div>
-          </div>
-          
-          <div
-            onClick={() => loadExample('sockshop')}
-            onMouseEnter={() => setHoveredExample('sockshop')}
-            onMouseLeave={() => setHoveredExample(null)}
-            style={styles.exampleCard(hoveredExample === 'sockshop')}
-          >
-            <div style={styles.exampleTitle(hoveredExample === 'sockshop')}>example#3:</div>
-            <div style={styles.exampleDesc(hoveredExample === 'sockshop')}>Sock shop w/ limited experiment duration</div>
-          </div>
-        </div>
-        
         {/* Unified Chat Input Area */}
         <div style={{ 
           width: '100%', 

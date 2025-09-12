@@ -18,7 +18,6 @@ from pydantic import BaseModel, Field, model_validator
 from ..chaos_eater import ChaosEater, ChaosEaterInput, ChaosEaterOutput
 from ..ce_tools.ce_tool import CEToolType, CETool
 from ..utils.llms import load_llm
-from ..utils.functions import MessageLogger
 
 
 # ---------------------------------------------------------------------
@@ -193,6 +192,7 @@ class JobManager:
         self.jobs: Dict[str, JobInfo] = {}
         self.tasks: Dict[str, asyncio.Task] = {}
         self.chaos_eaters: Dict[str, ChaosEater] = {}
+        self.events: Dict[str, List[dict]] = {}
         self.lock = asyncio.Lock()
 
     async def create_job(self, _: ChaosEaterJobRequest) -> str:
@@ -206,6 +206,19 @@ class JobManager:
                 progress="Job created",
             )
         return job_id
+
+    async def add_event(self, job_id: str, event: dict) -> None:
+        async with self.lock:
+            self.events.setdefault(job_id, []).append(event)
+
+    async def get_events_since(self, job_id: str, last_idx: int | None) -> tuple[list[dict], int]:
+        async with self.lock:
+            buf = self.events.get(job_id, [])
+            start = (last_idx or -1) + 1
+            if start < 0:
+                start = 0
+            new = buf[start:]
+            return new, (start + len(new) - 1)
 
     async def get_job(self, job_id: str) -> Optional[JobInfo]:
         return self.jobs.get(job_id)
@@ -320,6 +333,8 @@ class APICallback:
 # ---------------------------------------------------------------------
 # Background runner
 # ---------------------------------------------------------------------
+from .streaming import FrontendMessageLogger
+
 async def run_chaos_eater_cycle(
     job_id: str,
     job_manager: JobManager,
@@ -333,7 +348,7 @@ async def run_chaos_eater_cycle(
             job_manager.jobs[job_id].updated_at = datetime.now()
 
         # Logger without Streamlit
-        message_logger = MessageLogger()
+        message_logger = FrontendMessageLogger()
 
         # Instance
         chaos_eater = ChaosEater(
@@ -348,6 +363,7 @@ async def run_chaos_eater_cycle(
         # Thread-safe callback
         loop = asyncio.get_running_loop()
         callback = APICallback(job_manager, job_id, loop)
+        message_logger.set_emitter(lambda ev: callback.on_stream("log", ev))
 
         # Build/convert input
         if request.input_data:
@@ -566,7 +582,11 @@ async def health_check():
 
 
 @app.websocket("/jobs/{job_id}/stream")
-async def websocket_endpoint(websocket: WebSocket, job_id: str, job_mgr: JobManager = Depends(get_job_manager)):
+async def websocket_endpoint(
+    websocket: WebSocket,
+    job_id: str,
+    job_mgr: JobManager = Depends(get_job_manager)
+):
     await websocket.accept()
     try:
         job = await job_mgr.get_job(job_id)
@@ -574,6 +594,7 @@ async def websocket_endpoint(websocket: WebSocket, job_id: str, job_mgr: JobMana
             await websocket.send_json({"error": f"Job {job_id} not found"})
             return
 
+        last_event_idx = -1 
         last_progress = None
         while True:
             # 1. send new events, if any
@@ -610,7 +631,7 @@ async def websocket_endpoint(websocket: WebSocket, job_id: str, job_mgr: JobMana
                 })
                 break
 
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.25)
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected for job {job_id}")
     except Exception:
