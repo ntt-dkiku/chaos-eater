@@ -760,6 +760,86 @@ async def release_cluster(body: ReleaseBody):
     removed = await redis.hdel(USAGE_HASH, body.session_id)
     return {"released": bool(removed)}
 
+# ---------------------------------------------------------------------
+# API key settings
+# ---------------------------------------------------------------------
+from typing import Optional, Literal
+from pydantic import field_validator
+
+from ..utils.llms import get_env_key_name, verify_api_key, verify_model_name
+
+
+Provider = Literal["openai", "anthropic", "google", "ollama"]
+
+class APIKeyRequest(BaseModel):
+    provider: Provider
+    api_key: str
+
+    @field_validator("api_key")
+    @classmethod
+    def not_empty(cls, v: str):
+        if not v or not v.strip():
+            raise ValueError("api_key must not be empty")
+        return v.strip()
+
+class APIKeyInfo(BaseModel):
+    provider: Provider
+    configured: bool
+
+def _set_env_key(provider: str, api_key: str) -> None:
+    env_name = get_env_key_name(provider)
+    os.environ[env_name] = api_key
+
+def _get_env_key(provider: str) -> Optional[str]:
+    env_name = get_env_key_name(provider)
+    return os.environ.get(env_name)
+
+def _del_env_key(provider: str) -> bool:
+    env_name = get_env_key_name(provider)
+    if env_name in os.environ:
+        del os.environ[env_name]
+        return True
+    return False
+
+@app.post("/config/api-key", response_model=APIKeyInfo)
+async def set_api_key(req: APIKeyRequest):
+    """
+    Validate and set API key for a given provider.
+    - Returns masked key in response.
+    - If ?persist=true, also writes to .env (development convenience).
+    """
+    ok = verify_api_key(req.provider, req.api_key)
+    if not ok:
+        raise HTTPException(status_code=400, detail="Invalid API key for the provider")
+    _set_env_key(req.provider, req.api_key)
+    return APIKeyInfo(
+        provider=req.provider,
+        configured=True,
+    )
+
+@app.get("/config/api-key", response_model=APIKeyInfo)
+async def get_api_key(provider: Provider = Query(...)):
+    """
+    Get current configuration status for a provider.
+    Only returns masked key (or nothing).
+    """
+    existing = _get_env_key(provider)
+    return APIKeyInfo(
+        provider=provider,
+        configured=bool(existing and verify_api_key(provider, existing))
+    )
+
+@app.delete("/config/api-key", response_model=APIKeyInfo)
+async def delete_api_key(provider: Provider = Query(...), persist: bool = Query(False)):
+    """
+    Delete API key for a provider from process env (and optionally from .env).
+    """
+    existed = _get_env_key(provider)
+    removed = _del_env_key(provider)
+    return APIKeyInfo(
+        provider=provider,
+        configured=False,
+    )
 
 # ---------------------------------------------------------------------
 # Main

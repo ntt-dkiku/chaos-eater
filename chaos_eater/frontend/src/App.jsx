@@ -518,6 +518,61 @@ export default function ChaosEaterApp() {
   const [logoHovered, setLogoHovered] = useState(false);
   const [buttonHovered, setButtonHovered] = useState({});
 
+  //---------------------------
+  // API key confiuration
+  //---------------------------
+  const [apiKeyConfigured, setApiKeyConfigured] = useState(false);
+
+  function providerFromModel(model) {
+    if (!model) return null;
+    const p = String(model).split('/')[0]?.trim();
+    if (["openai", "anthropic", "google", "ollama"].includes(p)) return p;
+    return null;
+  }
+
+  async function checkProviderStatus(model) {
+    const provider = providerFromModel(model);
+    if (!provider) {
+      setApiKeyConfigured(false);
+      return;
+    }
+    try {
+      const r = await fetch(`${API_BASE}/config/api-key?provider=${provider}`);
+      const info = await r.json();
+      setApiKeyConfigured(info?.configured);
+    } catch {
+      setApiKeyConfigured(false);
+    }
+  }
+
+  useEffect(() => {
+    if (formData.model) {
+      checkProviderStatus(formData.model);
+    }
+  }, [formData.model]);
+
+  async function saveApiKeyForCurrentModel(apiKey, model) {
+    const provider = providerFromModel(model);
+    if (!provider) throw new Error(`Unknown provider from model: ${model}`);
+    if (!apiKey || !apiKey.trim()) throw new Error("API Key is empty");
+  
+    const res = await fetch(`${API_BASE}/config/api-key?persist=true`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider, api_key: apiKey.trim() }),
+    });
+    if (!res.ok) {
+      const t = await res.text().catch(()=>'');
+      throw new Error(t || `HTTP ${res.status}`);
+    }
+    await checkProviderStatus(model);
+    return res.json(); // { provider, configured }
+  }
+
+
+  //
+  //
+  //
   return (
     <div style={{ display: 'flex', height: '100vh', backgroundColor: '#0a0a0a', color: '#e5e7eb', position: 'relative' }}>      
       {/* Sidebar */}
@@ -619,56 +674,82 @@ export default function ChaosEaterApp() {
                   ))}
                 </select>
               </div>
-              
+
               {/* API Key */}
-              <div>
-                <label style={{ fontSize: '12px', color: '#6b7280', fontWeight: '400', letterSpacing: '0.5px' }}>API key</label>
-                <div style={{ position: 'relative' }}>
-                  <input
-                    type={formData.apiKeyVisible ? "text" : "password"}
-                    placeholder="Enter your API key"
-                    style={{ 
-                      width: '100%', 
-                      marginTop: '4px', 
-                      padding: '10px 36px 10px 12px', 
-                      backgroundColor: '#0a0a0a', 
-                      borderRadius: '4px', 
-                      border: '1px solid #1f2937', 
-                      color: '#e5e7eb', 
-                      fontSize: '14px',
-                      outline: 'none',
-                      transition: 'border-color 0.2s ease',
-                      boxSizing: 'border-box',
-                    }}
-                    value={formData.apiKey}
-                    onChange={(e) => setFormData({...formData, apiKey: e.target.value})}
-                    onFocus={(e) => e.target.style.borderColor = '#374151'}
-                    onBlur={(e) => e.target.style.borderColor = '#1f2937'}
-                  />
-                  <button
-                    onClick={() => setFormData({...formData, apiKeyVisible: !formData.apiKeyVisible})}
-                    style={{ 
-                      position: 'absolute', 
-                      right: '8px', 
-                      top: '50%', 
-                      transform: 'translateY(-50%)', 
-                      backgroundColor: 'transparent', 
-                      border: 'none', 
-                      color: '#6b7280', 
-                      cursor: 'pointer',
-                      padding: '4px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center'
-                    }}
-                    onMouseEnter={(e) => e.currentTarget.style.color = '#9ca3af'}
-                    onMouseLeave={(e) => e.currentTarget.style.color = '#6b7280'}
-                  >
-                    {formData.apiKeyVisible ? <EyeOff size={16} /> : <Eye size={16} />}
-                  </button>
+              {providerFromModel(formData.model) !== "ollama" && ( // Ollama does not require API key
+                <div>
+                  <label style={{ fontSize: '12px', color: '#6b7280', fontWeight: '400', letterSpacing: '0.5px' }}>API key</label>
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      type={formData.apiKeyVisible ? "text" : "password"}
+                      // placeholder="Enter your API key"
+                      placeholder={apiKeyConfigured ? "Your API key is already set" : "Enter your API key"}
+                      style={{ 
+                        width: '100%', 
+                        marginTop: '4px', 
+                        padding: '10px 36px 10px 12px', 
+                        backgroundColor: '#0a0a0a', 
+                        borderRadius: '4px', 
+                        border: '1px solid #1f2937', 
+                        color: '#e5e7eb', 
+                        fontSize: '14px',
+                        outline: 'none',
+                        transition: 'border-color 0.2s ease',
+                        boxSizing: 'border-box',
+                      }}
+                      value={formData.apiKey}
+                      onChange={(e) => setFormData({...formData, apiKey: e.target.value})}
+                      onFocus={(e) => e.target.style.borderColor = '#374151'}
+                      onKeyDown={async (e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          try {
+                            const r = await saveApiKeyForCurrentModel(formData.apiKey, formData.model);
+                            setNotification({ type: 'success', message: `API key saved for ${r.provider}` });
+                            setFormData(prev => ({ ...prev, apiKey: '' }));
+                          } catch (err) {
+                            setNotification({ type: 'error', message: `Save failed: ${err.message || err}` });
+                          }
+                        }
+                      }}
+                      onBlur={async (e) => {
+                        e.target.style.borderColor = '#1f2937';
+                        if (formData.apiKey.trim()) {
+                          try {
+                            const r = await saveApiKeyForCurrentModel(formData.apiKey, formData.model);
+                            setNotification({ type: 'success', message: `API key saved for ${r.provider}` });
+                            setFormData(prev => ({ ...prev, apiKey: '' }));
+                          } catch (err) {
+                            setNotification({ type: 'error', message: `Save failed: ${err.message || err}` });
+                          }
+                        }
+                      }}
+                    />
+                    <button
+                      onClick={() => setFormData({...formData, apiKeyVisible: !formData.apiKeyVisible})}
+                      style={{ 
+                        position: 'absolute', 
+                        right: '8px', 
+                        top: '50%', 
+                        transform: 'translateY(-50%)', 
+                        backgroundColor: 'transparent', 
+                        border: 'none', 
+                        color: '#6b7280', 
+                        cursor: 'pointer',
+                        padding: '4px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.color = '#9ca3af'}
+                      onMouseLeave={(e) => e.currentTarget.style.color = '#6b7280'}
+                    >
+                      {formData.apiKeyVisible ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
                 </div>
-              </div>
-              
+              )}
+
               {/* Cluster Selection */}
               <div>
                 <label style={{ fontSize: '12px', color: '#6b7280', fontWeight: '400', letterSpacing: '0.5px' }}>Cluster selection</label>
@@ -1050,7 +1131,7 @@ export default function ChaosEaterApp() {
         </div>
         
         {/* Title */}
-        <h1 style={{ fontSize: '30px', fontWeight: '300', margin: '0 0 48px' }}>
+        <h1 style={{ fontSize: '30px', fontWeight: 'bold', fontWeight: '300', margin: '0 0 48px' }}>
           Let's dive into <span style={{ color: '#84cc16', fontWeight: '600' }}>Chaos</span> together :)
         </h1>
         
