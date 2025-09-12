@@ -207,18 +207,20 @@ class JobManager:
             )
         return job_id
 
-    async def add_event(self, job_id: str, event: dict) -> None:
+    async def add_event(self, job_id: str, event: dict) -> int:
         async with self.lock:
-            self.events.setdefault(job_id, []).append(event)
+            if job_id not in self.events:
+                self.events[job_id] = []
+            self.events[job_id].append(event)
+            # return new cursor (len)
+            return len(self.events[job_id])
 
     async def get_events_since(self, job_id: str, last_idx: int | None) -> tuple[list[dict], int]:
         async with self.lock:
             buf = self.events.get(job_id, [])
-            start = (last_idx or -1) + 1
-            if start < 0:
-                start = 0
+            start = 0 if last_idx is None else last_idx
             new = buf[start:]
-            return new, (start + len(new) - 1)
+            return new, len(buf)
 
     async def get_job(self, job_id: str) -> Optional[JobInfo]:
         return self.jobs.get(job_id)
@@ -582,11 +584,7 @@ async def health_check():
 
 
 @app.websocket("/jobs/{job_id}/stream")
-async def websocket_endpoint(
-    websocket: WebSocket,
-    job_id: str,
-    job_mgr: JobManager = Depends(get_job_manager)
-):
+async def websocket_endpoint(websocket: WebSocket, job_id: str, job_mgr: JobManager = Depends(get_job_manager)):
     await websocket.accept()
     try:
         job = await job_mgr.get_job(job_id)
@@ -594,20 +592,15 @@ async def websocket_endpoint(
             await websocket.send_json({"error": f"Job {job_id} not found"})
             return
 
-        last_event_idx = -1 
         last_progress = None
+        last_event_idx = 0   # ← これが重要（送信済みカーソル）
         while True:
-            # 1. send new events, if any
+            # 1. only NEW events
             new_events, last_event_idx = await job_mgr.get_events_since(job_id, last_event_idx)
             for ev in new_events:
-                # Each event is a standalone message
-                await websocket.send_json({
-                    "job_id": job_id,
-                    "type": "event",
-                    "event": ev
-                })
+                await websocket.send_json({"type": "event", "event": ev})
 
-            # 2. send progress change
+            # 2. progress changed only
             job = await job_mgr.get_job(job_id)
             if not job:
                 break
@@ -631,7 +624,7 @@ async def websocket_endpoint(
                 })
                 break
 
-            await asyncio.sleep(0.25)
+            await asyncio.sleep(1)
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected for job {job_id}")
     except Exception:
