@@ -2,23 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   ChevronDown,
   ChevronUp,
-  ChevronLeft,
-  ChevronRight,
-  Upload,
   Send,
-  Square,
-  Play,
-  Download,
-  Trash2,
-  RefreshCw,
   CheckCircle,
-  XCircle,
-  AlertCircle,
-  Info,
   Eye,
   EyeOff,
   Loader,
-  Menu,
   X,
   Paperclip,
   PanelLeftOpen,
@@ -113,7 +101,14 @@ export default function ChaosEaterApp() {
     'ollama/qwen3:32b',
     'custom'
   ];
-
+  const defaultModel = 'openai/gpt-4o-2024-08-06';
+  const selectModelValue =
+    !formData.model || formData.model.trim() === ''
+      ? defaultModel
+      : models.includes(formData.model)
+        ? formData.model
+        : 'custom';
+  
   //--------------------------------------------------------------
   // cluster management
   //--------------------------------------------------------------
@@ -147,7 +142,7 @@ export default function ChaosEaterApp() {
       ? res.json()
       : res.text();
   }
-    
+
   // get clusters（/clusters?session_id=...）
   const loadClusters = async () => {
     try {
@@ -664,7 +659,7 @@ export default function ChaosEaterApp() {
                     paddingRight: '36px',
                     transition: 'border-color 0.2s ease'
                   }}
-                  value={formData.model}
+                  value={selectModelValue}
                   onChange={(e) => setFormData({...formData, model: e.target.value})}
                   onFocus={(e) => e.target.style.borderColor = '#374151'}
                   onBlur={(e) => e.target.style.borderColor = '#1f2937'}
@@ -674,6 +669,48 @@ export default function ChaosEaterApp() {
                   ))}
                 </select>
               </div>
+              
+              {selectModelValue === 'custom' && (
+                <div>
+                  <label style={{ fontSize: '12px', color: '#6b7280', fontWeight: '400', letterSpacing: '0.5px' }}>Custom model</label>
+                  <input
+                    type="text"
+                    placeholder="ollama/gpt-oss:20b"
+                    defaultValue={formData.model && !models.includes(formData.model) ? formData.model : ""}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        const val = e.currentTarget.value.trim();
+                        setFormData(prev => ({
+                          ...prev,
+                          model: val || defaultModel
+                        }));
+                      }
+                    }}
+                    onBlur={(e) => {
+                      const val = e.currentTarget.value.trim();
+                      setFormData(prev => ({
+                        ...prev,
+                        model: val || defaultModel
+                      }));
+                    }}
+                    style={{ 
+                      width: '100%', 
+                      marginTop: '4px', 
+                      padding: '10px 36px 10px 12px', 
+                      backgroundColor: '#0a0a0a', 
+                      borderRadius: '4px', 
+                      border: '1px solid #1f2937', 
+                      color: '#e5e7eb', 
+                      fontSize: '14px',
+                      outline: 'none',
+                      transition: 'border-color 0.2s ease',
+                      boxSizing: 'border-box',
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = '#374151')}
+                    onBlurCapture={(e) => (e.currentTarget.style.borderColor = '#1f2937')}
+                  />
+                </div>
+              )}
 
               {/* API Key */}
               {providerFromModel(formData.model) !== "ollama" && ( // Ollama does not require API key
