@@ -5,7 +5,7 @@ from ...hypothesis.hypothesizer import Hypothesis
 from ...experiment.experimenter import ChaosExperiment, ChaosExperimentResult
 from ...utils.wrappers import LLM, LLMBaseModel, LLMField
 from ...utils.llms import build_json_agent, LLMLog, LoggingCallback
-from ...utils.functions import dict_to_str, MessageLogger, StreamDebouncer
+from ...utils.functions import dict_to_str, MessageLogger
 
 
 SYS_ANALYZE_RESULT = """\
@@ -74,8 +74,6 @@ class AnalysisAgent:
         experiment_result: ChaosExperimentResult
     ) -> Tuple[LLMLog, str]: # NOTE: not Analysis, but str
         logger = LoggingCallback(name="analysis_experiment", llm=self.llm)
-        debouncer = StreamDebouncer()
-        empty = self.message_logger.placeholder()
         if len(reconfig_history) == 0:
             agent = build_json_agent(
                 llm=self.llm,
@@ -105,9 +103,7 @@ class AnalysisAgent:
             "experiment_result": experiment_result.to_str()},
             {"callbacks": [logger]}
         ):
-            if debouncer.should_update():
-                if (analysis := token.get("report")) is not None:
-                    empty.write(analysis)
-        analysis = token.get("report")
-        empty.write(analysis)
+            if (analysis := token.get("report")) is not None:
+                self.message_logger.stream(analysis)
+        self.message_logger.stream(analysis, final=True)
         return logger.log, analysis

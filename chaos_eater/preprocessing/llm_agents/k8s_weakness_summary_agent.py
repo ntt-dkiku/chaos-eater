@@ -3,7 +3,7 @@ from typing import List, Tuple
 from ...utils.wrappers import LLM, BaseModel, Field
 from ...utils.llms import build_json_agent, LoggingCallback, LLMLog
 from ...utils.schemas import File
-from ...utils.functions import MessageLogger, StreamDebouncer
+from ...utils.functions import MessageLogger
 
 
 #---------
@@ -60,15 +60,12 @@ class K8sWeaknessSummaryAgent:
 
     def summarize_weaknesses(self, k8s_yamls: List[File]) -> Tuple[LLMLog, str]:
         self.logger = LoggingCallback(name="k8s_summary", llm=self.llm)
-        debouncer = StreamDebouncer()
-        placeholder = self.message_logger.placeholder()
         for output in self.agent.stream(
             {"k8s_yamls": self.get_k8s_yamls_str(k8s_yamls)},
             {"callbacks": [self.logger]}
         ):
-            if debouncer.should_update():
-                placeholder.write(self.get_text(output))
-        placeholder.write(self.get_text(output))
+            self.message_logger.stream(self.get_text(output))
+        self.message_logger.stream(self.get_text(output), final=True)
         return self.logger.log, self.get_text(output)
     
     def get_text(self, output: dict) -> str:
@@ -76,14 +73,41 @@ class K8sWeaknessSummaryAgent:
         if (issues := output.get("issues")) is not None:
             for i, issue in enumerate(issues):
                 if (name := issue.get("issue_name")) is not None:
+                    # セクションタイトルは段落にする
                     text += f"Issue #{i}: {name}\n"
-                if (details := issue.get("issue_details")) is not None:
-                    text += f"  - details: {details}\n"
-                if (manifests := issue.get("manifests")) is not None:
-                    text += f"  - manifests having the issues: {manifests}\n"
-                if (config := issue.get("problematic_config")) is not None:
-                    text += f"  - problematic config: {config}\n\n"
+
+                # --- リストとして出したい部分は必ず空行を挟む ---
+                details = issue.get("issue_details")
+                manifests = issue.get("manifests")
+                config = issue.get("problematic_config")
+
+                if details or manifests or config:
+                    text += "\n"  # ← ここが重要（段落→リストの区切り）
+
+                if details is not None:
+                    text += f"- details: {details}\n"
+                if manifests is not None:
+                    text += f"- manifests having the issues: {manifests}\n"
+                if config is not None:
+                    text += f"- problematic config: {config}\n"
+
+                # 各 Issue ごとに段落を区切る
+                text += "\n"
         return text
+    
+    # def get_text(self, output: dict) -> str:
+    #     text = ""
+    #     if (issues := output.get("issues")) is not None:
+    #         for i, issue in enumerate(issues):
+    #             if (name := issue.get("issue_name")) is not None:
+    #                 text += f"Issue #{i}: {name}\n"
+    #             if (details := issue.get("issue_details")) is not None:
+    #                 text += f"- details: {details}\n"
+    #             if (manifests := issue.get("manifests")) is not None:
+    #                 text += f"- manifests having the issues: {manifests}\n"
+    #             if (config := issue.get("problematic_config")) is not None:
+    #                 text += f"- problematic config: {config}\n"
+    #     return text
 
     def get_k8s_yamls_str(self, k8s_yamls: List[File]) -> str:
         input_str = ""

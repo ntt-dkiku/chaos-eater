@@ -11,7 +11,8 @@ from ..utils.wrappers import LLM, BaseModel
 from ..utils.schemas import File
 from ..utils.k8s import wait_for_resources_ready
 from ..utils.llms import LLMLog
-from ..utils.streamlit import StreamlitDisplayHandler, Spinner
+from ..utils.streamlit import Spinner # StreamlitDisplayHandler
+from ..backend.streaming import FrontEndDisplayHandler
 from ..utils.functions import (
     write_file,
     save_json,
@@ -130,42 +131,41 @@ class PreProcessor:
         )
 
         # deploy the resources using skaffold
-        self.message_logger.write("##### K8s manifest(s) to be deployed:")
+        self.message_logger.write("#### K8s manifest(s) to be deployed:")
         for k8s_yaml in k8s_yamls:
-            self.message_logger.write(f"```{k8s_yaml.fname}```")
-            self.message_logger.code(k8s_yaml.content)
+            self.message_logger.code(k8s_yaml.content, language="yaml", filename=k8s_yaml.fname)
         if is_new_deployment:
-            spinner = Spinner(f"##### Deploying resources...")
+            spinner = Spinner(f"#### Deploying resources...")
             try:
                 run_command(
                     cmd=f"skaffold run --kube-context {kube_context} -l project={project_name}",
                     cwd=os.path.dirname(new_skaffold_yaml.path),
-                    display_handler=StreamlitDisplayHandler(self.message_logger)
+                    display_handler=FrontEndDisplayHandler(self.message_logger)
                 )
             except subprocess.CalledProcessError as e:
                 raise RuntimeError("K8s resource deployment failed.")
-            spinner.end(f"##### Deploying resources... Done")
+            spinner.end(f"#### Deploying resources... Done")
 
         # wait for all the resources to be deployed
         wait_for_resources_ready(label_selector=f"project={project_name}", context=kube_context)
         # display each resouce status
-        self.message_logger.write("##### Resource statuses")
+        self.message_logger.write("#### Resource statuses")
         run_command(
             cmd=f"kubectl get all --all-namespaces --context {kube_context} --selector=project={project_name}",
-            display_handler=StreamlitDisplayHandler(self.message_logger)
+            display_handler=FrontEndDisplayHandler(self.message_logger)
         )
 
         #-----------------------------
         # summarize each k8s manifest
         #-----------------------------
-        self.message_logger.write("##### Summary of each manifest:")
+        self.message_logger.write("#### Summary of each manifest:")
         summary_log, k8s_summaries = self.k8s_summary_agent.summarize_manifests(k8s_yamls=k8s_yamls)
         log.append(summary_log)
 
         #-----------------------------------------
         # summarize weakness points in the system
         #-----------------------------------------
-        self.message_logger.write("##### Resiliency issuses/weaknesses in the manifests:")
+        self.message_logger.write("#### Resiliency issuses/weaknesses in the manifests:")
         weakness_log, k8s_weakness_summary = self.k8s_weakness_summary_agent.summarize_weaknesses(k8s_yamls=k8s_yamls)
         log.append(weakness_log)
 
@@ -182,7 +182,7 @@ class PreProcessor:
         # )
         # log.append(depdency_token_usage)
 
-        self.message_logger.write("##### Application of the manifests:")
+        self.message_logger.write("#### Application of the manifests:")
         #---------------------------------------------
         # assume the application of the k8s manifests
         #---------------------------------------------
@@ -192,7 +192,7 @@ class PreProcessor:
         )
         log.append(app_token_usage)
 
-        self.message_logger.write("##### Summary of your instructions for Chaos Engineering:")
+        self.message_logger.write("#### Summary of your instructions for Chaos Engineering:")
         #----------------------------------------------
         # summarize instructions for Chaos Engineering
         #----------------------------------------------

@@ -1,5 +1,5 @@
 from collections import Counter
-from typing import List, Dict, Any, Tuple, Literal
+from typing import List, Tuple, Literal
 
 from ...preprocessing.preprocessor import ProcessedData
 from ...hypothesis.hypothesizer import Hypothesis
@@ -7,12 +7,10 @@ from ...ce_tools.ce_tool_base import CEToolBase
 from ...utils.wrappers import LLM, LLMBaseModel, LLMField, BaseModel
 from ...utils.llms import build_json_agent, LLMLog, LoggingCallback
 from ...utils.functions import (
-    pseudo_streaming_text,
     parse_time,
     add_timeunit,
     sanitize_k8s_name,
     MessageLogger,
-    StreamDebouncer
 )
 
 
@@ -200,31 +198,13 @@ class ExperimentPlanAgent:
         #-------------------
         # initialization
         #-------------------
-        plan_msg = self.message_logger.placeholder()
-        plan_container = self.get_plan_items()
-        pseudo_streaming_text("##### Planning a CE experiment...", obj=plan_msg)
+        self.message_logger.write("#### Planning a CE experiment")
         logger = LoggingCallback(name="experiment_plan", llm=self.llm)
-        debouncer = StreamDebouncer()
 
         #----------------------
         # plan a time schedule
-        #----------------------
-        def display_time_schedule(time_schedule: dict) -> Tuple[str, str, str, str, str]:
-            if (time_schedule_thought := time_schedule.get("thought")) is not None:
-                plan_container["time_schedule_thought"].write(time_schedule_thought)
-            if (total_time := time_schedule.get("total_time")) is not None:
-                plan_container["total_time"].write(f"Total experiment time: ```{total_time}```")
-            if (pre_validation_time := time_schedule.get("pre_validation_time")) is not None:
-                plan_container["pre_validation_time"].write(f"Pre-validation Phase: ```{pre_validation_time}```")
-                plan_container["pre_validation_header"].write(f"###### :blue-background[Pre-validation Phase ({pre_validation_time})]")
-            if (fault_injection_time := time_schedule.get("fault_injection_time")) is not None:
-                plan_container["fault_injection_time"].write(f"Fault-injection Phase: ```{fault_injection_time}```")
-                plan_container["fault_injection_header"].write(f"###### :red-background[Fault-injection Phase ({fault_injection_time})]")
-            if (post_validation_time := time_schedule.get("post_validation_time")) is not None:
-                plan_container["post_validation_time"].write(f"Post-validation Phase: ```{post_validation_time}```")
-                plan_container["post_validation_header"].write(f"###### :green-background[Post-validation Phase ({post_validation_time})]")
-            return time_schedule_thought, total_time, pre_validation_time, fault_injection_time, post_validation_time
-
+        #----------------------    
+        self.message_logger.write("##### :grey-background[Time Schedule]")
         for time_schedule in self.time_schedule_agent.stream({
             "user_input": data.to_k8s_overview_str(),
             "ce_instructions": data.ce_instructions,
@@ -232,13 +212,24 @@ class ExperimentPlanAgent:
             "fault_scenario": hypothesis.fault.to_overview_str()},
             {"callbacks": [logger]}
         ):
-            if debouncer.should_update():
-                display_time_schedule(time_schedule)
-        time_schedule_thought, total_time, pre_validation_time, fault_injection_time, post_validation_time = display_time_schedule(time_schedule)
+            text = ""
+            if (time_schedule_thought := time_schedule.get("thought")) is not None:
+                text += f"{time_schedule_thought}\n"
+            if (total_time := time_schedule.get("total_time")) is not None:
+                text += f"Total experiment time: `{total_time}`\n"
+            if (pre_validation_time := time_schedule.get("pre_validation_time")) is not None:
+                text += f"Pre-validation Phase: `{pre_validation_time}`\n"
+            if (fault_injection_time := time_schedule.get("fault_injection_time")) is not None:
+                text += f"Fault-injection Phase: `{fault_injection_time}`\n"
+            if (post_validation_time := time_schedule.get("post_validation_time")) is not None:
+                text += f"Post-validation Phase: `{post_validation_time}`\n"
+            self.message_logger.stream(text)
+        self.message_logger.stream(text, final=True)
 
         #---------------------------------------------------------------------------
         # plan pre-validation, fault-injection, post-validation phases sequentially
         #---------------------------------------------------------------------------
+        self.message_logger.write(f"##### :blue-background[Pre-validation Phase ({pre_validation_time})]")
         for pre_validation_plan in self.pre_validation_agent.stream({
             "user_input": data.to_k8s_overview_str(),
             "ce_instructions": data.ce_instructions,
@@ -248,10 +239,11 @@ class ExperimentPlanAgent:
             "phase_total_time": pre_validation_time},
             {"callbacks": [logger]}
         ):
-            if debouncer.should_update():
-                self.display_phase_overview(pre_validation_plan, "pre_validation", plan_container)
-        self.display_phase_overview(pre_validation_plan, "pre_validation", plan_container)
+            pre_validation_overview = self.get_phase_overview_str(pre_validation_plan, "pre_validation")
+            self.message_logger.stream(pre_validation_overview)
+        self.message_logger.stream(pre_validation_overview, final=True)
 
+        self.message_logger.write(f"##### :red-background[Fault-injection Phase ({fault_injection_time})]")
         for fault_injection_plan in self.fault_injection_agent.stream({
             "user_input": data.to_k8s_overview_str(),
             "ce_instructions": data.ce_instructions,
@@ -261,10 +253,11 @@ class ExperimentPlanAgent:
             "phase_total_time": fault_injection_time},
             {"callbacks": [logger]}
         ):
-            if debouncer.should_update():
-                self.display_phase_overview(fault_injection_plan, "fault_injection", plan_container)
-        self.display_phase_overview(fault_injection_plan, "fault_injection", plan_container)
+            fault_injection_overview = self.get_phase_overview_str(fault_injection_plan, "fault_injection")
+            self.message_logger.stream(fault_injection_overview)
+        self.message_logger.stream(fault_injection_overview, final=True)
 
+        self.message_logger.write(f"##### :green-background[Post-validation Phase ({post_validation_time})]")
         for post_validation_plan in self.post_validation_agent.stream({
             "user_input": data.to_k8s_overview_str(),
             "ce_instructions": data.ce_instructions,
@@ -274,9 +267,9 @@ class ExperimentPlanAgent:
             "phase_total_time": post_validation_time},
             {"callbacks": [logger]}    
         ):
-            if debouncer.should_update():
-                self.display_phase_overview(post_validation_plan, "post_validation", plan_container)
-        self.display_phase_overview(post_validation_plan, "post_validation", plan_container)
+            post_validation_overview = self.get_phase_overview_str(post_validation_plan, "post_validation")
+            self.message_logger.stream(post_validation_overview)
+        self.message_logger.stream(post_validation_overview, final=True)
 
         #-------------------
         # add workflow name
@@ -285,13 +278,11 @@ class ExperimentPlanAgent:
         self.add_workflowname_and_deadline(fault_injection_plan, "fault_injection", "unittest")
         self.add_workflowname_and_deadline(fault_injection_plan, "fault_injection", "fault_injection")
         self.add_workflowname_and_deadline(post_validation_plan, "post_validation", "unittest")
-        pre_validation_overview = self.display_phase_overview(pre_validation_plan, "pre_validation", plan_container)
-        fault_injection_overview = self.display_phase_overview(fault_injection_plan, "fault_injection", plan_container)
-        post_validation_overview = self.display_phase_overview(post_validation_plan, "post_validation", plan_container)
 
         #---------------------------------------
         # summary (used for the analysis phase)
         #---------------------------------------
+        self.message_logger.write("##### :gray-background[Summary]")
         for summary in self.summary_agent.stream({
             "time_schedule_overview": time_schedule_thought,
             "pre_validation_overview": pre_validation_overview,
@@ -299,11 +290,9 @@ class ExperimentPlanAgent:
             "post_validation_overview": post_validation_overview},
             {"callbacks": [logger]}
         ):
-            if debouncer.should_update():
-                if (summary_str := summary.get("summary")) is not None:
-                    plan_container["summary"].write(summary_str)
-        summary_str = summary.get("summary")
-        plan_container["summary"].write(summary_str)
+            if (summary_str := summary.get("summary")) is not None:
+                self.message_logger.stream(summary_str)
+        self.message_logger.stream(summary_str, final=True)
 
         #----------
         # epilogue
@@ -312,7 +301,6 @@ class ExperimentPlanAgent:
         self.add_fpath_to_unittests([pre_validation_plan, fault_injection_plan, post_validation_plan], hypothesis)
         # for faults
         self.add_params_to_faults([fault_injection_plan], hypothesis)
-        pseudo_streaming_text("##### CE experiment Planning Completed!", obj=plan_msg)
         return (
             logger.log, 
             ChaosExperimentPlan(
@@ -372,61 +360,21 @@ class ExperimentPlanAgent:
                         if fault_injection["name"] == fault.name and fault_injection["name_id"] == fault.name_id:
                             fault_injection["params"] = fault.params
 
-    def get_plan_items(self) -> Dict[str, Any]:
-        plan_items = {}
-        plan_items["header"] = self.message_logger.placeholder()
-        expander = plan_items["header"].expander("##### Chaos Engineering Experiment Plan", expanded=True)
-        # time schedule
-        time_container = expander.container(border=True)
-        time_container.write("###### :grey-background[Time Schedule]")
-        plan_items["time_schedule_thought"] = time_container.placeholder()
-        plan_items["total_time"] = time_container.placeholder()
-        plan_items["pre_validation_time"] = time_container.placeholder()
-        plan_items["fault_injection_time"] = time_container.placeholder()
-        plan_items["post_validation_time"] = time_container.placeholder()
-        # pre-validation
-        pre_container = expander.container(border=True)
-        plan_items["pre_validation_header"] = pre_container.placeholder()
-        plan_items["pre_validation_header"].write("###### :blue-background[Pre-validation Phase]")
-        plan_items["pre_validation_thought"] = pre_container.placeholder()
-        plan_items["pre_validation_unittests"] = pre_container.placeholder()
-        # fault-injection
-        fault_container = expander.container(border=True)
-        plan_items["fault_injection_header"] = fault_container.placeholder()
-        plan_items["fault_injection_header"].write("###### :red-background[Fault-injection Phase]")
-        plan_items["fault_injection_thought"] = fault_container.placeholder()
-        plan_items["fault_injection_unittests"] = fault_container.placeholder()
-        plan_items["fault_injection_faults"] = fault_container.placeholder()
-        # post-validation
-        post_container = expander.container(border=True)
-        plan_items["post_validation_header"] = post_container.placeholder()
-        plan_items["post_validation_header"].write("###### :green-background[Post-validation Phase]")
-        plan_items["post_validation_thought"] = post_container.placeholder()
-        plan_items["post_validation_unittests"] = post_container.placeholder()
-        # summary
-        sum_container = expander.container(border=True)
-        sum_container.write("###### :gray-background[Summary]")
-        plan_items["summary"] = sum_container.placeholder()
-        return plan_items
-    
-    def display_phase_overview(
+
+    def get_phase_overview_str(
         self,
         plan: dict,
         phase_name: Literal["pre_validation", "fault_injection", "post_validation"],
-        plan_container: dict
     ) -> str:
+        thought = plan.get("thought", "")
         unittests_str = ""
         fault_str = ""
-        if (thought := plan.get("thought")) is not None:
-            plan_container[f"{phase_name}_thought"].write(thought)
         if (unittests := plan.get("unit_tests")) is not None:
             unittests_str = self.get_task_overview_str(unittests, "unittest")
-            plan_container[f"{phase_name}_unittests"].write(unittests_str)
         if phase_name != "fault_injection":
             return f"{thought}\n{unittests_str}"
         if (fault_injections := plan.get("fault_injection")) is not None:
             fault_str = self.get_task_overview_str(fault_injections, "fault_injection")
-            plan_container["fault_injection_faults"].write(fault_str)
         return f"{thought}\n{unittests_str}\n\n{fault_str}"
 
     def get_task_overview_str(
@@ -438,11 +386,11 @@ class ExperimentPlanAgent:
         tasks_str = ""
         for i, task in enumerate(tasks):
             if (name := task.get("name")) is not None:
-                tasks_str += f"- {header} #{i}: ```{name}```  \n"
+                tasks_str += f"- {header} #{i}: `{name}`\n"
             if (workflow_name := task.get("workflow_name")) is not None:
-                tasks_str += f"  - Workflow Name: ```{workflow_name}```  \n"
+                tasks_str += f"  - Workflow Name: `{workflow_name}`\n"
             if (grace_period := task.get("grace_period")) is not None:
-                tasks_str += f"  - Grace Period: ```{grace_period}```  \n"
+                tasks_str += f"  - Grace Period: `{grace_period}`\n"
             if (duration := task.get("duration")) is not None:
-                tasks_str += f"  - Duration: ```{duration}```  \n"
+                tasks_str += f"  - Duration: `{duration}`\n"
         return tasks_str

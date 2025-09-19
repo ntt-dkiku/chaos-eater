@@ -13,7 +13,8 @@ from .ce_tools.ce_tool_base import CEToolBase
 from .utils.constants import SKAFFOLD_YAML_TEMPLATE_PATH
 from .utils.wrappers import BaseModel, LLM
 from .utils.llms import LLMLog
-from .utils.streamlit import StreamlitDisplayHandler, Spinner
+from .utils.streamlit import Spinner
+from .backend.streaming import FrontEndDisplayHandler
 from .utils.k8s import remove_all_resources_by_labels, remove_all_resources_by_namespace
 from .utils.schemas import File
 from .utils.callbacks import ChaosEaterCallback
@@ -85,13 +86,13 @@ class ChaosEater:
         remove_all_resources_by_namespace(
             kube_context,
             self.namespace,
-            display_handler=StreamlitDisplayHandler(self.message_logger)
+            display_handler=FrontEndDisplayHandler(self.message_logger)
         )
         if clean_cluster_before_run:
             remove_all_resources_by_labels(
                 kube_context,
                 f"project={project_name}",
-                display_handler=StreamlitDisplayHandler(self.message_logger)
+                display_handler=FrontEndDisplayHandler(self.message_logger)
             )
         spinner.end(f"##### Cleaning the cluster ```{kube_context}```... Done")
         # prepare a working directory
@@ -192,7 +193,7 @@ class ChaosEater:
 
             # check if the hypothesis is satisfied
             if experiment_result.all_tests_passed:
-                self.message_logger.write("##### Your k8s yaml already has good resilience!!!")
+                self.message_logger.write("### Your k8s yaml already has good resilience!!!")
                 break
             
             # set flag
@@ -340,7 +341,7 @@ class ChaosEater:
                 run_command(
                     cmd=f"skaffold run --kube-context {kube_context} -l project={project_name}",
                     cwd=os.path.dirname(new_skaffold_path),
-                    display_handler=StreamlitDisplayHandler(self.message_logger)
+                    display_handler=FrontEndDisplayHandler(self.message_logger)
                 )
             except subprocess.CalledProcessError as e:
                 raise RuntimeError("K8s resource deployment failed.")
@@ -348,7 +349,7 @@ class ChaosEater:
             self.message_logger.write("##### Resource statuses")
             run_command(
                 cmd=f"kubectl get all --all-namespaces --context {kube_context} --selector=project={project_name}",
-                display_handler=StreamlitDisplayHandler(self.message_logger)
+                display_handler=FrontEndDisplayHandler(self.message_logger)
             )
 
             #------------------------------------------------------
@@ -401,6 +402,6 @@ class ChaosEater:
             remove_all_resources_by_labels(
                 kube_context,
                 f"project={project_name}",
-                display_handler=StreamlitDisplayHandler(self.message_logger)
+                display_handler=FrontEndDisplayHandler(self.message_logger)
             )
         return ce_output

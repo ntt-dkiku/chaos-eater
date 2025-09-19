@@ -2,3 +2,4 @@ __pycache__/
 sandbox/
 old/
 .ipynb_checkpoints
+.env

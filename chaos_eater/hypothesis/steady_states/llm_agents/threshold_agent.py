@@ -4,8 +4,7 @@ from .inspection_agent import Inspection
 from ....preprocessing.preprocessor import ProcessedData
 from ....utils.wrappers import LLM, LLMBaseModel, LLMField
 from ....utils.llms import build_json_agent, LLMLog, LoggingCallback
-from ....utils.streamlit import StreamlitContainer
-from ....utils.functions import StreamDebouncer
+from ....utils.functions import MessageLogger
 
 
 #---------
@@ -48,7 +47,11 @@ class Threshold(LLMBaseModel):
 # agent definition
 #------------------
 class ThresholdAgent:
-    def __init__(self, llm: LLM) -> None:
+    def __init__(
+        self,
+        llm: LLM,
+        message_logger: MessageLogger
+    ) -> None:
         self.llm = llm
         self.agent = build_json_agent(
             llm=llm,
@@ -56,30 +59,17 @@ class ThresholdAgent:
             pydantic_object=Threshold,
             is_async=False
         )
-    
+        self.message_logger = message_logger
+
     def define_threshold(
         self,
         input_data: ProcessedData,
         steady_state_draft: Dict[str, str],
         inspection: Inspection,
-        predefined_steady_states: list,
-        display_container: StreamlitContainer,
+        predefined_steady_states: list
     ) -> Tuple[LLMLog, Dict[str, str]]:
         logger = LoggingCallback(name="threshold_definition", llm=self.llm)
-        debouncer = StreamDebouncer()
-        display_container.create_subcontainer(id="threshold", header="##### 🚩 Threshold")
-        display_container.create_subsubcontainer(subcontainer_id="threshold", subsubcontainer_id=f"threshold_thought")
-        display_container.create_subsubcontainer(subcontainer_id="threshold", subsubcontainer_id=f"threshold")
-        
-        def display_responce(responce: dict) -> Tuple[str, str]:
-            if (thought := responce.get("thought")) is not None:
-                display_container.update_subsubcontainer(thought, "threshold_thought")
-                steady_state_draft["threshold_reason"] = thought
-            if (threshold := responce.get("threshold")) is not None:
-                display_container.update_subsubcontainer(threshold, "threshold")
-                steady_state_draft["threshold"] = threshold
-            return thought, threshold
-        
+        self.message_logger.write("#### 🚩 Threshold\n")
         for responce in self.agent.stream({
             "user_input": input_data.to_k8s_overview_str(),
             "ce_instructions": input_data.ce_instructions,
@@ -88,7 +78,13 @@ class ThresholdAgent:
             "inspection_summary": inspection.to_str()},
             {"callbacks": [logger]}
         ):
-            if debouncer.should_update():
-                display_responce(responce)
-        thought, threshold = display_responce(responce)
+            text = ""
+            if (thought := responce.get("thought")) is not None:
+                text += f"`Thoughts`:\n{thought}\n"
+                steady_state_draft["threshold_reason"] = thought
+            if (threshold := responce.get("threshold")) is not None:
+                text += f"`Threshold`:\n{threshold}"
+                steady_state_draft["threshold"] = threshold
+            self.message_logger.stream(text)
+        self.message_logger.stream(text, final=True)
         return logger.log, {"threshold": threshold, "reason": thought}

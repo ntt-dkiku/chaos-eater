@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  chaos-eater:
+    image: chaos-eater/kind-in-dind-sandbox:0.1
+    container_name: chaos-eater
+    network_mode: bridge
+    privileged: true
+    volumes:
+      - ..:/app
+    ports:
+      - "${CHAOSEATER_GUI_PORT}:${CHAOSEATER_GUI_PORT}"
+      - "${CHAOSEATER_API_PORT}:${CHAOSEATER_API_PORT}"
+      - "${CHAOSMESH_GUI_PORT}:${CHAOSMESH_GUI_PORT}"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+    stdin_open: true
+    tty: true

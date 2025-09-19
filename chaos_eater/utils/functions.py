@@ -488,7 +488,7 @@ class MessageLogger:
             json.dump(self.messages, f, ensure_ascii=False, indent=2)
 
 class StreamDebouncer:
-    def __init__(self, interval: float = 0.5):
+    def __init__(self, interval: float = 0):
         self.interval = interval
         self.last_update_time = 0
 

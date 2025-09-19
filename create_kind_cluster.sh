@@ -71,8 +71,6 @@ kubectl apply -n kube-system -f https://github.com/kubernetes-sigs/metrics-serve
 # build and load the docker image for k8s api pod used by ChaosEater
 docker build -t chaos-eater/k8sapi:1.0 -f docker/Dockerfile_k8sapi .
 kind load docker-image chaos-eater/k8sapi:1.0 --name ${CLUSTER_NAME}
-# docker image for 
-docker build -f docker/Dockerfile_llm -t chaos-eater/chaos-eater:1.0 .
 
 #------------
 # Chaos Mesh
@@ -104,79 +102,58 @@ echo "To stop the port-forward process, use: kill ${PORT_FORWARD_PID}"
 #-----------------------------------
 # launch ollama server if requested
 #-----------------------------------
-if [ "${OLLAMA}" = "True" ]; then
-    echo "Starting Ollama container..."
-    docker run -d \
-        --name ollama \
-        -p 11434:11434 \
-        -v ollama_data:/root/.ollama \
-        ollama/ollama:latest
-fi
+docker compose -f docker/docker-compose.yaml up --build
 
-#-------------------------------
-# launch ChaosEater's container
-#-------------------------------
-if [ "${DEVELOP}" = "True" ]; then
-    docker run --rm \
-        -v .:/app/ \
-        -v ~/.kube/config:/root/.kube/config \
-        -v $(which kubectl):/usr/local/bin/kubectl \
-        -v $(which skaffold):/usr/local/bin/skaffold \
-        -v $(which kind):/usr/local/bin/kind \
-        -v ~/.krew/bin/kubectl-graph:/root/.krew/bin/kubectl-graph \
-        -v /workspace:/workspace \
-        -v /var/run/docker.sock:/var/run/docker.sock \
-        -e PATH="/root/.krew/bin:$PATH" \
-        -e OPENAI_API_KEY="${OPENAI_API_KEY}" \
-        -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
-        -e GOOGLE_API_KEY="${GOOGLE_API_KEY}" \
-        -d \
-        --name chaos-eater \
-        --network host \
-        chaos-eater/chaos-eater:1.0 \
-        bash -c "redis-server --daemonize yes && tail -f /dev/null"
-else
-    docker run --rm \
-        -v .:/app/ \
-        -v ~/.kube/config:/root/.kube/config \
-        -v $(which kubectl):/usr/local/bin/kubectl \
-        -v $(which skaffold):/usr/local/bin/skaffold \
-        -v $(which kind):/usr/local/bin/kind \
-        -v ~/.krew/bin/kubectl-graph:/root/.krew/bin/kubectl-graph \
-        -v /var/run/docker.sock:/var/run/docker.sock \
-        -e PATH="/root/.krew/bin:$PATH" \
-        -e OPENAI_API_KEY="${OPENAI_API_KEY}" \
-        -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
-        -e GOOGLE_API_KEY="${GOOGLE_API_KEY}" \
-        -d \
-        --name chaos-eater \
-        --network host \
-        chaos-eater/chaos-eater:1.0 \
-        bash -c "redis-server --daemonize yes; streamlit run ChaosEater_demo.py --server.port ${PORT} --server.fileWatcherType none"
-fi
-# COMMON_RUN_OPTS=(
-#     -d --rm
-#     --name chaos-eater
-#     --network host
-#     -v .:/app
-#     -v "$HOME/.kube/config:/root/.kube/config"
-#     -v "$(which kubectl):/usr/local/bin/kubectl"
-#     -v "$(which skaffold):/usr/local/bin/skaffold"
-#     -v "$(which kind):/usr/local/bin/kind"
-#     -v "$HOME/.krew/bin/kubectl-graph:/root/.krew/bin/kubectl-graph"
-#     -v /var/run/docker.sock:/var/run/docker.sock
-#     -e "PATH=/root/.krew/bin:$PATH"
-#     -e "OPENAI_API_KEY=$OPENAI_API_KEY"
-#     -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY"
-#     -e "GOOGLE_API_KEY=$GOOGLE_API_KEY"
-# )
-# if [ "${DEVELOP}" = "True" ]; then
-#   COMMON_RUN_OPTS+=(-v /workspace:/workspace)
-#   RUN_CMD='bash -c "redis-server --daemonize yes && tail -f /dev/null"'
-# else
-#   RUN_CMD='bash -c "redis-server --daemonize yes; streamlit run ChaosEater_demo.py --server.port '"${PORT}"' --server.fileWatcherType none"'
+
+# if [ "${OLLAMA}" = "True" ]; then
+#     echo "Starting Ollama container..."
+#     docker run -d \
+#         --name ollama \
+#         -p 11434:11434 \
+#         -v ollama_data:/root/.ollama \
+#         ollama/ollama:latest
 # fi
-# docker run "${COMMON_RUN_OPTS[@]}" chaos-eater/chaos-eater:1.0 ${RUN_CMD}
+# #-------------------------------
+# # launch ChaosEater's container
+# #-------------------------------
+# if [ "${DEVELOP}" = "True" ]; then
+#     docker run --rm \
+#         -v .:/app/ \
+#         -v ~/.kube/config:/root/.kube/config \
+#         -v $(which kubectl):/usr/local/bin/kubectl \
+#         -v $(which skaffold):/usr/local/bin/skaffold \
+#         -v $(which kind):/usr/local/bin/kind \
+#         -v ~/.krew/bin/kubectl-graph:/root/.krew/bin/kubectl-graph \
+#         -v /workspace:/workspace \
+#         -v /var/run/docker.sock:/var/run/docker.sock \
+#         -e PATH="/root/.krew/bin:$PATH" \
+#         -e OPENAI_API_KEY="${OPENAI_API_KEY}" \
+#         -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
+#         -e GOOGLE_API_KEY="${GOOGLE_API_KEY}" \
+#         -d \
+#         --name chaos-eater \
+#         --network host \
+#         chaos-eater/chaos-eater:1.0 \
+#         bash -c "redis-server --daemonize yes && tail -f /dev/null"
+# else
+#     docker run --rm \
+#         -v .:/app/ \
+#         -v ~/.kube/config:/root/.kube/config \
+#         -v $(which kubectl):/usr/local/bin/kubectl \
+#         -v $(which skaffold):/usr/local/bin/skaffold \
+#         -v $(which kind):/usr/local/bin/kind \
+#         -v ~/.krew/bin/kubectl-graph:/root/.krew/bin/kubectl-graph \
+#         -v /var/run/docker.sock:/var/run/docker.sock \
+#         -e PATH="/root/.krew/bin:$PATH" \
+#         -e OPENAI_API_KEY="${OPENAI_API_KEY}" \
+#         -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
+#         -e GOOGLE_API_KEY="${GOOGLE_API_KEY}" \
+#         -d \
+#         --name chaos-eater \
+#         --network host \
+#         chaos-eater/chaos-eater:1.0 \
+#         bash -c "redis-server --daemonize yes; streamlit run ChaosEater_demo.py --server.port ${PORT} --server.fileWatcherType none"
+# fi
 
 #----------
 # epilogue

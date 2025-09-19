@@ -18,9 +18,3 @@ WORKDIR /app
 COPY . .
 RUN chmod +x create_environment.sh
 RUN ./create_environment.sh
-
-#----------------------------
-# copy the entrypoint script
-#----------------------------
-COPY create_kind_cluster.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh

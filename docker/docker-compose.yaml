@@ -24,7 +24,7 @@ services:
       - ~/.krew/bin/kubectl-graph:/root/.krew/bin/kubectl-graph:ro
       # for dood
       - /var/run/docker.sock:/var/run/docker.sock
-    command: uvicorn chaos_eater.backend.api:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn chaos_eater.backend.api:app --host 0.0.0.0 --port 8000 --reload --reload-dir chaos_eater 
   
   chaos-eater-frontend:
     build:
@@ -52,6 +52,28 @@ services:
       - chaos-network
     volumes:
       - redis-data:/data
+
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: chaos-eater-ollama
+  #   environment:
+  #     - OLLAMA_HOST=0.0.0.0
+  #     - NVIDIA_VISIBLE_DEVICES=all
+  #     - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+  #     - LOG_LEVEL=debug
+  #   volumes:
+  #     - ${HOME}/.ollama:/root/.ollama
+  #   ports:
+  #     - "11434:11434"
+  #   restart: unless-stopped
+  #   runtime: nvidia
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: all
+  #             capabilities: [gpu]
 
 networks:
   chaos-network:

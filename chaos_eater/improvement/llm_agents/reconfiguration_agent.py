@@ -20,7 +20,6 @@ from ...utils.functions import (
     limit_string_length,
     remove_curly_braces,
     MessageLogger,
-    StreamDebouncer
 )
 from ...utils.schemas import File
 from ...utils.k8s import remove_all_resources_by_labels
@@ -315,6 +314,9 @@ class ReconfigurationAgent:
         reconfig_history: List[ReconfigurationResult],
         logger: LoggingCallback
     ) -> dict:
+        #----------------------
+        # prompt configuration
+        #----------------------
         result_history0 = result_history[0]
         chat_messages = [("system", SYS_RECONFIGURE_K8S_YAML), ("human", USER_RECONFIGURE_K8S_YAML1)]
         for i in range(len(analysis_history)-1):
@@ -343,43 +345,33 @@ class ReconfigurationAgent:
             pydantic_object=ModK8sYAMLs,
             is_async=False
         )
-        expander = self.message_logger.expander("##### Reconfiguration", expanded=True) 
-        thought_box = expander.placeholder()
-        k8s_box = []
-        debouncer = StreamDebouncer()
 
-        def display_response(response: dict) -> None:
-            if (thought := response.get("thought")) is not None:
-                thought_box.write(thought)
-            if (modified_k8s_yamls := response.get("modified_k8s_yamls")) is not None:
-                for i, mod_k8s_yaml in enumerate(modified_k8s_yamls):
-                    if i + 1 > len(k8s_box):
-                        k8s_box.append({
-                            "mod_type": expander.placeholder(),
-                            "fname": expander.placeholder(),
-                            "explanation": expander.placeholder(),
-                            "code": expander.placeholder(),
-                        })
-                    if (mod_type := mod_k8s_yaml.get("mod_type")) is not None:
-                        k8s_box[i]["mod_type"].write(f"Modification_type: {mod_type}")
-                    if (fname := mod_k8s_yaml.get("fname")) is not None:
-                        k8s_box[i]["fname"].write(f"File name: {fname}")
-                    if (explanation := mod_k8s_yaml.get("explanation")) is not None:
-                        k8s_box[i]["explanation"].write(explanation)
-                    if (code := mod_k8s_yaml.get("code")) is not None:
-                        k8s_box[i]["code"].code(code, language="yaml")
-
-        for mod_k8s_yamls in agent.stream({
+        #--------
+        # output
+        #--------
+        self.message_logger.write("#### Reconfiguration") 
+        for response in agent.stream({
             "system_overview": input_data.to_k8s_overview_str(),
             "hypothesis_overview": hypothesis.to_str(),
             "experiment_plan_summary": experiment.plan["summary"],
             "experiment_result": result_history0.to_str()},
             {"callbacks": [logger]}
         ):
-            if debouncer.should_update():
-                display_response(mod_k8s_yamls)
-        display_response(mod_k8s_yamls)
-        return mod_k8s_yamls
+            text = ""
+            if (thought := response.get("thought")) is not None:
+                text += f"{thought}\n"
+            if (modified_k8s_yamls := response.get("modified_k8s_yamls")) is not None:
+                for i, mod_k8s_yaml in enumerate(modified_k8s_yamls):
+                    if (mod_type := mod_k8s_yaml.get("mod_type")) is not None:
+                        text += f"Modification_type: `{mod_type}`\n"
+                    if (explanation := mod_k8s_yaml.get("explanation")) is not None:
+                        text += f"{explanation}\n"
+                    if (fname := mod_k8s_yaml.get("fname")) is not None:
+                        if (code := mod_k8s_yaml.get("code")) is not None:
+                            text += f"```yaml {fname}\n{code}\n```"
+            self.message_logger.stream(text)
+        self.message_logger.stream(text, final=True)
+        return response
     
     def debug_reconfig_yamls(
         self,
@@ -394,8 +386,14 @@ class ReconfigurationAgent:
         output_history: List[dict] = [],
         error_history: List[str] = [],
     ) -> dict:
+        #----------------------
+        # prompt configuration
+        #----------------------
         result_history0 = result_history[0]
-        chat_messages = [("system", SYS_RECONFIGURE_K8S_YAML), ("human", USER_RECONFIGURE_K8S_YAML1)]
+        chat_messages = [
+            ("system", SYS_RECONFIGURE_K8S_YAML),
+            ("human", USER_RECONFIGURE_K8S_YAML1)
+        ]
         for i in range(len(analysis_history)-1):
             if i > 0:
                 chat_messages.append(
@@ -404,9 +402,20 @@ class ReconfigurationAgent:
                         SYS_REPORT_RESULTS.replace("{mod_experiment_result}", result_history[i].to_str()).replace("{mod_version}", str(i+1)).replace("{mod_k8s_yamls}", file_list_to_str(k8s_yamls_history[i]))
                     )
                 )
-            chat_messages.append(("ai", AI_ANALYZE_RESULT.replace("{analysis_report}", analysis_history[i].report)))
-            chat_messages.append(("human", USER_RECONFIGURE_K8S_YAML2))
-            chat_messages.append(("ai", AI_RECONFIGURE_K8S_YAML.replace("{output}", dict_to_str(reconfig_history[i].mod_k8s_yamls))))
+            chat_messages.append(
+                (
+                    "ai",
+                    AI_ANALYZE_RESULT.replace("{analysis_report}", analysis_history[i].report)
+                )
+            )
+            chat_messages.append(("human",USER_RECONFIGURE_K8S_YAML2)
+            )
+            chat_messages.append(
+                (
+                    "ai",
+                    AI_RECONFIGURE_K8S_YAML.replace("{output}", dict_to_str(reconfig_history[i].mod_k8s_yamls))
+                )
+            )
         if len(result_history) > 1:
             chat_messages.append(
                 (
@@ -414,52 +423,55 @@ class ReconfigurationAgent:
                     SYS_REPORT_RESULTS.replace("{mod_experiment_result}", result_history[-1].to_str()).replace("{mod_version}", str(len(result_history))).replace("{mod_k8s_yamls}", file_list_to_str(k8s_yamls_history[-1]))
                 )
             )
-        chat_messages.append(("ai", AI_ANALYZE_RESULT.replace("{analysis_report}", analysis_history[-1].report)))
+        chat_messages.append(
+            (
+                "ai",
+                AI_ANALYZE_RESULT.replace("{analysis_report}", analysis_history[-1].report)
+            )
+        )
         chat_messages.append(("human", USER_RECONFIGURE_K8S_YAML2))
         for output, error in zip(output_history, error_history):
             chat_messages.append(("ai", dict_to_str(output)))
-            chat_messages.append(("human", USER_DEBUG_RECONFIGURATEION.replace("{error_message}", error.replace('{', '{{').replace('}', '}}'))))
-
+            chat_messages.append(
+                (
+                    "human",
+                    USER_DEBUG_RECONFIGURATEION.replace("{error_message}", error.replace('{', '{{').replace('}', '}}'))
+                )
+            )
+        
+        #------------------
+        # agent definition
+        #------------------
         agent = build_json_agent(
             llm=self.llm,
             chat_messages=chat_messages,
             pydantic_object=ModK8sYAMLs,
             is_async=False
         )
-        expander = self.message_logger.expander("##### Reconfiguration", expanded=True)
-        thought_box = expander.placeholder()
-        k8s_box = []
-        debouncer = StreamDebouncer()
 
-        def display_responce(response: dict) -> None:
-            if (thought := response.get("thought")) is not None:
-                thought_box.write(thought)
-            if (modified_k8s_yamls := response.get("modified_k8s_yamls")) is not None:
-                for i, mod_k8s_yaml in enumerate(modified_k8s_yamls):
-                    if i + 1 > len(k8s_box):
-                        k8s_box.append({
-                            "mod_type": expander.placeholder(),
-                            "fname": expander.placeholder(),
-                            "explanation": expander.placeholder(),
-                            "code": expander.placeholder(),
-                        })
-                    if (mod_type := mod_k8s_yaml.get("mod_type")) is not None:
-                        k8s_box[i]["mod_type"].write(f"Modification_type: {mod_type}")
-                    if (fname := mod_k8s_yaml.get("fname")) is not None:
-                        k8s_box[i]["fname"].write(f"File name: {fname}")
-                    if (explanation := mod_k8s_yaml.get("explanation")) is not None:
-                        k8s_box[i]["explanation"].write(explanation)
-                    if (code := mod_k8s_yaml.get("code")) is not None:
-                        k8s_box[i]["code"].code(code, language="yaml")
-
-        for mod_k8s_yamls in agent.stream({
+        #--------
+        # output
+        #--------
+        self.message_logger.write("#### Reconfiguration")
+        for response in agent.stream({
             "system_overview": input_data.to_k8s_overview_str(),
             "hypothesis_overview": hypothesis.to_str(),
             "experiment_plan_summary": experiment.plan["summary"],
             "experiment_result": result_history0.to_str()},
             {"callbacks": [logger]}
         ):
-            if debouncer.should_update():
-                display_responce(mod_k8s_yamls)
-        display_responce(mod_k8s_yamls)
-        return mod_k8s_yamls
+            text = ""
+            if (thought := response.get("thought")) is not None:
+                text += f"{thought}\n"
+            if (modified_k8s_yamls := response.get("modified_k8s_yamls")) is not None:
+                for i, mod_k8s_yaml in enumerate(modified_k8s_yamls):
+                    if (mod_type := mod_k8s_yaml.get("mod_type")) is not None:
+                        text += f"Modification_type: `{mod_type}`\n"
+                    if (explanation := mod_k8s_yaml.get("explanation")) is not None:
+                        text += f"{explanation}\n"
+                    if (fname := mod_k8s_yaml.get("fname")) is not None:
+                        if (code := mod_k8s_yaml.get("code")) is not None:
+                            text += f"```yaml {fname}\n{code}\n```"
+            self.message_logger.stream(text)
+        self.message_logger.stream(text, final=True)
+        return response

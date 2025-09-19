@@ -6,13 +6,12 @@ from ...steady_states.steady_state_definer import SteadyStates
 from ....ce_tools.ce_tool_base import CEToolBase
 from ....utils.wrappers import LLM, BaseModel
 from ....utils.llms import build_json_agent, LLMLog, LoggingCallback
-from ....utils.streamlit import StreamlitDisplayContainer
 from ....utils.functions import (
     render_jinja_template,
     write_file,
     type_cmd3,
     limit_string_length,
-    StreamDebouncer
+    MessageLogger
 )
 
 
@@ -87,10 +86,12 @@ class FaultRefiner:
     def __init__(
         self,
         llm: LLM,
-        ce_tool: CEToolBase
+        ce_tool: CEToolBase,
+        output_emitter: MessageLogger
     ) -> None:
         self.llm = llm
         self.ce_tool = ce_tool
+        self.output_emitter = output_emitter
 
     def refine_faults(
         self,
@@ -98,14 +99,12 @@ class FaultRefiner:
         ce_instructions: str,
         steady_states: SteadyStates,
         fault_scenario: Dict[str, str],
-        display_container: StreamlitDisplayContainer,
         work_dir: str,
         max_retries: int = 3
     ) -> Tuple[LLMLog, FaultScenario]:
         self.logger = LoggingCallback(name="refine_fault_params", llm=self.llm)
-        display_container.create_subcontainer(id="fault_params", header="##### ⚙ Detailed fault parameters")
+        self.output_emitter.write("##### ⚙ Detailed fault parameters")
         faults_ = []
-        idx = 0
         for para_faults in fault_scenario["faults"]:
             para_faults_ = []
             faults_.append(para_faults_)
@@ -114,13 +113,11 @@ class FaultRefiner:
                 # generate fault params
                 #-----------------------
                 refined_prams = self.refine_fault(
-                    idx=idx,
                     user_input=user_input,
                     ce_instructions=ce_instructions,
                     steady_states=steady_states.to_overview_str(),
                     fault_scenario=self.convert_fault_senario_to_str(fault_scenario),
-                    fault=fault,
-                    display_container=display_container
+                    fault=fault
                 )
                 #-----------------------
                 # validate fault params
@@ -137,14 +134,11 @@ class FaultRefiner:
                         break
                     error_history.append(limit_string_length(msg))
                     refined_prams = self.refine_fault(
-                        idx=idx,
                         user_input=user_input,
                         ce_instructions=ce_instructions,
                         steady_states=steady_states.to_overview_str(),
                         fault_scenario=self.convert_fault_senario_to_str(fault_scenario),
                         fault=fault,
-                        display_container=display_container,
-                        mod_count=mod_count,
                         output_history=output_history,
                         error_history=error_history
                     )
@@ -157,8 +151,6 @@ class FaultRefiner:
                     name_id=fault["name_id"],
                     params=refined_prams
                 ))
-                idx += 1
-        display_container.update_header(f"##### ✅ Scenario: {fault_scenario['event']}", expanded=True)
         return (
             self.logger.log, 
             FaultScenario(
@@ -170,14 +162,11 @@ class FaultRefiner:
 
     def refine_fault(
         self,
-        idx: int,
         user_input: str,
         ce_instructions: str,
         steady_states: str,
         fault_scenario: str,
         fault: Dict[str, str],
-        display_container: StreamlitDisplayContainer,
-        mod_count: int = -1,
         output_history: List[dict] = [],
         error_history: List[str] = []
     ) -> Dict[str, Any]:
@@ -194,21 +183,9 @@ class FaultRefiner:
             pydantic_object=fault_params,
             is_async=False
         )
-        if mod_count == -1:
-            display_container.create_subsubcontainer(subcontainer_id="fault_params", subsubcontainer_id=f"fault_type{idx}")
-            display_container.create_subsubcontainer(subcontainer_id="fault_params", subsubcontainer_id=f"fault_params{idx}")
-        
-        debouncer = StreamDebouncer()
-
-        result = {}        
-        def display_response(response: dict) -> None:
-            for key in fault_params.__fields__.keys():
-                key_item = response.get(key)
-                if key_item is not None and isinstance(key_item, Iterable) and len(key_item) > 0:
-                    result[key] = key_item
-                    display_container.update_subsubcontainer(f"Detailed parameters of ```{fault['name']}``` ({fault['scope']})", f"fault_type{idx}")
-                    display_container.update_subsubcontainer(result, f"fault_params{idx}")
-
+        # output
+        result = {}
+        self.output_emitter.write(f"Detailed parameters of `{fault['name']}` ({fault['scope']})")
         for response in agent.stream({
             "user_input": user_input,
             "ce_instructions": ce_instructions,
@@ -218,9 +195,13 @@ class FaultRefiner:
             "ce_tool_name": self.ce_tool.name},
             {"callbacks": [self.logger]}
         ):
-            if debouncer.should_update():
-                display_response(response)
-        display_response(response)
+            for key in fault_params.__fields__.keys():
+                key_item = response.get(key)
+                if key_item is not None and isinstance(key_item, Iterable) and len(key_item) > 0:
+                    result[key] = key_item
+            result_str = f"```json \n{result}\n```" # json.dumps(result, indent=2, ensure_ascii=False)
+            self.output_emitter.stream(result_str)
+        self.output_emitter.stream(result_str, final=True)
         return result
     
     def convert_fault_senario_to_str(self, fault_scenario: Dict[str, str]) -> str:

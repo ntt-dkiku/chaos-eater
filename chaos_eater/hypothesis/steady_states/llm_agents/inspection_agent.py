@@ -5,9 +5,12 @@ from ....preprocessing.preprocessor import ProcessedData
 from ....utils.wrappers import LLM, BaseModel, Field
 from ....utils.llms import build_json_agent, LLMLog, LoggingCallback
 from ....utils.schemas import File
-from ....utils.functions import write_file, dict_to_str, sanitize_filename, StreamDebouncer
-from ....utils.streamlit import StreamlitContainer
-
+from ....utils.functions import (
+    write_file,
+    dict_to_str,
+    sanitize_filename,
+    MessageLogger
+)
 
 INTERVAL_SEC = "1s"
 MAX_DURATION = "5s"
@@ -80,17 +83,18 @@ class InspectionAgent:
     def __init__(
         self,
         llm: LLM,
-        namespace: str = "chaos-eater"
+        message_logger: MessageLogger,
+        namespace: str = "chaos-eater",
     ) -> None:
         self.llm = llm
         self.namespace = namespace
-    
+        self.message_logger = message_logger
+
     def inspect_current_state(
         self,
         input_data: ProcessedData,
         steady_state_draft: Dict[str, str],
         predefined_steady_states: list,
-        display_container: StreamlitContainer,
         kube_context: str,
         work_dir: str,
         max_retries: int = 3
@@ -99,7 +103,7 @@ class InspectionAgent:
         # intialization
         #---------------
         self.logger = LoggingCallback(name="tool_command_writing", llm=self.llm)
-        display_container.create_subcontainer(id="inspection", header="##### 🔍 Current state inspection")
+        self.message_logger.write("#### 🔍 Current state inspection")
         output_history = []
         error_history = []
 
@@ -109,7 +113,6 @@ class InspectionAgent:
         raw_output, inspection = self.generate_inspection(
             input_data=input_data,
             steady_state_draft=steady_state_draft,
-            display_container=display_container,
             work_dir=work_dir
         )
         output_history.append(raw_output)
@@ -120,27 +123,18 @@ class InspectionAgent:
         mod_count = 0
         while (1):
             # run the inspection script
-            subsubcontainer_id = f"inspection_status{mod_count}"
-            display_container.create_subsubcontainer(
-                subcontainer_id="inspection",
-                subsubcontainer_id=subsubcontainer_id
-            )
             returncode, console_log = run_pod(
                 inspection,
                 work_dir,
                 kube_context,
                 self.namespace,
-                display_container.get_subsubcontainer(subsubcontainer_id)
+                self.message_logger
             )
             inspection.result = console_log
-            display_container.create_subsubcontainer(
-                subcontainer_id="inspection",
-                subsubcontainer_id=f"inspection_value{mod_count}",
-                text=console_log,
-                is_code=True,
-                language="powershell"
+            self.message_logger.code(
+                console_log,
+                language="bash"
             )
-            print(console_log)
             
             # validation
             if returncode == 0:
@@ -155,7 +149,6 @@ class InspectionAgent:
             raw_output, inspection = self.generate_inspection(
                 input_data=input_data,
                 steady_state_draft=steady_state_draft,
-                display_container=display_container,
                 work_dir=work_dir,
                 mod_count=mod_count,
                 output_history=output_history,
@@ -169,7 +162,6 @@ class InspectionAgent:
         self,
         input_data: ProcessedData,
         steady_state_draft: Dict[str, str],
-        display_container: StreamlitContainer,
         work_dir: str,
         mod_count: int = -1,
         output_history: List[dict] = [],
@@ -194,49 +186,6 @@ class InspectionAgent:
         #------------------------------
         # generate a inspection script
         #------------------------------
-        debouncer = StreamDebouncer()
-        display_container.create_subsubcontainer(subcontainer_id="inspection", subsubcontainer_id=f"inspection_description{mod_count}")
-        display_container.create_subsubcontainer(subcontainer_id="inspection", subsubcontainer_id=f"inspection_script{mod_count}")
-        
-        def display_repsonse(response: dict) -> Tuple[str, str, str, str]:
-            fname = ""; tool_type = ""; code = ""; duration = ""
-            if (thought := response.get("thought")) is not None:
-                display_container.update_subsubcontainer(thought, f"inspection_description{mod_count}")
-            if (tool := response.get("tool")) is not None:
-                if (tool_type := response.get("tool_type")) is not None:
-                    if tool_type == "k8s":
-                        if (code := tool.get("script")) is not None:
-                            duration = tool.get("duration")
-                            fname = "k8s_" + sanitize_filename(steady_state_draft["name"])
-                            fname = f"{fname}_mod{mod_count}.py" if mod_count >= 0 else f"{fname}.py"
-                            display_container.update_subsubcontainer(
-                                f"{thought}  \ntool: ```{tool_type}``` duration: ```{duration}```  \nInspection script (Python) ```{fname}```:",
-                                f"inspection_description{mod_count}"
-                            )
-                            display_container.update_subsubcontainer(
-                                code,
-                                f"inspection_script{mod_count}",
-                                is_code=True,
-                                language="python"
-                            )
-                    elif tool_type == "k6":
-                        if (code := tool.get("script")) is not None:
-                            vus = tool.get("vus")
-                            duration = tool.get("duration")
-                            fname = "k6_" + sanitize_filename(steady_state_draft["name"])
-                            fname = f"{fname}_mod{mod_count}.js" if mod_count >= 0 else f"{fname}.js"
-                            display_container.update_subsubcontainer(
-                                f"{thought}  \ntool: ```{tool_type}``` vus: ```{vus}``` duration: ```{duration}```  \nInspection script (Javascript) ```{fname}```:",
-                                f"inspection_description{mod_count}"
-                            )
-                            display_container.update_subsubcontainer(
-                                code,
-                                f"inspection_script{mod_count}",
-                                is_code=True,
-                                language="javascript"
-                            )
-            return tool_type, fname, code, duration
-
         for inspection in agent.stream({
             "user_input": input_data.to_k8s_overview_str(),
             "ce_instructions": input_data.ce_instructions,
@@ -244,10 +193,30 @@ class InspectionAgent:
             "steady_state_thought": steady_state_draft["thought"]},
             {"callbacks": [self.logger]}
         ):
-            if debouncer.should_update():
-                display_repsonse(inspection)
-        tool_type, fname, code, duration = display_repsonse(inspection)
-
+            text = ""
+            if (thought := inspection.get("thought")) is not None:
+                text += f"{thought}\n"
+            if (tool := inspection.get("tool")) is not None:
+                if (tool_type := inspection.get("tool_type")) is not None:
+                    if tool_type == "k8s":
+                        if (code := tool.get("script")) is not None:
+                            duration = tool.get("duration")
+                            fname = "k8s_" + sanitize_filename(steady_state_draft["name"])
+                            fname = f"{fname}_mod{mod_count}.py" if mod_count >= 0 else f"{fname}.py"
+                            text += f"tool: `{tool_type}` duration: `{duration}`\n"
+                            text += f"Inspection script (Python):\n"
+                            text += f"```python {fname}\n{code}\n```"
+                    elif tool_type == "k6":
+                        if (code := tool.get("script")) is not None:
+                            vus = tool.get("vus")
+                            duration = tool.get("duration")
+                            fname = "k6_" + sanitize_filename(steady_state_draft["name"])
+                            fname = f"{fname}_mod{mod_count}.js" if mod_count >= 0 else f"{fname}.js"
+                            text += f"tool: `{tool_type}` vus: `{vus}` duration: `{duration}`\n"
+                            text += f"Inspection script (Javascript):\n"
+                            text += f"```javascript {fname}\n{code}\n```"
+            self.message_logger.stream(text)
+        self.message_logger.stream(text, final=True)
         
         #----------
         # epilogue

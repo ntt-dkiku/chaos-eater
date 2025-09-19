@@ -57,14 +57,14 @@ class K8sSummaryAgent:
         summaries = []
         for k8s_yaml in k8s_yamls:
             self.message_logger.write(f"```{k8s_yaml.fname}```")
-            placeholder = self.message_logger.placeholder()
             for summary in self.agent.stream(
                 {"k8s_yaml": file_to_str(k8s_yaml)}, 
                 {"callbacks": [self.logger]}
             ):
                 if debouncer.should_update():
                     if (summary_str := summary.get("k8s_summary")) is not None:
-                        placeholder.write(summary_str)
-            placeholder.write(summary_str)
+                        self.message_logger.stream(summary_str)
+            summary_str = summary.get("k8s_summary")
+            self.message_logger.stream(summary_str, final=True)
             summaries.append(summary_str)
         return self.logger.log, summaries

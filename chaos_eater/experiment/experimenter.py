@@ -220,8 +220,7 @@ class Experimenter:
         #-----------------------------------
         # run the valid chaos workflow
         #-----------------------------------
-        execution_msg = self.message_logger.placeholder()
-        pseudo_streaming_text("##### Running the experiment... See http://localhost:2333 for more details.", obj=execution_msg)
+        self.message_logger.stream("#### Running the experiment... See http://localhost:2333 for more details.")
         # self.ce_tool.run_experiment() # TODO
         # reset the experiment
         type_cmd(f"kubectl delete --context {kube_context} -n {namespace} -f {experiment.workflow.path} --ignore-not-found")
@@ -229,7 +228,8 @@ class Experimenter:
         type_cmd(f'kubectl delete po --context {kube_context} -n {namespace} --selector="chaos-mesh.org/workflow={experiment.workflow_name}" --ignore-not-found')
         # run the experiment
         type_cmd(f"kubectl apply --context {kube_context} -n {namespace} -f {experiment.workflow.path}")
-        self.message_logger.iframe("http://localhost:2333/#/workflows", height=500, scrolling=True)
+        # TODO
+        # self.message_logger.iframe("http://localhost:2333/#/workflows", height=500, scrolling=True)
 
         #--------------------------
         # wait for workflow to end
@@ -245,7 +245,7 @@ class Experimenter:
             status_accomplished = next((c["status"] for c in conditions if c["type"] == "Accomplished"), None)
             workflow_running = (status_accomplished == "False")
             time.sleep(check_interval)
-        pseudo_streaming_text("##### Completed the chaos experiment!", obj=execution_msg)
+        self.message_logger.stream("#### Completed the chaos experiment!", final=True)
 
         #-----------------------
         # organize the resullts

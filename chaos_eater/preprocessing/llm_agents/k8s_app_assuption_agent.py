@@ -58,27 +58,26 @@ class K8sAppAssumptionAgent:
     ) -> Tuple[LLMLog, K8sAppAssumption]:
         logger = LoggingCallback(name="k8s_app", llm=self.llm)
         debouncer = StreamDebouncer()
-        self.message_logger.write("Thoughts:")
-        container = self.message_logger.placeholder()
-        self.message_logger.write("Assumed application:")
-        container2 = self.message_logger.placeholder()
+
         user_input = self.get_user_input(
             k8s_yamls=k8s_yamls,
             k8s_summaries=k8s_summaries
         )
+
         for output in self.agent.stream(
             {"user_input": user_input},
             {"callbacks": [logger]}
         ):
+            text = ""
             if debouncer.should_update():
                 if (thought := output.get("thought")) is not None:
-                    container.write(thought)
+                    text += f"`Thoughts`:\n{thought}\n\n"
                 if (app := output.get("k8s_application")) is not None:
-                    container2.write(app)
+                    text += f"`Assumed application`:\n{app}\n"
+                self.message_logger.stream(text)
+        self.message_logger.stream(text, final=True)
         thought = output.get("thought")
         app = output.get("k8s_application")
-        container.write(thought)
-        container2.write(app)
         return (
             logger.log,
             K8sAppAssumption(

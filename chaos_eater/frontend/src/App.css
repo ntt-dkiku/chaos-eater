@@ -1,4 +1,19 @@
 body {
     font-family: "sans-serif", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
                  "Helvetica Neue", Arial;
-}  
+} 
+
+html, body, #root {
+    height: 100%;
+    scrollbar-gutter: stable;
+}
+
+
+.container {
+    min-width: 0;
+}
+
+.sidebar {
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+}

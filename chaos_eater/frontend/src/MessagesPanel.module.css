@@ -1,0 +1,125 @@
+.container {
+    position: relative;
+    width: 100%;
+    max-width: 768px;
+    padding: 16px;
+    background: transparent;
+    border-radius: 8px;
+    color: #e5e7eb;
+    font-size: 16px;
+    line-height: 24px;
+    box-sizing: border-box;
+    flex: 1;
+    overflow-y: auto;
+}
+
+.empty {
+    color: #6b7280;
+    font-size: 14px;
+}
+
+.subheader {
+    margin: 12px 0;
+    padding: 8px 0;
+    border-bottom: 1px solid #374151;
+    color: #e5e7eb;
+    font-weight: 600;
+}
+
+.codeBlockWrapper {
+    margin: 8px 0;  
+}
+.codeBlock {
+    margin: 0;
+    padding: 12px;
+    background: #0b0b0b;
+    border: 1px solid #1f2937;
+    border-radius: 6px;
+    overflow-x: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.msg {
+    margin: 6px 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.msgUser { color: #60a5fa; }
+.msgAssistant { color: #e5e7eb; }
+
+.bottomSentinel {
+    height: 1px;
+}
+
+.jumpBtn {
+    position: sticky;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+  
+    width: 44px;
+    height: 44px;
+    border-radius: 9999px;
+    border: 1px solid #374151;
+    cursor: pointer;
+  
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  
+    background: #111827;
+    color: #e5e7eb;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.25);
+    z-index: 10;
+    transition: transform 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
+}
+  
+.jumpBtn:hover {
+    box-shadow: 0 10px 24px rgba(0,0,0,0.32);
+}
+  
+.jumpBtn:active {
+    transform: translateX(-50%) scale(0.9);
+}
+  
+.jumpBtn:focus-visible {
+    outline: 2px solid #60fa6a;
+    outline-offset: 2px;
+}
+
+:global(.md-inline-code),
+:global(:not(pre) > code) {
+    background: #2b2f36;
+    padding: 0.15em 0.45em;
+    border-radius: 6px;
+    font-size: 0.92em;
+    white-space: break-spaces; /* allow wrapping for long paths/globs */
+}
+
+
+/* For <p> and <li> elements, use pre-line (preserve line breaks, collapse consecutive spaces) */
+:global(.markdown-body p),
+:global(.markdown-body li) {
+    white-space: pre-line !important;  /* Preserve line breaks, collapse spaces */
+}
+
+:global(.markdown-body p) {
+    margin: 0 !important;
+    padding-bottom: 0.3em !important;
+}
+
+:global(.markdown-body p + ul) {
+    margin-top: 0em !important;  /* space btween p and ul */
+}
+
+:global(.markdown-body ul) {
+    margin: 0 !important;
+}
+
+:global(.markdown-body li) {
+    margin: 0.3em 0 !important;
+}

@@ -13,6 +13,8 @@ import {
   PanelLeftClose
 } from 'lucide-react';
 import './App.css';
+import MessagesPanel from './components/MessagesPanel';
+
 
 export default function ChaosEaterApp() {
   // === API constants & helpers ===
@@ -37,7 +39,7 @@ export default function ChaosEaterApp() {
 
   // Turn File objects into {name, content, size} (text) keeping paths if folder upload used.
   const readAsTextWithPath = (file) => {
-    new Promise((resolve) => {
+    return new Promise((resolve) => {  // ← returnを追加
       const reader = new FileReader();
       reader.onload = (e) =>
         resolve({
@@ -45,7 +47,7 @@ export default function ChaosEaterApp() {
           content: e.target.result,
           size: file.size,
         });
-        reader.readAsText(file);
+      reader.readAsText(file);
     });
   };
 
@@ -150,9 +152,11 @@ export default function ChaosEaterApp() {
       setClustersError(null);
       const q = encodeURIComponent(sessionIdRef.current || '');
       const data = await fetchJSON(`/clusters?session_id=${q}`);
-      setClusters(data);
+      setClusters(prev => {
+        return JSON.stringify(prev) === JSON.stringify(data) ? prev : data;
+      });
       // apply it if you already claimed one and the form is unset
-      if (!formData.cluster && data.mine) {
+      if (!formData.cluster && data.mine && formData.cluster !== data.mine) {
         setFormData(prev => ({ ...prev, cluster: data.mine }));
       }
     } catch (e) {
@@ -162,10 +166,10 @@ export default function ChaosEaterApp() {
     }
   };
   
-  // 1st time & periodic update（30s）
+  // 1st time & periodic update（60s）
   useEffect(() => {
     loadClusters();
-    const id = setInterval(loadClusters, 30000);
+    const id = setInterval(loadClusters, 60000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -379,22 +383,25 @@ export default function ChaosEaterApp() {
     const examples = {
       nginx: {
         files: [{
-          name: 'nginx-deployment.yaml',
-          content: `apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: nginx\nspec:\n  replicas: 3`
+          name: 'nginx.zip',
+          project_path: 'examples/nginx',
+          content: ''
         }],
         instructions: '- The Chaos-Engineering experiment must be completed within 1 minute.\n- List ONLY one steady state about Pod Count.\n- Conduct pod-kill'
       },
       nginxLimited: {
         files: [{
-          name: 'nginx-deployment.yaml',
-          content: `apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: nginx\nspec:\n  replicas: 3`
+          name: 'nginx.zip',
+          project_path: 'examples/nginx',
+          content: ''
         }],
         instructions: 'The Chaos-Engineering experiment must be completed within 1 minute.'
       },
       sockshop: {
         files: [{
-          name: 'sock-shop.yaml',
-          content: '# Sock Shop microservices deployment'
+          name: 'sock-shop.zip',
+          project_path: 'examples/sock-shop-2',
+          content: ''
         }],
         instructions: '- The Chaos-Engineering experiment must be completed within 1 minute.\n- Test with URL: http://front-end.sock-shop.svc.cluster.local/'
       }
@@ -403,6 +410,7 @@ export default function ChaosEaterApp() {
     const example = examples[exampleType];
     if (example) {
       setUploadedFiles(example.files);
+      setBackendProjectPath(example.files[0].project_path)
       setFormData(prev => ({ ...prev, instructions: example.instructions }));
     }
   };
@@ -424,8 +432,9 @@ export default function ChaosEaterApp() {
     // 1. prepare request body for /jobs
     const payload = {
       project_path: backendProjectPath,
+      ce_instructions: formData.instructions?.trim() || null,
       kube_context: formData.cluster,
-      project_name: formData.projectName || 'chaos-project',
+      project_name: formData.projectName || 'chaos-eater',
       work_dir: null,
       clean_cluster_before_run: formData.cleanBefore,
       clean_cluster_after_run: formData.cleanAfter,
@@ -471,7 +480,7 @@ export default function ChaosEaterApp() {
         setMessages((m) => [...m, { type: 'status', role: 'assistant', content: 'Connected. Streaming started…' }]);
       };
       socket.onmessage = (event) => {
-        handleWsPayload(event.data, setMessages);
+        handleWsPayload(event.data);
       };
       socket.onerror = () => {
         setMessages((m) => [...m, { type: 'status', role: 'assistant', content: 'WebSocket error' }]);
@@ -542,185 +551,177 @@ export default function ChaosEaterApp() {
     return res.json(); // { provider, configured }
   }
 
-    //----------------
+  //----------------
   // dialog display
   //----------------
   // Normalize to a lightweight shape for rendering (type is 'text' | 'code' | 'subheader' | 'status')
   const normalize = (msg) => ({ type: msg.type || 'text', role: msg.role || 'assistant', content: msg.content || msg.text || '', language: msg.language });
   // Toggle for showing the log/message panel
   const [panelVisible, setPanelVisible] = useState(false);
+  // for smoothing streaming
+  const messageQueueRef = useRef([]);
+  const processTimerRef = useRef(null);
+  const rafRef = useRef(null);
 
   // For appending partial chunks
-  function appendAssistantPartial(setter, chunk) {
+  // Keep track of the most recent partial message state
+  const partialStateRef = useRef(null);
+  // Example: { open: true, role:'assistant', type:'code'|'text', language:'python'|undefined }
+
+  function appendAssistantPartial(
+    setter,
+    chunk,
+    {
+      role = 'assistant',
+      mode = 'delta',            // 'delta' means append, 'frame' means full replacement
+      format = 'plain',          // 'plain' for text, 'code' for code blocks
+      language = undefined,
+      final = false              // true if this partial is the last one for the bubble
+    } = {}
+  ) {
+    const type = (format === 'code') ? 'code' : 'text';
+    const c = String(chunk ?? '');
+
     setter(prev => {
       const out = [...prev];
       const last = out[out.length - 1];
-      if (last && last.role === 'assistant' && (last.type === 'text' || !last.type)) {
-        // Append to the tail
-        last.content = `${last.content || ''}${chunk}`;
-        return out;
+
+      // Check if the current partial should continue the same bubble
+      const sameBubble =
+        partialStateRef.current?.open &&
+        partialStateRef.current?.role === role &&
+        partialStateRef.current?.type === type &&
+        (type === 'text' || partialStateRef.current?.language === (language || undefined));
+
+      if (sameBubble && last && last.role === role && last.type === type) {
+        // Append or replace depending on mode
+        if (mode === 'frame') {
+          // For frame mode, replace the content with the latest chunk
+          last.content = c;
+        } else {
+          // For delta mode, append the new chunk to the end
+          last.content = `${last.content || ''}${c}`;
+        }
+      } else {
+        // Create a new bubble
+        out.push({
+          type, // 'text' | 'code'
+          role,
+          content: c,
+          ...(type === 'code' ? { language } : {})
+        });
+        partialStateRef.current = { open: true, role, type, language: (type === 'code' ? language : undefined) };
       }
-      // If the last item isn't assistant text, create a new one
-      out.push({ type: 'text', role: 'assistant', content: chunk });
+
+      if (final) {
+        // Reset state so the next partial will start a new bubble
+        partialStateRef.current = null;
+      }
       return out;
     });
   }
 
-  // Apply one WebSocket payload into messages
-  function handleWsPayload(payload, setMessages) {
-    // payload should be a string
-    let msg;
-    try { msg = JSON.parse(payload); } catch { 
-      setMessages(m => [...m, { type: 'text', role: 'assistant', content: String(payload) }]);
-      return;
-    }
-
-    // (1) Preferred event wrapper (backend sends {type:"event", event:{...}})
-    if (msg?.type === 'event' && msg.event) {
-      const ev = msg.event;
-
-      // Streaming partial
-      if (ev.type === 'partial' && ev.partial) {
-        appendAssistantPartial(setMessages, ev.partial);
-        return;
-      }
-
-      // Normal write/code/subheader
-      if (ev.type === 'write') {
-        setMessages(m => [...m, { type: 'text', role: ev.role || 'assistant', content: ev.text || '' }]);
-        return;
-      }
-      if (ev.type === 'code') {
-        setMessages(m => [...m, { type: 'code', role: ev.role || 'assistant', content: ev.code || '', language: ev.language }]);
-        return;
-      }
-      if (ev.type === 'subheader') {
-        setMessages(m => [...m, { type: 'subheader', role: ev.role || 'assistant', content: ev.text || '' }]);
-        return;
-      }
-
-      // For unexpected shapes, stringify and show as-is
-      setMessages(m => [...m, { type: 'text', role: 'assistant', content: JSON.stringify(ev) }]);
-      return;
-    }
-
-    // (2) Legacy/generic shape (top-level partial/progress, etc.)
-    if (msg.partial) {
-      appendAssistantPartial(setMessages, msg.partial);
-      return;
-    }
-
-    // status/progress (fallback compatible with existing onmessage)
-    const content = msg.rich || msg.message || msg.progress || (msg.status ? `Status: ${msg.status}` : null);
-    if (content != null) {
-      setMessages(m => [...m, { type: 'status', role: 'assistant', content }]);
-      return;
-    }
-
-    // Otherwise, show raw JSON
-    setMessages(m => [...m, { type: 'text', role: 'assistant', content: JSON.stringify(msg) }]);
+  // Function to process queued messages in batches
+  function processMessageQueue() {
+    if (messageQueueRef.current.length === 0) return;
+    
+    // Extract messages from queue and process them together
+    const messages = [...messageQueueRef.current];
+    messageQueueRef.current = [];
+    
+    rafRef.current = requestAnimationFrame(() => {
+      messages.forEach(payload => {
+        // Original handleWsPayload processing
+        let msg;
+        try {
+          msg = JSON.parse(payload);
+        } catch {
+          setMessages(m => [...m, { type: 'text', role: 'assistant', content: String(payload) }]);
+          return;
+        }
+        
+        if (msg?.type === 'event' && msg.event) {
+          const ev = msg.event;
+          if (ev.type === 'partial' && ev.partial != null) {
+            appendAssistantPartial(setMessages, ev.partial, {
+              role: ev.role || 'assistant',
+              mode: ev.mode || 'delta',
+              format: ev.format || 'plain',
+              language: ev.language,
+              filename: ev.filename,
+              final: !!ev.final,
+            });
+            return;
+          }
+          if (ev.type === 'partial_end') {
+            partialStateRef.current = null;
+            return;
+          }
+          if (ev.type === 'write') {
+            setMessages(m => [...m, { type: 'text', role: ev.role || 'assistant', content: ev.text || '' }]);
+            return;
+          }
+          if (ev.type === 'code') {
+            setMessages(m => [...m, { type: 'code', role: ev.role || 'assistant', content: ev.code || '', language: ev.language, filename: ev.filename }]);
+            return;
+          }
+          if (ev.type === 'subheader') {
+            setMessages(m => [...m, { type: 'subheader', role: ev.role || 'assistant', content: ev.text || '' }]);
+            return;
+          }
+          setMessages(m => [...m, { type: 'text', role: 'assistant', content: JSON.stringify(ev) }]);
+          return;
+        }
+        
+        if (msg.partial != null) {
+          appendAssistantPartial(setMessages, msg.partial, {
+            role: msg.role || 'assistant',
+            mode: msg.mode || 'delta',
+            format: msg.format || 'plain',
+            language: msg.language,
+            final: !!msg.final,
+          });
+          return;
+        }
+        
+        const content = msg.rich || msg.message || msg.progress || (msg.status ? `Status: ${msg.status}` : null);
+        if (content != null) {
+          console.log(content);
+          return;
+        }
+        
+        setMessages(m => [...m, { type: 'text', role: 'assistant', content: JSON.stringify(msg) }]);
+      });
+      
+      rafRef.current = null;
+    });
   }
 
-  function MessagesPanel({ messages }) {
-    const containerRef = useRef(null);
-    const endRef = useRef(null);
-  
-    // autoscroll to bottom
-    useEffect(() => {
-      if (!containerRef.current) return;
-      endRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages]);
-  
-    const renderMsg = (m, i) => {
-      const type = m.type || 'text';
-      const roleColor = m.role === 'user' ? '#60a5fa' : '#e5e7eb';
-  
-      if (type === 'subheader') {
-        return (
-          <div key={i} style={{ margin: '12px 0', padding: '8px 0', borderBottom: '1px solid #374151', color: '#e5e7eb', fontWeight: 600 }}>
-            {m.content}
-          </div>
-        );
-      }
-  
-      if (type === 'code') {
-        return (
-          <div key={i} style={{ margin: '8px 0' }}>
-            <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 4 }}>{m.language || 'code'}</div>
-            <pre style={{
-              margin: 0,
-              padding: '12px',
-              backgroundColor: '#0b0b0b',
-              border: '1px solid #1f2937',
-              borderRadius: 6,
-              overflowX: 'auto',
-              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-              fontSize: 13,
-              lineHeight: '1.5',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-            }}>
-              <code>{m.content}</code>
-            </pre>
-          </div>
-        );
-      }
-  
-      if (type === 'status') {
-        return (
-          <div key={i} style={{ margin: '6px 0', fontSize: 12, color: '#9ca3af' }}>
-            {m.content}
-          </div>
-        );
-      }
-  
-      // default: text
-      return (
-        <div key={i} style={{ margin: '6px 0', color: roleColor, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-          {m.content}
-        </div>
-      );
-    };
-  
-    return (
-      <div
-        ref={containerRef}
-        style={{
-          width: '100%',
-          maxWidth: '768px',
-          padding: '16px',
-          backgroundColor: 'transparent',
-          borderRadius: 8,
-          border: 'none',
-          color: '#e5e7eb',
-          fontSize: '16px',
-          fontFamily: 'inherit',
-          resize: 'none',
-          outline: 'none',
-          transition: 'all 0.2s ease',
-          lineHeight: '24px',
-          boxSizing: 'border-box',
-          minHeight: '32px',
-          overflow: 'hidden',
-          border: '1px solid #374151',
-        }}
-      >
-        {messages.length === 0 ? (
-          <div style={{ color: '#6b7280', fontSize: 14 }}>dialog will be displayed here</div>
-        ) : (
-          messages.map(renderMsg)
-        )}
-        <div ref={endRef} />
-      </div>
-    );
+  // Simplified version using only RAF
+  function handleWsPayload(payload) {
+    messageQueueRef.current.push(payload);
+    
+    if (!rafRef.current) {
+      rafRef.current = requestAnimationFrame(() => {
+        processMessageQueue();
+        rafRef.current = null;
+      });
+    }
   }
-  
+
   useEffect(() => {
     return () => {
+      if (processTimerRef.current) {
+        clearTimeout(processTimerRef.current);
+      }
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+      }
+      messageQueueRef.current = [];
       try { wsRef.current?.close(); } catch {}
     };
   }, []);
-  
+
 
   //
   //
@@ -1236,24 +1237,37 @@ export default function ChaosEaterApp() {
       
       {/* Main Content */}
       <div style={{ 
-        flex: 1, 
-        display: 'flex', 
-        flexDirection: 'column', 
-        alignItems: 'center', 
-        justifyContent: 'center', 
-        padding: '32px',
-        marginLeft: sidebarOpen ? '0' : '0',
-        transition: 'margin-left 0.3s ease'
+          flex: 1, 
+          display: 'flex', 
+          flexDirection: 'column', 
+          alignItems: 'center', 
+          justifyContent: 'center', 
+          padding: '32px',
+          marginLeft: sidebarOpen ? '0' : '0',
+          transition: 'margin-left 0.3s ease',
+          minHeight: 0
       }}>
-        {panelVisible ? (
-          <>
-            {/* dialog */}
-            <MessagesPanel messages={messages} />
+        {/* dialog */}
+        <div style={{ 
+          position: panelVisible ? 'relative' : 'absolute',
+          visibility: panelVisible ? 'visible' : 'hidden',
+          opacity: panelVisible ? 1 : 0,
+          width: '100%',
+          maxWidth: '768px', 
+          height: panelVisible ? 'calc(100% - 150px)' : '0',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'stretch',
+          transition: 'opacity 0.3s ease',
+          pointerEvents: panelVisible ? 'auto' : 'none',
+          overflow: 'hidden',
+          minHeight: 0,
+        }}>
+          <MessagesPanel messages={messages} />
+        </div>
 
-            {/* Spacer to push chatbox down */}
-            <div style={{ flex: 1 }}></div>
-          </>
-        ) : (
+        {/* landing image */}
+        {!panelVisible && (
           <>
             {/* Animated Logo with Eye */}
             <div 
@@ -1383,13 +1397,14 @@ export default function ChaosEaterApp() {
             </div>
           </>
         )}
-
+        
         {/* Unified Chat Input Area */}
         <div style={{ 
           width: '100%', 
           maxWidth: '768px', 
           position: 'relative',
-          marginBottom: '0px'
+          marginBottom: '0px',
+          flexShrink: 0 
         }}>
           <input
             ref={fileInputRef}

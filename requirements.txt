@@ -28,3 +28,8 @@ tqdm
 pydot
 redis
 pydantic==2.10.6 # langchain currently does not support pydantic>=2.11
+
+# API
+uvicorn[standard]
+fastapi
+python-multipart

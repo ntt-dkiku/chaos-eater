@@ -12,10 +12,7 @@ COPY requirements.txt .
 RUN apt-get -y update && \
     apt-get install -y \
     curl \
-    git \
     zip \
-    vim \
-    tmux \
     redis
 
 # install docker client

@@ -3,8 +3,7 @@ from typing import Dict, Tuple
 from ....preprocessing.preprocessor import ProcessedData
 from ....utils.wrappers import LLM, BaseModel, Field
 from ....utils.llms import build_json_agent, LoggingCallback, LLMLog
-from ....utils.streamlit import StreamlitContainer
-from ....utils.functions import StreamDebouncer
+from ....utils.functions import StreamDebouncer, MessageLogger
 
 
 #---------
@@ -49,7 +48,11 @@ class SteadyStateDraft(BaseModel):
 # agent definition
 #------------------
 class SteadyStateDraftAgent:
-    def __init__(self, llm: LLM) -> None:
+    def __init__(
+        self,
+        llm: LLM,
+        message_logger: MessageLogger
+    ) -> None:
         self.llm = llm
         self.agent = build_json_agent(
             llm=llm,
@@ -60,31 +63,17 @@ class SteadyStateDraftAgent:
             pydantic_object=SteadyStateDraft,
             is_async=False
         )
+        self.message_logger = message_logger
 
     def draft_steady_state(
         self,
         input_data: ProcessedData,
         predefined_steady_states: list,
-        prev_check_thought: str,
-        display_container: StreamlitContainer
+        prev_check_thought: str
     ) -> Tuple[LLMLog, Dict[str, str]]:
         # initialization
         logger = LoggingCallback(name="steady_state_draft", llm=self.llm)
         debouncer = StreamDebouncer()
-        container_id = "description"
-        display_container.create_subcontainer(id=container_id, header=f"##### 💬 Description")
-        display_container.create_subsubcontainer(subcontainer_id=container_id, subsubcontainer_id=container_id)
-        prev_check_thought = prev_check_thought if prev_check_thought != "" else "No steady states have been defined, so a new steady state needs to be defined."
-        
-        # define display function
-        def display_response(response: dict) -> None:
-            if (thought := response["thought"]) is not None:
-                display_container.update_subsubcontainer(thought, container_id)
-            if (name := response["name"]) is not None:
-                display_container.update_header(
-                    f"##### Steady state #{predefined_steady_states.count+1}: {name}",
-                    expanded=True
-                )
         
         # stream the response
         for steady_state in self.agent.stream({
@@ -94,7 +83,12 @@ class SteadyStateDraftAgent:
             "prev_check_thought": prev_check_thought},
             {"callbacks": [logger]}
         ):
+            text = ""
             if debouncer.should_update():
-                display_response(steady_state)
-        display_response(steady_state)
+                if (name := steady_state.get("name")) is not None:
+                    text += f"#### Steady state #{predefined_steady_states.count+1}: {name}\n"
+                if (thought := steady_state.get("thought")) is not None:
+                    text += thought
+                self.message_logger.stream(text)
+        self.message_logger.stream(text, final=True)
         return logger.log, steady_state

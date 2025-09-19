@@ -7,9 +7,8 @@ from ....preprocessing.preprocessor import ProcessedData
 from ....utils.wrappers import LLM, LLMBaseModel, LLMField
 from ....utils.llms import build_json_agent, LLMLog, LoggingCallback
 from ....utils.schemas import File
-from ....utils.functions import write_file, read_file, copy_file, sanitize_filename, StreamDebouncer
+from ....utils.functions import write_file, read_file, copy_file, sanitize_filename, MessageLogger
 from ....utils.constants import UNITTEST_BASE_PY_PATH
-from ....utils.streamlit import StreamlitContainer
 
 
 #---------
@@ -96,8 +95,13 @@ class K6UnitTest(LLMBaseModel):
 # agent definition
 #------------------
 class UnittestAgent:
-    def __init__(self, llm: LLM) -> None:
+    def __init__(
+        self,
+        llm: LLM,
+        message_logger: MessageLogger
+    ) -> None:
         self.llm = llm
+        self.message_logger = message_logger
 
     def write_unittest(
         self,
@@ -106,7 +110,6 @@ class UnittestAgent:
         inspection: List[Inspection],
         threshold: List[Dict[str, str]],
         predefined_steady_states: list,
-        display_container: StreamlitContainer,
         kube_context: str,
         work_dir: str,
         max_retries: int = 3
@@ -120,7 +123,7 @@ class UnittestAgent:
         output_history = []
         error_history = []
         fname_prefix = f'unittest_{sanitize_filename(steady_state_draft["name"])}'
-        display_container.create_subcontainer(id="unittest", header="##### 📄 Unit test to validate the steady state")
+        self.message_logger.write("#### 📄 Unit test to validate the steady state")
 
         #---------------
         # first attempt
@@ -129,8 +132,7 @@ class UnittestAgent:
             steady_state_draft=steady_state_draft,
             inspection=inspection,
             threshold=threshold,
-            predefined_steady_states=predefined_steady_states,
-            display_container=display_container
+            predefined_steady_states=predefined_steady_states
         )
 
         #---------------------------------------------------------
@@ -156,26 +158,17 @@ class UnittestAgent:
                 )
             )
             
-            subsubcontainer_id = f"unittest_result{mod_count}"
-            display_container.create_subsubcontainer(
-                subcontainer_id="unittest",
-                subsubcontainer_id=subsubcontainer_id
-            )
             returncode, console_log = run_pod(
                 inspection=inspection_,
                 work_dir=work_dir,
                 kube_context=kube_context,
                 namespace="chaos-eater",
-                display_container=display_container.get_subsubcontainer(subsubcontainer_id)
+                message_logger=self.message_logger
             )
-            display_container.create_subsubcontainer(
-                subcontainer_id="unittest",
-                subsubcontainer_id=f"unittest_value{mod_count}",
-                text=console_log,
-                is_code=True,
-                language="powershell"
+            self.message_logger.code(
+                console_log,
+                language="bash"
             )
-            print(console_log)
 
             # validation
             if returncode == 0:
@@ -192,7 +185,6 @@ class UnittestAgent:
                 inspection=inspection,
                 threshold=threshold,
                 predefined_steady_states=predefined_steady_states,
-                display_container=display_container,
                 mod_count=mod_count,
                 output_history=output_history,
                 error_history=error_history
@@ -201,7 +193,6 @@ class UnittestAgent:
         #----------
         # epilogue
         #----------
-        display_container.update_header(f"##### ✅ Steady state #{predefined_steady_states.count+1}: {steady_state_draft['name']}", expanded=True)
         return (
             self.logger.log,
             File(
@@ -218,7 +209,6 @@ class UnittestAgent:
         inspection: Inspection,
         threshold: Dict[str, str],
         predefined_steady_states: list,
-        display_container: StreamlitContainer,
         mod_count: int = -1,
         output_history: List[Dict[str, str]] = [],
         error_history: List[str] = []
@@ -240,22 +230,6 @@ class UnittestAgent:
         )
 
         # generate a unit test
-        debouncer = StreamDebouncer()
-        display_container.create_subsubcontainer(subcontainer_id="unittest", subsubcontainer_id=f"unittest_thought{mod_count}")
-        display_container.create_subsubcontainer(subcontainer_id="unittest", subsubcontainer_id=f"unittest{mod_count}")
-        
-        def display_responce(responce: dict) -> Tuple[str, str]:
-            if (thought := responce.get("thought")) is not None:
-                display_container.update_subsubcontainer(thought, f"unittest_thought{mod_count}")
-            if (code := responce.get("code")) is not None:
-                display_container.update_subsubcontainer(
-                    code,
-                    f"unittest{mod_count}",
-                    is_code=True,
-                    language="python" if inspection.tool_type == "k8s" else "javascript"
-                )
-            return thought, code
-
         for responce in agent.stream({
             "steady_state_name": steady_state_draft["name"],
             "steady_state_thought": steady_state_draft["thought"],
@@ -264,7 +238,12 @@ class UnittestAgent:
             "steady_state_threshold_description": threshold["reason"]},
             {"callbacks": [self.logger]}
         ):
-            if debouncer.should_update():
-                display_responce(responce)
-        thought, code = display_responce(responce)
+            text = ""
+            if (thought := responce.get("thought")) is not None:
+                text += f"{thought}\n"
+            if (code := responce.get("code")) is not None:
+                language = "python" if inspection.tool_type == "k8s" else "javascript"
+                text += f"```{language} test.py\n{code}\n```"
+            self.message_logger.stream(text)
+        self.message_logger.stream(text, final=True)
         return {"thought": thought, "code": code}

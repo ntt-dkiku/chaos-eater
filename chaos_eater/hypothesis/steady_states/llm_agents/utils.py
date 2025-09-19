@@ -61,7 +61,7 @@ def run_pod(
     work_dir: str,
     kube_context: str,
     namespace: str,
-    display_container = None
+    message_logger = None
 ) -> Tuple[int, str]:
     # write pod manifest
     pod_name = sanitize_k8s_name(os.path.splitext(inspection.script.fname)[0]) + "-pod"
@@ -87,7 +87,7 @@ def run_pod(
     type_cmd(f"kubectl apply -f {yaml_path} --context {kube_context} -n {namespace}")
     
     # wait until the pod complete
-    if wait_for_pod_completion(pod_name, kube_context, namespace, display_container=display_container):
+    if wait_for_pod_completion(pod_name, kube_context, namespace, message_logger=message_logger):
         time.sleep(1)
         returncode, console_logs = get_pod_logs(pod_name, kube_context, namespace)
         type_cmd(f"kubectl delete pod {pod_name} --context {kube_context} -n {namespace}") # delete the pod
@@ -105,7 +105,7 @@ def wait_for_pod_completion(
     namespace: str = "chaos-eater",
     timeout: float = 300.,
     interval: int = 1,
-    display_container = None
+    message_logger = None
 ) -> bool:
     start_time = time.time()
     while (time.time()) - start_time < timeout:
@@ -119,18 +119,21 @@ def wait_for_pod_completion(
             pod_data = json.loads(result.stdout)
             phase = pod_data["status"]["phase"]
             if phase == "Succeeded":
-                if display_container is not None:
-                    display_container.write(f"###### Pod ```{pod_name}``` has completed sucessfully.  \nThe inspection script's results (current states) are as follows:")
+                if message_logger is not None:
+                    message_logger.stream(
+                        f"##### Pod `{pod_name}` has completed sucessfully.\nThe inspection script's results (current states) are as follows:",
+                        final=True
+                    )
                 print(f"Pod {pod_name} has completed sucessfully.\nThe script's results are as follows:")
                 return True
             elif phase == "Failed":
-                if display_container is not None:
-                    display_container.write(f"###### Pod ```{pod_name}``` has failed.")
+                if message_logger is not None:
+                    message_logger.stream(f"##### Pod `{pod_name}` has failed.", final=True)
                 print(f"Pod {pod_name} has failed.")
                 return True
             else:
-                if display_container is not None:
-                    display_container.write(f"###### Pod ```{pod_name}``` is in phase ```{phase}```. Waiting...")
+                if message_logger is not None:
+                    message_logger.stream(f"##### Pod `{pod_name}` is in phase `{phase}`. Waiting...")
                 print(f"Pod {pod_name} is in phase {phase}. Waiting...")
         except subprocess.CalledProcessError as e:
             print(f"Error checking Pod status: {e}")

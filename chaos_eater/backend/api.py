@@ -151,6 +151,7 @@ def build_input_from_project_path(project_path: str, override_instructions: Opti
         raise ValueError(f"Failed to parse skaffold.yaml: {e}")
 
     # 2) collect k8s YAMLs from manifests.rawYaml
+    work_dir = skaffold_file.parent.parent
     manifests = (sk.get("manifests") or {})
     raw_list = manifests.get("rawYaml") or []
     if not isinstance(raw_list, list) or not raw_list:
@@ -166,16 +167,16 @@ def build_input_from_project_path(project_path: str, override_instructions: Opti
         files.append({
             "path": str(abs_path),
             "content": content,                 # Union[str, bytes] supported by your File schema
-            "work_dir": str(root),
-            "fname": str(abs_path.relative_to(root))
+            "work_dir": str(work_dir),
+            "fname": str(abs_path.relative_to(work_dir))
         })
 
     ce_input = {
         "skaffold_yaml": {
             "path": str(skaffold_file),
             "content": skaffold_content,
-            "work_dir": str(root),
-            "fname": str(skaffold_file.relative_to(root))
+            "work_dir": str(work_dir),
+            "fname": str(skaffold_file.relative_to(work_dir))
         },
         "files": files,
         "ce_instructions": override_instructions or ""
@@ -302,6 +303,9 @@ class APICallback:
         """Generic streaming hook used by agents."""
         # Enrich + forward as a structured event
         payload = dict(event)
+        # default mode for partials if not provided by the producer
+        if payload.get("type") == "partial" and "mode" not in payload:
+            payload["mode"] = os.getenv("CE_PARTIAL_MODE", "delta")
         payload.setdefault("channel", channel)
         payload.setdefault("ts", time.time())
         fut = asyncio.run_coroutine_threadsafe(
@@ -686,8 +690,13 @@ async def upload_project_zip(
     # Optional: remove zip after extract
     zip_path.unlink(missing_ok=True)
 
-    # Return the project_path (absolute path on server)
-    return {"project_path": str(proj_dir)}
+    # Search for skaffold.yaml and use its parent directory as the project_path.
+    matches = list(proj_dir.rglob("skaffold.yaml"))
+    if not matches:
+        raise HTTPException(status_code=400, detail="skaffold.yaml not found in uploaded zip")
+
+    skaffold_dir = matches[0].parent
+    return {"project_path": str(skaffold_dir)}
 
 # ---------------------------------------------------------------------
 # Get cluster list

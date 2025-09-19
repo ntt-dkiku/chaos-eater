@@ -9,7 +9,6 @@ from ...hypothesis.steady_states.llm_agents.utils import Inspection, run_pod
 from ...utils.wrappers import LLM, LLMBaseModel, LLMField
 from ...utils.llms import build_json_agent, LLMLog, LoggingCallback
 from ...utils.functions import (
-    pseudo_streaming_text,
     file_list_to_str,
     dict_to_str,
     read_file,
@@ -19,7 +18,6 @@ from ...utils.functions import (
     sanitize_filename,
     remove_curly_braces,
     MessageLogger,
-    StreamDebouncer
 )
 from ...utils.schemas import File
 from ...utils.constants import UNITTEST_BASE_PY_PATH
@@ -148,8 +146,7 @@ class ExperimentRePlanAgent:
         #------------------------
         # replan the fault scope
         #------------------------
-        plan_msg = self.message_logger.placeholder()
-        pseudo_streaming_text("##### Adjusting the scope of fault injection...", obj=plan_msg)
+        self.message_logger.write("#### Adjusting the scopes of fault injections")
         self.replan_scope(
             experiment=prev_experiment,
             experiment_plan=new_experiment_plan,
@@ -157,11 +154,11 @@ class ExperimentRePlanAgent:
             curr_k8s_yamls=curr_k8s_yamls,
             logger=logger
         )
-        pseudo_streaming_text("##### The fault-scope adjustment Completed!", obj=plan_msg)
 
         #----------------------
         # replan the unit test
         #----------------------
+        self.message_logger.write("#### Adjusting the unit tests ")
         self.replan_unittests(
             experiemnt_plan=new_experiment_plan,
             prev_k8s_yamls=prev_k8s_yamls,
@@ -185,22 +182,10 @@ class ExperimentRePlanAgent:
         curr_k8s_yamls: List[File],
         logger: LoggingCallback
     ) -> None:
-        debouncer = StreamDebouncer()
         fault_injections = experiment_plan["fault_injection"]["fault_injection"]
         for fault_injection in fault_injections:
             self.message_logger.write("Current fault injection settings:")
             self.message_logger.write(f"{self.get_fault_str(fault_injection)}")
-            thought_empty = self.message_logger.placeholder()
-            self.message_logger.write("Next fault injection scope:")
-            selector_empty = self.message_logger.placeholder()
-
-            def display_response(response: dict) -> Tuple[str, dict]:
-                if (thought := response.get("thought")) is not None:
-                    thought_empty.write(thought)
-                if (selector := response.get("selector")) is not None:
-                    selector_empty.write(selector)
-                return thought, selector
-
             for response in self.scope_agent.stream({
                 "prev_k8s_yamls": file_list_to_str(prev_k8s_yamls),
                 "experiment_plan": experiment.to_str(),
@@ -208,9 +193,14 @@ class ExperimentRePlanAgent:
                 "curr_fault_injection": self.get_fault_str(fault_injection)},
                 {"callbacks": [logger]}
             ):
-                if debouncer.should_update():
-                    display_response(response)
-            _, selector = display_response(response)
+                text = ""
+                if (thought := response.get("thought")) is not None:
+                    text += f"{thought}\n"
+                if (selector := response.get("selector")) is not None:
+                    text += "Next fault injection scope:\n"
+                    text += f"{selector}"
+                self.message_logger.stream(text)
+            self.message_logger.stream(text, final=True)
             
             # change the scope
             fault_injection["params"]["selector"] = selector
@@ -229,13 +219,13 @@ class ExperimentRePlanAgent:
         tasks_str = ""
         for i, task in enumerate(tasks):
             if (name := task.get("name")) is not None:
-                tasks_str += f"- {header} #{i}: ```{name}```  \n"
+                tasks_str += f"- {header} #{i}: `{name}`  \n"
             if (workflow_name := task.get("workflow_name")) is not None:
-                tasks_str += f"  - Workflow Name: ```{workflow_name}```  \n"
+                tasks_str += f"- Workflow Name: `{workflow_name}`  \n"
             if (grace_period := task.get("grace_period")) is not None:
-                tasks_str += f"  - Grace Period: ```{grace_period}```  \n"
+                tasks_str += f"- Grace Period: `{grace_period}`  \n"
             if (duration := task.get("duration")) is not None:
-                tasks_str += f"  - Duration: ```{duration}```  \n"
+                tasks_str += f"- Duration: `{duration}`  \n"
         return tasks_str
     
     def replan_unittests(
@@ -270,32 +260,30 @@ class ExperimentRePlanAgent:
                 output_history = []
                 error_history = []
                 fname_prefix = f'unittest_{sanitize_filename(unittest["name"])}'
-                tool_type = "k8s" if get_file_extension(unittest["file_path"]) == ".py" else "k6"
+                if get_file_extension(unittest["file_path"]) == ".py":
+                    language = "python"
+                    tool_type = "k8s"
+                else:
+                    language = "javascript"
+                    tool_type = "k6"
 
                 #-----------------------------------------------------
                 # generate an adjusted unittest if needed (first try)
                 #-----------------------------------------------------
-                debouncer = StreamDebouncer()
                 self.message_logger.write("Adjusted unittest")
-                self.thought_empty = self.message_logger.placeholder()
-                self.code_empty = self.message_logger.placeholder()
-
-                def display_response(response: dict) -> Tuple[str, str]:
-                    if (thought := response.get("thought")) is not None:
-                        self.thought_empty.write(thought)
-                    if (code := response.get("code")) is not None:
-                        self.code_empty.code(code)
-                    return thought, code
-                
-                for token in self.unittest_agent.stream({
+                for response in self.unittest_agent.stream({
                     "prev_k8s_yamls": file_list_to_str(prev_k8s_yamls),
                     "prev_unittest": unittest_code,
                     "curr_k8s_yamls": file_list_to_str(curr_k8s_yamls)},
                     {"callbacks": [logger]}
                 ):
-                    if debouncer.should_update():
-                        display_response(token)
-                _, code = display_response(token)
+                    text = ""
+                    if (thought := response.get("thought")) is not None:
+                        text += f"{thought}\n"
+                    if (code := response.get("code")) is not None:
+                        text += f"```{language} {unittest['file_path']}\n{code}\n```"
+                    self.message_logger.stream(text)
+                self.message_logger.stream(text, final=True)
 
                 #-----------------------
                 # validate the unittest
@@ -320,7 +308,7 @@ class ExperimentRePlanAgent:
                                 fname=os.path.basename(file_path)
                             )
                         )
-                        output_history.append(token)
+                        output_history.append(response)
                     else:
                         write_file(file_path, unittest_code)
                         inspection_ = Inspection(
@@ -350,7 +338,9 @@ class ExperimentRePlanAgent:
                     print(console_log)
 
                     # rewrite the unit test
-                    token = self.debug_unittest(
+                    response = self.debug_unittest(
+                        filename=unittest["file_path"],
+                        language=language,
                         unittest_code=unittest_code,
                         prev_k8s_yamls=prev_k8s_yamls,
                         curr_k8s_yamls=curr_k8s_yamls,
@@ -358,7 +348,7 @@ class ExperimentRePlanAgent:
                         error_history=error_history,
                         logger=logger
                     )
-                    code = token["code"]
+                    code = response["code"]
 
                     # increment count
                     mod_count += 1
@@ -369,6 +359,8 @@ class ExperimentRePlanAgent:
     
     def debug_unittest(
         self,
+        filename: str,
+        language: Literal["python", "javascript"],
         unittest_code: str,
         prev_k8s_yamls: List[File],
         curr_k8s_yamls: List[File],
@@ -398,23 +390,18 @@ class ExperimentRePlanAgent:
         #----------------------------------
         # debugging the adjusted unit test
         #----------------------------------
-        debouncer = StreamDebouncer()
         self.message_logger.write("Debugging:")
-        self.error_handling_empty = self.message_logger.placeholder()
-
-        def display_response(response: dict) -> None:
-            if (thought := response.get("thought")) is not None:
-                self.error_handling_empty.write(thought)
-            if (code := response.get("code")) is not None:
-                self.code_empty.code(code)
-
-        for token in debugging_agent.stream({
+        for response in debugging_agent.stream({
             "prev_k8s_yamls": file_list_to_str(prev_k8s_yamls),
             "prev_unittest": unittest_code,
             "curr_k8s_yamls": file_list_to_str(curr_k8s_yamls)},
             {"callbacks": [logger]}
         ):
-            if debouncer.should_update():
-                display_response(token)
-        display_response(token)
-        return token
+            text = ""
+            if (thought := response.get("thought")) is not None:
+                text += f"{thought}\n"
+            if (code := response.get("code")) is not None:
+                text += f"```{language} {filename}\n{code}\n```"
+            self.message_logger.stream(text)
+        self.message_logger.stream(text, final=True)
+        return response

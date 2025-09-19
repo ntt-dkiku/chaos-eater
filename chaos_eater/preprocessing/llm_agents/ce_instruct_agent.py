@@ -55,14 +55,13 @@ class CEInstructAgent:
     def summarize_ce_instructions(self, ce_instructions: str) -> Tuple[LLMLog, str]:
         logger = LoggingCallback(name="ce_instruction_summary", llm=self.llm)
         debouncer = StreamDebouncer()
-        placeholder = self.message_logger.placeholder()
         for summary in self.agent.stream(
             {"ce_instructions": ce_instructions},
             {"callbacks": [logger]}
         ):
             if debouncer.should_update():
                 if (summary_str := summary.get("ce_instructions")) is not None:
-                    placeholder.write(summary_str)
+                    self.message_logger.stream(summary_str)
         summary_str = summary.get("ce_instructions")
-        placeholder.write(summary_str)
+        self.message_logger.stream(summary_str, final=True)
         return logger.log, summary_str

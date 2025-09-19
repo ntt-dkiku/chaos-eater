@@ -7,7 +7,6 @@ from ..steady_states.steady_state_definer import SteadyStates
 from ...ce_tools.ce_tool_base import CEToolBase
 from ...preprocessing.preprocessor import ProcessedData
 from ...utils.llms import LLM, LLMLog
-from ...utils.streamlit import StreamlitDisplayContainer
 from ...utils.functions import MessageLogger
 
 
@@ -26,8 +25,8 @@ class FaultDefiner:
         self.test_dir = test_dir
         self.namespace = namespace
         # agents
-        self.fault_scenario_agent = FaultScenarioAgent(llm, ce_tool)
-        self.refiner = FaultRefiner(llm, ce_tool)
+        self.fault_scenario_agent = FaultScenarioAgent(llm, ce_tool, message_logger)
+        self.refiner = FaultRefiner(llm, ce_tool, message_logger)
 
     def convert_steady_state_to_str(self, steady_states: List[Dict[str, str]]) -> str:
         steady_state_str = ""
@@ -45,8 +44,7 @@ class FaultDefiner:
         #-------------------
         # 0. initialization
         #-------------------
-        self.message_logger.write("##### Fault definition")
-        display_container = StreamlitDisplayContainer(self.message_logger)
+        self.message_logger.write("#### Failure definition")
         fault_dir = f"{work_dir}/faults"
         os.makedirs(fault_dir, exist_ok=True)
         logs = []
@@ -58,7 +56,6 @@ class FaultDefiner:
             user_input=data.to_k8s_overview_str(),
             ce_instructions=data.ce_instructions,
             steady_states=steady_states,
-            display_container=display_container
         )
         logs.append(scenario_log)
 
@@ -70,7 +67,6 @@ class FaultDefiner:
             ce_instructions=data.ce_instructions,
             steady_states=steady_states,
             fault_scenario=fault_scenario,
-            display_container=display_container,
             work_dir=fault_dir,
             max_retries=max_retries
         )

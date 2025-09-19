@@ -3,7 +3,7 @@ from typing import Dict, Tuple
 from ....preprocessing.preprocessor import ProcessedData
 from ....utils.wrappers import LLM, BaseModel, Field
 from ....utils.llms import build_json_agent, LoggingCallback, LLMLog
-from ....utils.functions import StreamDebouncer, MessageLogger
+from ....utils.functions import MessageLogger
 
 
 #---------
@@ -40,7 +40,11 @@ class SteadyStateCompletionCheck(BaseModel):
 # agent definition
 #------------------
 class SteadyStateCompletionCheckAgent:
-    def __init__(self, llm: LLM) -> None:
+    def __init__(
+        self,
+        llm: LLM,
+        message_logger: MessageLogger
+    ) -> None:
         self.llm = llm
         self.agent = build_json_agent(
             llm=llm,
@@ -48,25 +52,15 @@ class SteadyStateCompletionCheckAgent:
             pydantic_object=SteadyStateCompletionCheck,
             is_async=False
         )
+        self.message_logger = message_logger
 
     def check_steady_state_completion(
         self,
         input_data: ProcessedData,
         predefined_steady_states: list,
-        message_logger: MessageLogger
     ) -> Tuple[LLMLog, Dict[str, str]]:
         logger = LoggingCallback(name="steady_state_completion_check", llm=self.llm)
-        debouncer = StreamDebouncer()
-        container = message_logger.container(border=True)
-        container.write("##### Steady state completion check")
-        thought_empty = container.placeholder()
-        check_empty = container.placeholder()
-
-        def display_responce(responce) -> None:
-            if (thought := completion_check["thought"]) is not None:
-                thought_empty.write(thought)
-            if (check := completion_check["requires_addition"]) is not None:
-                check_empty.write(f"An additional steady state is needed?: ```{check}```")
+        self.message_logger.write("#### Steady state completion check")
 
         for completion_check in self.agent.stream({
             "user_input": input_data.to_k8s_overview_str(), 
@@ -74,7 +68,11 @@ class SteadyStateCompletionCheckAgent:
             "predefined_steady_states": predefined_steady_states.to_str()},
             {"callbacks": [logger]}
         ):
-            if debouncer.should_update():
-                display_responce(completion_check)
-        display_responce(completion_check)
+            text = ""
+            if (thought := completion_check["thought"]) is not None:
+                text += f"{thought}\n"
+            if (check := completion_check["requires_addition"]) is not None:
+                text += f"An additional steady state is needed?: `{check}`"
+            self.message_logger.stream(text)
+        self.message_logger.stream(text, final=True)
         return logger.log, completion_check
