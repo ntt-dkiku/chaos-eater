@@ -87,7 +87,7 @@ function CodeBlock({ code, language = "text", filename }) {
   );
 }
 
-export default function MessagesPanel({ messages }) {
+export default function MessagesPanel({ messages, showResume = false, onResume }) {
   const containerRef = useRef(null);
   const contentRef = useRef(null);           // Content wrapper to observe size changes
   const bottomElRef = useRef(null);          // Real ref for the bottom element
@@ -246,6 +246,38 @@ export default function MessagesPanel({ messages }) {
     <div ref={containerRef} className={msg_styles.container}>
       <div ref={contentRef}>
         {messages.length === 0 ? <div /> : messages.map(renderMsg)}
+
+        {/* Resume button - placed after messages */}
+        {showResume && (
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'flex-end',
+            marginTop: '12px',
+            marginBottom: '12px',
+            paddingRight: '6px'
+          }}>
+            <button
+              onClick={onResume}
+              title="Resume chaos eater"
+              aria-label="Resume"
+              style={{
+                padding: '8px 12px',
+                backgroundColor: '#84cc16',
+                border: '1px solid #4d7c0f',
+                color: '#000',
+                borderRadius: 8,
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: 'pointer',
+                boxShadow: '0 2px 8px rgba(132, 204, 22, 0.3)',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.filter = 'brightness(1.05)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.filter = 'none'; }}
+            >
+              Resume
+            </button>
+          </div>
+        )}
 
         {/* Sentinel element for Intersection Observer */}
         <div ref={attachBottom} style={{ height: 1 }} />

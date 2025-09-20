@@ -194,6 +194,7 @@ class JobManager:
         self.tasks: Dict[str, asyncio.Task] = {}
         self.chaos_eaters: Dict[str, ChaosEater] = {}
         self.events: Dict[str, List[dict]] = {}
+        self.callbacks: Dict[str, CancellableAPICallback] = {}  # Keep reference to callbacks
         self.lock = asyncio.Lock()
 
     async def create_job(self, _: ChaosEaterJobRequest) -> str:
@@ -233,17 +234,29 @@ class JobManager:
         return jobs
 
     async def cancel_job(self, job_id: str) -> bool:
-        # Note: If work is running inside a thread via run_in_executor, this is best-effort.
+        """Improved cancellation handling"""
+        # 1. Set cancellation flag in callback
+        callback = self.callbacks.get(job_id)
+        if callback:
+            callback.cancelled = True  # This will trigger exception on next stream event
+
+        # 2. Also cancel asyncio task (as fallback)
         task = self.tasks.get(job_id)
         if task and not task.done():
             task.cancel()
-            async with self.lock:
-                if job_id in self.jobs:
-                    self.jobs[job_id].status = JobStatus.CANCELLED
-                    self.jobs[job_id].updated_at = datetime.now()
-                    self.jobs[job_id].progress = "Job cancelled (best-effort)"
-            return True
-        return False
+        
+        # 3. Update job status
+        async with self.lock:
+            if job_id in self.jobs:
+                self.jobs[job_id].status = JobStatus.CANCELLED
+                self.jobs[job_id].updated_at = datetime.now()
+                self.jobs[job_id].progress = "Job cancelled"
+                
+        # 4. Cleanup
+        if job_id in self.callbacks:
+            del self.callbacks[job_id]
+            
+        return True
 
     async def update_job_progress(self, job_id: str, progress: str):
         async with self.lock:
@@ -335,6 +348,21 @@ class APICallback:
     def on_postprocess_start(self):       self._push("Phase EX: Postprocessing started")
     def on_postprocess_end(self, _):      self._push("Phase EX: Postprocessing completed")
 
+class CancellableAPICallback(APICallback):
+    def __init__(
+        self, 
+        job_manager: JobManager,
+        job_id: str,
+        loop: asyncio.AbstractEventLoop
+    ):
+        super().__init__(job_manager, job_id, loop)
+        self.cancelled = False
+
+    def on_stream(self, channel: str, event: dict) -> None:
+        """Check cancellation on every stream event"""
+        if self.cancelled:
+            raise asyncio.CancelledError(f"Job {self.job_id} cancelled")
+        super().on_stream(channel, event)
 
 # ---------------------------------------------------------------------
 # Background runner
@@ -368,7 +396,12 @@ async def run_chaos_eater_cycle(
 
         # Thread-safe callback
         loop = asyncio.get_running_loop()
-        callback = APICallback(job_manager, job_id, loop)
+        callback = CancellableAPICallback(job_manager, job_id, loop)
+
+        # Store callback reference in JobManager
+        job_manager.callbacks[job_id] = callback
+
+        # Set emitter
         message_logger.set_emitter(lambda ev: callback.on_stream("log", ev))
 
         # Build/convert input
@@ -376,7 +409,10 @@ async def run_chaos_eater_cycle(
             ce_input = ChaosEaterInput(**request.input_data)
         else:
             # project_path flow already validated by request model
-            built = build_input_from_project_path(request.project_path, override_instructions=request.ce_instructions)
+            built = build_input_from_project_path(
+                request.project_path, 
+                override_instructions=request.ce_instructions
+            )
             ce_input = ChaosEaterInput(**built)
 
         # Run CE in thread pool (avoid blocking the event loop)
@@ -406,8 +442,9 @@ async def run_chaos_eater_cycle(
         async with job_manager.lock:
             job_manager.jobs[job_id].status = JobStatus.CANCELLED
             job_manager.jobs[job_id].updated_at = datetime.now()
-            job_manager.jobs[job_id].progress = "Job cancelled (best-effort)"
-        raise
+            job_manager.jobs[job_id].progress = "Job cancelled"
+        logger.info(f"Job {job_id} was cancelled")
+
     except Exception as e:
         logger.exception(f"Job {job_id} failed")
         async with job_manager.lock:
@@ -415,8 +452,11 @@ async def run_chaos_eater_cycle(
             job_manager.jobs[job_id].updated_at = datetime.now()
             job_manager.jobs[job_id].error = str(e)
             job_manager.jobs[job_id].progress = f"Job failed: {e}"
+
     finally:
+        # Cleanup
         job_manager.tasks.pop(job_id, None)
+        job_manager.callbacks.pop(job_id, None)  # Remove callback reference
 
 
 # ---------------------------------------------------------------------
@@ -539,16 +579,32 @@ async def list_jobs(
 
 @app.delete("/jobs/{job_id}")
 async def cancel_job(job_id: str, job_mgr: JobManager = Depends(get_job_manager)):
+    """
+    Cancel a running job.
+    This will set the cancellation flag and interrupt the job at the next checkpoint.
+    """
     job = await job_mgr.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
-    if job.status != JobStatus.RUNNING:
-        raise HTTPException(status_code=400, detail=f"Job {job_id} is not running (status: {job.status})")
+    
+    if job.status == JobStatus.CANCELLED:
+        return {"message": f"Job {job_id} is already cancelled", "status": job.status}
+        
+    if job.status in {JobStatus.COMPLETED, JobStatus.FAILED}:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Cannot cancel job {job_id} with status: {job.status}"
+        )
+    
     cancelled = await job_mgr.cancel_job(job_id)
     if cancelled:
-        return {"message": f"Job {job_id} cancelled (best-effort)."}
-    raise HTTPException(status_code=400, detail=f"Failed to cancel job {job_id}")
-
+        return {
+            "message": f"Job {job_id} cancellation initiated",
+            "status": "CANCELLING",
+            "note": "Job will stop at the next checkpoint"
+        }
+    
+    raise HTTPException(status_code=500, detail=f"Failed to cancel job {job_id}")
 
 @app.get("/jobs/{job_id}/logs")
 async def get_job_logs(job_id: str, job_mgr: JobManager = Depends(get_job_manager)):

@@ -3,6 +3,7 @@ import {
   ChevronDown,
   ChevronUp,
   Send,
+  Pause,
   CheckCircle,
   Eye,
   EyeOff,
@@ -418,6 +419,128 @@ export default function ChaosEaterApp() {
   //------------------------------------------------------------
   // run ce cycle
   //------------------------------------------------------------
+  const [runState, setRunState] = useState('idle');
+
+  const handleStop = async () => {
+    setRunState('paused');
+    setIsLoading(false);
+    
+    // Close WebSocket
+    if (wsRef.current) {
+      try {
+        wsRef.current.close();
+        wsRef.current = null;
+      } catch (e) {
+        console.error('Failed to close WebSocket:', e);
+      }
+    }
+    
+    if (!jobId) {
+      setNotification({ type: 'info', message: 'No active job' });
+      return;
+    }
+    
+    // Send cancellation request
+    try {
+      const response = await fetch(`${API_BASE}/jobs/${jobId}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        
+        if (response.status === 404) {
+          setNotification({ type: 'warning', message: 'Job not found' });
+          return;
+        } else if (response.status === 400) {
+          setNotification({ 
+            type: 'warning', 
+            message: errorData.detail || 'Job may not be running or already finished' 
+          });
+          return;
+        } else {
+          throw new Error(`Cancel failed: ${response.statusText}`);
+        }
+      }
+      
+      // Poll for status confirmation (max 10 seconds)
+      let attempts = 0;
+      const maxAttempts = 10;
+      
+      const checkInterval = setInterval(async () => {
+        attempts++;
+        
+        try {
+          const statusResponse = await fetch(`${API_BASE}/jobs/${jobId}`);
+          if (statusResponse.ok) {
+            const job = await statusResponse.json();
+            
+            if (job.status === 'cancelled') {
+              clearInterval(checkInterval);
+              setNotification({ 
+                type: 'success', 
+                message: 'Job stopped successfully' 
+              });
+              return;
+            }
+            
+            if (job.status === 'failed') {
+              clearInterval(checkInterval);
+              setNotification({ 
+                type: 'info', 
+                message: 'Job stopped with error' 
+              });
+              return;
+            }
+            
+            if (job.status === 'completed') {
+              clearInterval(checkInterval);
+              setNotification({ 
+                type: 'info', 
+                message: 'Job already completed' 
+              });
+              return;
+            }
+          }
+        } catch (e) {
+          console.error('Status check failed:', e);
+        }
+        
+        if (attempts >= maxAttempts) {
+          clearInterval(checkInterval);
+          setNotification({ 
+            type: 'warning', 
+            message: 'Stop request sent, but job status unclear. Please refresh to check status.' 
+          });
+        }
+      }, 1000);
+      
+    } catch (error) {
+      console.error('Stop failed:', error);
+      
+      // Fallback: try fire-and-forget request
+      try {
+        fetch(`${API_BASE}/jobs/${jobId}`, {
+          method: 'DELETE',
+          keepalive: true
+        }).catch(() => {});
+      } catch {}
+      
+      setNotification({ 
+        type: 'error', 
+        message: 'Failed to stop job. Backend may still be processing.' 
+      });
+    }
+  };
+
+  // resume 
+  const handleResume = async () => {
+    await handleSubmit();
+  };
+
   const handleSubmit = async () => {
     if (!formData.cluster) {
       setNotification({ type: 'error', message: 'Please select a cluster' });
@@ -428,6 +551,7 @@ export default function ChaosEaterApp() {
       return;
     }
     setIsLoading(true);
+    setRunState('running');
 
     // 1. prepare request body for /jobs
     const payload = {
@@ -488,16 +612,16 @@ export default function ChaosEaterApp() {
       socket.onclose = () => {
         setMessages((m) => [...m, { type: 'status', role: 'assistant', content: 'Stream closed' }]);
         setIsLoading(false);
+        setRunState((prev) => (prev === 'paused' ? 'paused' : 'idle'));
       };
     } catch (err) {
       console.error(err);
       setNotification({ type: 'error', message: String(err.message || err) });
       setIsLoading(false);
+      setRunState('idle');
     }
   };
 
-  const [uploadHovered, setUploadHovered] = useState(false);
-  const [logoHovered, setLogoHovered] = useState(false);
   const [buttonHovered, setButtonHovered] = useState({});
 
   //---------------------------
@@ -1263,7 +1387,12 @@ export default function ChaosEaterApp() {
           overflow: 'hidden',
           minHeight: 0,
         }}>
-          <MessagesPanel messages={messages} />
+          {/* <MessagesPanel messages={messages} /> */}
+          <MessagesPanel
+            messages={messages}
+            showResume={runState === 'paused'}
+            onResume={handleResume}
+          />
         </div>
 
         {/* landing image */}
@@ -1613,39 +1742,71 @@ export default function ChaosEaterApp() {
                   </div>
                 )}
 
-                <button
-                  onClick={handleSubmit}
-                  disabled={isLoading}
-                  style={{
-                    width: 32,
-                    height: 32,
-                    padding: 0,
-                    backgroundColor: '#84cc16',
-                    border: 'none',
-                    borderRadius: 6,
-                    color: '#000000',
-                    cursor: isLoading ? 'not-allowed' : 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    transition: 'all 0.2s ease',
-                    opacity: isLoading ? 0.6 : 1,
-                    boxShadow: '0 2px 8px rgba(132, 204, 22, 0.3)',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!isLoading) {
+                {runState === 'running' ? (
+                  <button
+                    onClick={handleStop}
+                    style={{
+                      width: 32,
+                      height: 32,
+                      padding: 0,
+                      backgroundColor: '#84cc16',
+                      border: 'none',
+                      borderRadius: 6,
+                      color: '#000000',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      transition: 'all 0.2s ease',
+                      boxShadow: '0 2px 8px rgba(239, 68, 68, 0.3)',
+                    }}
+                    onMouseEnter={(e) => {
                       e.currentTarget.style.backgroundColor = '#a3d635';
                       e.currentTarget.style.transform = 'scale(1.05)';
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = '#84cc16';
-                    e.currentTarget.style.transform = 'scale(1)';
-                  }}
-                  title="Send (Enter to submit)"
-                >
-                  {isLoading ? <Loader size={16} className="animate-spin" /> : <Send size={16} />}
-                </button>
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = '#84cc16';
+                      e.currentTarget.style.transform = 'scale(1)';
+                    }}
+                    title="Stop"
+                  >
+                    <Pause size={18} strokeWidth={2} />
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleSubmit}
+                    disabled={isLoading}
+                    style={{
+                      width: 32,
+                      height: 32,
+                      padding: 0,
+                      backgroundColor: '#84cc16',
+                      border: 'none',
+                      borderRadius: 6,
+                      color: '#000000',
+                      cursor: isLoading ? 'not-allowed' : 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      transition: 'all 0.2s ease',
+                      opacity: isLoading ? 0.6 : 1,
+                      boxShadow: '0 2px 8px rgba(132, 204, 22, 0.3)',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isLoading) {
+                        e.currentTarget.style.backgroundColor = '#a3d635';
+                        e.currentTarget.style.transform = 'scale(1.05)';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = '#84cc16';
+                      e.currentTarget.style.transform = 'scale(1)';
+                    }}
+                    title="Send (Enter to submit)"
+                  >
+                    {isLoading ? <Loader size={16} className="animate-spin" /> : <Send size={16} />}
+                  </button>
+                )}
               </div>
             </div>
           </div>
