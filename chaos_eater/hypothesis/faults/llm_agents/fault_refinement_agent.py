@@ -1,11 +1,11 @@
 import yaml
 import json
-from typing import List, Dict, Any, Tuple, Iterable
+from typing import List, Dict, Any, Tuple, Optional, Iterable
 
 from ...steady_states.steady_state_definer import SteadyStates
 from ....ce_tools.ce_tool_base import CEToolBase
 from ....utils.wrappers import LLM, BaseModel
-from ....utils.llms import build_json_agent, LLMLog, LoggingCallback
+from ....utils.llms import build_json_agent, AgentLogger
 from ....utils.functions import (
     render_jinja_template,
     write_file,
@@ -100,9 +100,9 @@ class FaultRefiner:
         steady_states: SteadyStates,
         fault_scenario: Dict[str, str],
         work_dir: str,
-        max_retries: int = 3
-    ) -> Tuple[LLMLog, FaultScenario]:
-        self.logger = LoggingCallback(name="refine_fault_params", llm=self.llm)
+        max_retries: int = 3,
+        agent_logger: Optional[AgentLogger] = None
+    ) -> FaultScenario:
         self.output_emitter.write("##### ⚙ Detailed fault parameters")
         faults_ = []
         for para_faults in fault_scenario["faults"]:
@@ -117,7 +117,8 @@ class FaultRefiner:
                     ce_instructions=ce_instructions,
                     steady_states=steady_states.to_overview_str(),
                     fault_scenario=self.convert_fault_senario_to_str(fault_scenario),
-                    fault=fault
+                    fault=fault,
+                    agent_logger=agent_logger
                 )
                 #-----------------------
                 # validate fault params
@@ -140,7 +141,8 @@ class FaultRefiner:
                         fault_scenario=self.convert_fault_senario_to_str(fault_scenario),
                         fault=fault,
                         output_history=output_history,
-                        error_history=error_history
+                        error_history=error_history,
+                        agent_logger=agent_logger
                     )
                     output_history.append(refined_prams)
                 #---------------------- 
@@ -151,13 +153,10 @@ class FaultRefiner:
                     name_id=fault["name_id"],
                     params=refined_prams
                 ))
-        return (
-            self.logger.log, 
-            FaultScenario(
-                event=fault_scenario["event"],
-                faults=faults_,
-                description=fault_scenario["thought"]
-            )
+        return FaultScenario(
+            event=fault_scenario["event"],
+            faults=faults_,
+            description=fault_scenario["thought"]
         )
 
     def refine_fault(
@@ -168,8 +167,20 @@ class FaultRefiner:
         fault_scenario: str,
         fault: Dict[str, str],
         output_history: List[dict] = [],
-        error_history: List[str] = []
+        error_history: List[str] = [],
+        agent_logger: Optional[AgentLogger] = None
     ) -> Dict[str, Any]:
+        #----------------
+        # initialization
+        #----------------
+        cb = agent_logger and agent_logger.get_callback(
+            phase="hypothesis",
+            agent_name=f"refine_fault_params_{len(output_history)}"
+        )
+
+        #----------------------
+        # prompt configuration
+        #----------------------
         # generate chat history
         chat_messages=[("system", SYS_REFINE_FAULT), ("human", USER_REFINE_FAULT)]
         for output, error in zip(output_history, error_history):
@@ -183,7 +194,10 @@ class FaultRefiner:
             pydantic_object=fault_params,
             is_async=False
         )
+
+        #--------
         # output
+        #--------
         result = {}
         self.output_emitter.write(f"Detailed parameters of `{fault['name']}` ({fault['scope']})")
         for response in agent.stream({
@@ -193,7 +207,7 @@ class FaultRefiner:
             "fault_scenario": fault_scenario,
             "refined_fault_type": fault["name"] + f"({fault['scope']})" if len(fault['scope']) > 0 else fault["name"],
             "ce_tool_name": self.ce_tool.name},
-            {"callbacks": [self.logger]}
+            {"callbacks": [cb]} if cb else {}
         ):
             for key in fault_params.__fields__.keys():
                 key_item = response.get(key)

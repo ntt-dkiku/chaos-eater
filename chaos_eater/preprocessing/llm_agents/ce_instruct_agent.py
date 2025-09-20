@@ -1,8 +1,8 @@
-from typing import Tuple
+from typing import Optional
 
 from ...utils.wrappers import LLM, LLMBaseModel, LLMField
-from ...utils.llms import build_json_agent, LoggingCallback, LLMLog
-from ...utils.functions import MessageLogger, StreamDebouncer
+from ...utils.llms import build_json_agent, AgentLogger
+from ...utils.functions import MessageLogger
 
 
 SYS_SUMMARIZE_CE_INSTRUCTIONS = """\
@@ -52,16 +52,21 @@ class CEInstructAgent:
             is_async=False
         )
 
-    def summarize_ce_instructions(self, ce_instructions: str) -> Tuple[LLMLog, str]:
-        logger = LoggingCallback(name="ce_instruction_summary", llm=self.llm)
-        debouncer = StreamDebouncer()
+    def summarize_ce_instructions(
+        self,
+        ce_instructions: str,
+        agent_logger: Optional[AgentLogger] = None
+    ) -> str:
+        cb = agent_logger and agent_logger.get_callback(
+            phase="preprocessing",
+            agent_name="ce_instruction_summary"
+        )
+
         for summary in self.agent.stream(
             {"ce_instructions": ce_instructions},
-            {"callbacks": [logger]}
+            {"callbacks": [cb]} if cb else {}
         ):
-            if debouncer.should_update():
-                if (summary_str := summary.get("ce_instructions")) is not None:
-                    self.message_logger.stream(summary_str)
-        summary_str = summary.get("ce_instructions")
+            if (summary_str := summary.get("ce_instructions")) is not None:
+                self.message_logger.stream(summary_str)
         self.message_logger.stream(summary_str, final=True)
-        return logger.log, summary_str
+        return summary_str

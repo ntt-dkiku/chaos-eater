@@ -1,10 +1,10 @@
-from typing import Tuple
+from typing import Optional
 
 from ...preprocessing.preprocessor import ProcessedData
 from ...hypothesis.hypothesizer import Hypothesis
 from ...experiment.experimenter import ChaosExperiment, ChaosExperimentResult
 from ...utils.wrappers import LLM, LLMBaseModel, LLMField
-from ...utils.llms import build_json_agent, LLMLog, LoggingCallback
+from ...utils.llms import build_json_agent, AgentLogger
 from ...utils.functions import dict_to_str, MessageLogger
 
 
@@ -71,9 +71,14 @@ class AnalysisAgent:
         hypothesis: Hypothesis,
         experiment: ChaosExperiment,
         reconfig_history,
-        experiment_result: ChaosExperimentResult
-    ) -> Tuple[LLMLog, str]: # NOTE: not Analysis, but str
-        logger = LoggingCallback(name="analysis_experiment", llm=self.llm)
+        experiment_result: ChaosExperimentResult,
+        agent_logger: Optional[AgentLogger] = None
+    ) -> str: # NOTE: not Analysis, but str
+        cb = agent_logger and agent_logger.get_callback(
+            phase="analysis",
+            agent_name=f"analysis_{len(reconfig_history)}"
+        )
+
         if len(reconfig_history) == 0:
             agent = build_json_agent(
                 llm=self.llm,
@@ -101,9 +106,9 @@ class AnalysisAgent:
             "hypothesis_overview": hypothesis.to_str(),
             "experiment_plan_summary": experiment.plan["summary"],
             "experiment_result": experiment_result.to_str()},
-            {"callbacks": [logger]}
+            {"callbacks": [cb]} if cb else {}
         ):
             if (analysis := token.get("report")) is not None:
                 self.message_logger.stream(analysis)
         self.message_logger.stream(analysis, final=True)
-        return logger.log, analysis
+        return analysis

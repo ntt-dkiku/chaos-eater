@@ -12,8 +12,7 @@ from .postprocessing.postprocessor import PostProcessor, ChaosCycle
 from .ce_tools.ce_tool_base import CEToolBase
 from .utils.constants import SKAFFOLD_YAML_TEMPLATE_PATH
 from .utils.wrappers import BaseModel, LLM
-from .utils.llms import LLMLog
-from .utils.streamlit import Spinner
+from .utils.llms import AgentLogger
 from .backend.streaming import FrontEndDisplayHandler
 from .utils.k8s import remove_all_resources_by_labels, remove_all_resources_by_namespace
 from .utils.schemas import File
@@ -34,7 +33,6 @@ from .utils.functions import (
 class ChaosEaterOutput(BaseModel):
     output_dir: str = ""
     work_dir: str = ""
-    logs: Dict[str, List[LLMLog] | List[List[LLMLog]]] = {}
     run_time: Dict[str, float | List[float]] = {}
     ce_cycle: ChaosCycle = ChaosCycle()
 
@@ -80,9 +78,12 @@ class ChaosEater:
         max_retries: int = 3,
         callbacks: List[ChaosEaterCallback] = []
     ) -> ChaosEaterOutput:
+        #----------------
+        # initialization
+        #----------------
         self.message_logger.subheader("Phase 0: Preprocessing", divider="gray")
         # clean the cluster
-        spinner = Spinner(f"##### Cleaning the cluster ```{kube_context}```...")
+        self.message_logger.write(f"##### Cleaning the cluster: `{kube_context}`")
         remove_all_resources_by_namespace(
             kube_context,
             self.namespace,
@@ -94,7 +95,6 @@ class ChaosEater:
                 f"project={project_name}",
                 display_handler=FrontEndDisplayHandler(self.message_logger)
             )
-        spinner.end(f"##### Cleaning the cluster ```{kube_context}```... Done")
         # prepare a working directory
         if work_dir is None:
             work_dir = f"{self.root_dir}/cycle_{get_timestamp()}"
@@ -103,68 +103,60 @@ class ChaosEater:
         output_dir = f"{work_dir}/outputs"
         os.makedirs(output_dir, exist_ok=True)
         ce_output = ChaosEaterOutput(work_dir=work_dir)
+        agent_logger = AgentLogger(
+            llm=self.llm,
+            log_path=f"{work_dir}/logs/agent_log.jsonl",
+        )
         entire_start_time = time.time()
 
         #-----------------------------------------------------------------
         # 0. preprocessing (input deployment & validation and reflection)
         #-----------------------------------------------------------------
-        for cb in callbacks:
-            cb.on_preprocess_start()
         start_time = time.time()
-        preprcess_logs, data = self.preprocessor.process(
+        data = self.preprocessor.process(
             input=input,
             kube_context=kube_context,
             work_dir=work_dir,
             project_name=project_name,
-            is_new_deployment=is_new_deployment
+            is_new_deployment=is_new_deployment,
+            agent_logger=agent_logger
         )
         ce_output.run_time["preprocess"] = time.time() - start_time
-        ce_output.logs["preprocess"] = preprcess_logs
         ce_output.ce_cycle.processed_data = data
         save_json(f"{output_dir}/output.json", ce_output.dict()) # save intermediate results
-        for cb in callbacks:
-            cb.on_preprocess_end(preprcess_logs)
 
         #---------------
         # 1. hypothesis
         #---------------
-        for cb in callbacks:
-            cb.on_hypothesis_start()
         self.message_logger.subheader("Phase 1: Hypothesis", divider="gray")
         start_time = time.time()
-        hypothesis_logs, hypothesis = self.hypothesizer.hypothesize(
+        hypothesis = self.hypothesizer.hypothesize(
             data=data,
             kube_context=kube_context,
             work_dir=work_dir,
             max_num_steady_states=max_num_steadystates,
-            max_retries=max_retries
+            max_retries=max_retries,
+            agent_logger=agent_logger
         )
         ce_output.run_time["hypothesis"] = time.time() - start_time
-        ce_output.logs["hypothesis"] = hypothesis_logs
         ce_output.ce_cycle.hypothesis = hypothesis
         save_json(f"{output_dir}/output.json", ce_output.dict()) # save intermediate results
-        for cb in callbacks:
-            cb.on_hypothesis_end(hypothesis_logs)
 
         #---------------------
         # 2. Chaos Experiment
         #---------------------
         self.message_logger.subheader("Phase 2: Chaos Experiment", divider="gray")
-        for cb in callbacks:
-            cb.on_experiment_plan_start()
         # 2.1. plan a chaos experiment
         start_time = time.time()
-        experiment_logs, experiment = self.experimenter.plan_experiment(
+        experiment = self.experimenter.plan_experiment(
             data=data,
             hypothesis=hypothesis,
-            work_dir=work_dir
+            work_dir=work_dir,
+            agent_logger=agent_logger
         )
         ce_output.run_time["experiment_plan"] = time.time() - start_time
-        ce_output.logs["experiment_plan"] = experiment_logs
         ce_output.ce_cycle.experiment=experiment
         save_json(f"{output_dir}/output.json", ce_output.dict())
-        for cb in callbacks:
-            cb.on_experiment_plan_end(experiment_logs)
 
         #------------------
         # improvement loop
@@ -172,8 +164,6 @@ class ChaosEater:
         ce_output.run_time["analysis"] = []
         ce_output.run_time["improvement"] = []
         ce_output.run_time["experiment_execution"] = []
-        ce_output.logs["analysis"] = []
-        ce_output.logs["improvement"] = []
         mod_k8s_count = 0
         mod_dir = data.work_dir
         k8s_yamls = data.k8s_yamls
@@ -181,15 +171,11 @@ class ChaosEater:
         mod_dir_history = [mod_dir]
         while (1):
             # 2.2. conduct the chaos experiment
-            for cb in callbacks:
-                cb.on_experiment_start()
             start_time = time.time()
             experiment_result = self.experimenter.run(experiment, kube_context=kube_context)
             ce_output.run_time["experiment_execution"].append(time.time() - start_time)
             ce_output.ce_cycle.result_history.append(experiment_result)
             save_json(f"{output_dir}/output.json", ce_output.dict())
-            for cb in callbacks:
-                cb.on_experiment_end()
 
             # check if the hypothesis is satisfied
             if experiment_result.all_tests_passed:
@@ -206,34 +192,28 @@ class ChaosEater:
             #-------------
             # 3. analysis
             #-------------
-            for cb in callbacks:
-                cb.on_analysis_start()
             self.message_logger.subheader("Phase 3: Analysis", divider="gray")
             start_time = time.time()
-            analysis_logs, analysis = self.analyzer.analyze(
+            analysis = self.analyzer.analyze(
                 mod_count=mod_k8s_count,
                 input_data=data,
                 hypothesis=hypothesis,
                 experiment=experiment,
                 reconfig_history=ce_output.ce_cycle.reconfig_history,
                 experiment_result=experiment_result,
-                work_dir=work_dir
+                work_dir=work_dir,
+                agent_logger=agent_logger
             )
             ce_output.run_time["analysis"].append(time.time() - start_time)
-            ce_output.logs["analysis"].append(analysis_logs)
             ce_output.ce_cycle.analysis_history.append(analysis)
             save_json(f"{output_dir}/output.json", ce_output.dict())
-            for cb in callbacks:
-                cb.on_analysis_end(analysis_logs)
 
             #----------------
             # 4. improvement
             #----------------
-            for cb in callbacks:
-                cb.on_improvement_start()
             self.message_logger.subheader("Phase 4: Improvement", divider="gray")
             start_time = time.time()
-            reconfig_logs, reconfig = self.improver.reconfigure(
+            reconfig = self.improver.reconfigure(
                 input_data=data,
                 hypothesis=hypothesis,
                 experiment=experiment,
@@ -244,14 +224,12 @@ class ChaosEater:
                 reconfig_history=ce_output.ce_cycle.reconfig_history,
                 kube_context=kube_context,
                 work_dir=work_dir,
-                max_retries=max_retries
+                max_retries=max_retries,
+                agent_logger=agent_logger
             )
             ce_output.run_time["improvement"].append(time.time() - start_time)
-            ce_output.logs["improvement"].append(reconfig_logs)
             ce_output.ce_cycle.reconfig_history.append(reconfig)
             save_json(f"{output_dir}/output.json", ce_output.dict())
-            for cb in callbacks:
-                cb.on_improvement_end(reconfig_logs)
 
             #-------------------------------
             # preparation for the next loop
@@ -311,7 +289,6 @@ class ChaosEater:
                     ))
             # new_yamls
             for reconfig_yaml in reconfig_yamls:
-                print(reconfig_yaml)
                 if reconfig_yaml["mod_type"] == "create":
                     k8s_yamls_tmp.append(File(
                         path=f"{mod_dir}/{reconfig_yaml['fname']}",
@@ -336,7 +313,7 @@ class ChaosEater:
             #-----------------------------------
             # deploy the reconfigured k8s yamls
             #-----------------------------------
-            spinner = Spinner(f"##### Deploying reconfigured resources...")
+            self.message_logger.write(f"##### Deploying reconfigured resources")
             try:
                 run_command(
                     cmd=f"skaffold run --kube-context {kube_context} -l project={project_name}",
@@ -345,7 +322,6 @@ class ChaosEater:
                 )
             except subprocess.CalledProcessError as e:
                 raise RuntimeError("K8s resource deployment failed.")
-            spinner.end(f"##### Deploying reconfigured resources... Done")
             self.message_logger.write("##### Resource statuses")
             run_command(
                 cmd=f"kubectl get all --all-namespaces --context {kube_context} --selector=project={project_name}",
@@ -355,41 +331,36 @@ class ChaosEater:
             #------------------------------------------------------
             # replan the experiment (modify only fault selectorss)
             #------------------------------------------------------
-            for cb in callbacks:
-                cb.on_experiment_replan_start()
             start_time = time.time()
-            experiment_logs, experiment = self.experimenter.replan_experiment(
+            experiment = self.experimenter.replan_experiment(
                 prev_k8s_yamls=prev_k8s_yamls,
                 prev_experiment=experiment,
                 curr_k8s_yamls=k8s_yamls,
                 kube_context=kube_context,
                 work_dir=work_dir,
-                max_retries=max_retries
+                max_retries=max_retries,
+                agent_logger=agent_logger
             )
             ce_output.run_time["experiment_replan"] = time.time() - start_time
-            ce_output.logs["experiment_replan"] = experiment_logs
             ce_output.ce_cycle.experiment = experiment
             save_json(f"{output_dir}/output.json", ce_output.dict())
-            for cb in callbacks:
-                cb.on_experiment_replan_end(experiment_logs)
 
         #------------------------------
         # 5. post-processing (summary)
         #------------------------------
-        for cb in callbacks:
-            cb.on_postprocess_start()
         self.message_logger.subheader("Phase EX: Postprocessing", divider="gray")
         ce_output.ce_cycle.completes_reconfig = True
         save_json(f"{output_dir}/output.json", ce_output.dict())
         # summary
         start_time = time.time()
-        summary_logs, summary = self.postprocessor.process(ce_cycle=ce_output.ce_cycle, work_dir=output_dir)
+        summary = self.postprocessor.process(
+            ce_cycle=ce_output.ce_cycle,
+            work_dir=output_dir,
+            agent_logger=agent_logger
+        )
         ce_output.run_time["summary"] = time.time() - start_time
-        ce_output.logs["summary"] = summary_logs
         ce_output.ce_cycle.summary = summary
         save_json(f"{output_dir}/output.json", ce_output.dict())
-        for cb in callbacks:
-            cb.on_postprocess_end(summary_logs)
 
         #----------
         # epilogue

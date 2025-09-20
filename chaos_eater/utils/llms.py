@@ -1,6 +1,6 @@
 import os
 import requests
-from typing import List, Tuple, Callable, Iterator
+from typing import List, Tuple, Dict, Callable, Iterator
 
 import tiktoken
 import openai
@@ -165,14 +165,14 @@ class TokenUsage(BaseModel):
     total_tokens: int
 
 class LLMLog(BaseModel):
-    name: str
+    agent_name: str
     token_usage: TokenUsage
     message_history: List[List[str] | str]
 
 class LoggingCallback(BaseCallbackHandler):
     def __init__(
         self,
-        name: str,
+        agent_name: str,
         llm: LLM,
         streaming: bool = True
     ) -> None:
@@ -203,9 +203,9 @@ class LoggingCallback(BaseCallbackHandler):
             total_tokens=0
         )
         self.message_history = []
-        self.name = name
+        self.agent_name = agent_name
         self.log = LLMLog(
-            name=self.name,
+            agent_name=self.agent_name,
             token_usage=self.token_usage,
             message_history=self.message_history
         )
@@ -235,10 +235,120 @@ class LoggingCallback(BaseCallbackHandler):
                         self.token_usage.total_tokens += tokens.get("total_tokens", -1)
                 self.message_history.append(generation.text)
         self.log = LLMLog(
-            name=self.name,
+            agent_name=self.agent_name,
             token_usage=self.token_usage,
             message_history=self.message_history
         )
+
+import json
+import time
+from threading import Lock
+from typing import Dict, List
+
+class LogBundle(BaseModel):
+    logs: Dict[str, List[LLMLog]] = {}
+    updated_at: float = 0.0
+
+    def dict(self) -> dict:
+        d = self.dict()
+        return d
+
+class AgentLogger:
+    def __init__(
+        self,
+        llm: LLM,
+        log_path: str = "./logs/agent_log.jsonl"
+    ):
+        self.llm = llm
+        self.bundle = LogBundle(logs={}, updated_at=time.time())
+        self.log_path = log_path
+        self._lock = Lock()
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+
+    def add_log(
+        self,
+        phase: str,
+        log: LLMLog
+    ) -> None:
+        with self._lock:
+            self.bundle.logs.setdefault(phase, []).append(log)
+            self.bundle.updated_at = time.time()
+            self._append_jsonl_event("add_log", phase, log)
+
+    def add_logs(
+        self,
+        phase: str,
+        logs: List[LLMLog]
+    ) -> None:
+        with self._lock:
+            self.bundle.logs.setdefault(phase, []).extend(logs)
+            self.bundle.updated_at = time.time()
+            for lg in logs:
+                self._append_jsonl_event("add_log", phase, lg)
+
+    def _append_jsonl_event(
+        self,
+        event_type: str,
+        phase: str,
+        log: LLMLog
+    ) -> None:
+        if not self.log_path:
+            return
+        event = {
+            "type": event_type,
+            "ts": time.time(),
+            "phase": phase,
+            "log": log.dict(),
+        }
+        line = json.dumps(event, ensure_ascii=False)
+        with open(self.log_path, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+
+    def get_callback(
+        self,
+        phase: str,
+        agent_name: str,
+        streaming: bool = True
+    ) -> BaseCallbackHandler:
+        inner = LoggingCallback(
+            agent_name=agent_name,
+            llm=self.llm,
+            streaming=streaming
+        )
+        return AggregatingCallback(
+            inner=inner,
+            aggregator=self,
+            phase=phase
+        )
+    
+    def get_bundle(self) -> LogBundle:
+        with self._lock:
+            return self.bundle
+
+    def get_phase(self, phase: str) -> List[LLMLog]:
+        with self._lock:
+            return list(self.bundle.logs.get(phase, []))
+
+class AggregatingCallback(BaseCallbackHandler):
+    """A wrapper around LoggingCallback that automatically registers logs with the Aggregator when on_llm_end is called."""
+    def __init__(
+        self,
+        inner: LoggingCallback,
+        aggregator: AgentLogger,
+        phase: str
+    ):
+        self.inner = inner
+        self.aggregator = aggregator
+        self.phase = phase
+
+    def on_llm_start(self, serialized, prompts, **kwargs):
+        return self.inner.on_llm_start(serialized, prompts, **kwargs)
+
+    def on_llm_end(self, response, **kwargs):
+        self.inner.on_llm_end(response, **kwargs)
+        # save log
+        self.aggregator.add_log(self.phase, self.inner.log)
+
 
 UNIT = 1e+6
 PRICING_PER_TOKEN = {

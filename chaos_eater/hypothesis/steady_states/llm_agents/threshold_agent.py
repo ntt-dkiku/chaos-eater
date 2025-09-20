@@ -1,9 +1,9 @@
-from typing import Dict, Tuple
+from typing import Dict, Optional
 
 from .inspection_agent import Inspection
 from ....preprocessing.preprocessor import ProcessedData
 from ....utils.wrappers import LLM, LLMBaseModel, LLMField
-from ....utils.llms import build_json_agent, LLMLog, LoggingCallback
+from ....utils.llms import build_json_agent, AgentLogger
 from ....utils.functions import MessageLogger
 
 
@@ -66,9 +66,14 @@ class ThresholdAgent:
         input_data: ProcessedData,
         steady_state_draft: Dict[str, str],
         inspection: Inspection,
-        predefined_steady_states: list
-    ) -> Tuple[LLMLog, Dict[str, str]]:
-        logger = LoggingCallback(name="threshold_definition", llm=self.llm)
+        predefined_steady_states: list,
+        agent_logger: Optional[AgentLogger] = None
+    ) -> Dict[str, str]:
+        cb = agent_logger and agent_logger.get_callback(
+            phase="hypothesis",
+            agent_name="threshold_definition"
+        )
+        
         self.message_logger.write("#### 🚩 Threshold\n")
         for responce in self.agent.stream({
             "user_input": input_data.to_k8s_overview_str(),
@@ -76,7 +81,7 @@ class ThresholdAgent:
             "steady_state_name": steady_state_draft["name"],
             "steady_state_thought": steady_state_draft["thought"],
             "inspection_summary": inspection.to_str()},
-            {"callbacks": [logger]}
+            {"callbacks": [cb]} if cb else {}
         ):
             text = ""
             if (thought := responce.get("thought")) is not None:
@@ -87,4 +92,4 @@ class ThresholdAgent:
                 steady_state_draft["threshold"] = threshold
             self.message_logger.stream(text)
         self.message_logger.stream(text, final=True)
-        return logger.log, {"threshold": threshold, "reason": thought}
+        return {"threshold": threshold, "reason": thought}

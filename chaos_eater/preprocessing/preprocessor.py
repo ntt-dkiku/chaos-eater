@@ -10,13 +10,12 @@ from .llm_agents.ce_instruct_agent import CEInstructAgent
 from ..utils.wrappers import LLM, BaseModel
 from ..utils.schemas import File
 from ..utils.k8s import wait_for_resources_ready
-from ..utils.llms import LLMLog
-from ..utils.streamlit import Spinner # StreamlitDisplayHandler
+from ..utils.llms import LLMLog, AgentLogger
+from ..utils.streamlit import Spinner
 from ..backend.streaming import FrontEndDisplayHandler
 from ..utils.functions import (
     write_file,
     save_json,
-    recursive_to_dict,
     run_command,
     MessageLogger
 )
@@ -95,7 +94,8 @@ class PreProcessor:
         kube_context: str,
         work_dir: str,
         project_name: str = "chaos-eater",
-        is_new_deployment: bool = True
+        is_new_deployment: bool = True,
+        agent_logger: AgentLogger = None
     ) -> Tuple[List[LLMLog], ProcessedData]:
         preprocess_dir = f"{work_dir}/inputs"
         log = []
@@ -159,15 +159,19 @@ class PreProcessor:
         # summarize each k8s manifest
         #-----------------------------
         self.message_logger.write("#### Summary of each manifest:")
-        summary_log, k8s_summaries = self.k8s_summary_agent.summarize_manifests(k8s_yamls=k8s_yamls)
-        log.append(summary_log)
+        k8s_summaries = self.k8s_summary_agent.summarize_manifests(
+            k8s_yamls=k8s_yamls,
+            agent_logger=agent_logger
+        )
 
         #-----------------------------------------
         # summarize weakness points in the system
         #-----------------------------------------
         self.message_logger.write("#### Resiliency issuses/weaknesses in the manifests:")
-        weakness_log, k8s_weakness_summary = self.k8s_weakness_summary_agent.summarize_weaknesses(k8s_yamls=k8s_yamls)
-        log.append(weakness_log)
+        k8s_weakness_summary = self.k8s_weakness_summary_agent.summarize_weaknesses(
+            k8s_yamls=k8s_yamls,
+            agent_logger=agent_logger
+        )
 
         #---------------------------
         # analyze file dependencies
@@ -182,23 +186,25 @@ class PreProcessor:
         # )
         # log.append(depdency_token_usage)
 
-        self.message_logger.write("#### Application of the manifests:")
         #---------------------------------------------
         # assume the application of the k8s manifests
         #---------------------------------------------
-        app_token_usage, k8s_application = self.k8s_app_assumption_agent.assume_app(
+        self.message_logger.write("#### Application of the manifests:")
+        k8s_application = self.k8s_app_assumption_agent.assume_app(
             k8s_yamls=k8s_yamls,
-            k8s_summaries=k8s_summaries
+            k8s_summaries=k8s_summaries,
+            agent_logger=agent_logger
         )
-        log.append(app_token_usage)
 
-        self.message_logger.write("#### Summary of your instructions for Chaos Engineering:")
         #----------------------------------------------
         # summarize instructions for Chaos Engineering
         #----------------------------------------------
+        self.message_logger.write("#### Summary of your instructions for Chaos Engineering:")
         if input.ce_instructions is not None and input.ce_instructions != "":
-            instruct_token_usage, ce_instructions = self.ce_instruct_agent.summarize_ce_instructions(input.ce_instructions)
-            log.append(instruct_token_usage)
+            ce_instructions = self.ce_instruct_agent.summarize_ce_instructions(
+                input.ce_instructions,
+                agent_logger=agent_logger
+            )
         else:
             ce_instructions = ""
             self.message_logger.write("No Chaos-Engineering instructions are provided.")
@@ -216,8 +222,7 @@ class PreProcessor:
             ce_instructions=ce_instructions
         )
         save_json(f"{preprocess_dir}/processed_data.json", processed_data.dict())
-        save_json(f"{preprocess_dir}/preprcessing_log.json", recursive_to_dict(log))
-        return log, processed_data
+        return processed_data
     
     def get_kustomize_paths(self, skaffold_config: dict) -> List[str]:
         manifests = skaffold_config.get("manifests", {})

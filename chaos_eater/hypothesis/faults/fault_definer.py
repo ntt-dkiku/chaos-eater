@@ -1,12 +1,12 @@
 import os
-from typing import List, Dict, Tuple
+from typing import List, Dict, Optional
 
 from .llm_agents.fault_scenario_agent import FaultScenarioAgent
 from .llm_agents.fault_refinement_agent import FaultRefiner, FaultScenario
 from ..steady_states.steady_state_definer import SteadyStates
 from ...ce_tools.ce_tool_base import CEToolBase
 from ...preprocessing.preprocessor import ProcessedData
-from ...utils.llms import LLM, LLMLog
+from ...utils.llms import LLM, AgentLogger
 from ...utils.functions import MessageLogger
 
 
@@ -39,36 +39,36 @@ class FaultDefiner:
         data: ProcessedData,
         steady_states: SteadyStates,
         work_dir: str,
-        max_retries: int = 3
-    ) -> Tuple[LLMLog, FaultScenario]:
+        max_retries: int = 3,
+        agent_logger: Optional[AgentLogger] = None
+    ) -> FaultScenario:
         #-------------------
         # 0. initialization
         #-------------------
         self.message_logger.write("#### Failure definition")
         fault_dir = f"{work_dir}/faults"
         os.makedirs(fault_dir, exist_ok=True)
-        logs = []
 
         #----------------------------
         # 1. assume a fault scenario
         #----------------------------
-        scenario_log, fault_scenario = self.fault_scenario_agent.assume_scenario(
+        fault_scenario = self.fault_scenario_agent.assume_scenario(
             user_input=data.to_k8s_overview_str(),
             ce_instructions=data.ce_instructions,
             steady_states=steady_states,
+            agent_logger=agent_logger
         )
-        logs.append(scenario_log)
 
         #---------------------------------------------
         # refine the faults: determine the parameters
         #---------------------------------------------
-        fault_log, faults = self.refiner.refine_faults(
+        faults = self.refiner.refine_faults(
             user_input=data.to_k8s_overview_str(),
             ce_instructions=data.ce_instructions,
             steady_states=steady_states,
             fault_scenario=fault_scenario,
             work_dir=fault_dir,
-            max_retries=max_retries
+            max_retries=max_retries,
+            agent_logger=agent_logger
         )
-        logs.append(fault_log)
-        return logs, faults
+        return faults

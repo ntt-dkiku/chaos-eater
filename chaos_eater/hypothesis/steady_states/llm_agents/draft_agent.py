@@ -1,9 +1,9 @@
-from typing import Dict, Tuple
+from typing import Dict, Optional
 
 from ....preprocessing.preprocessor import ProcessedData
 from ....utils.wrappers import LLM, BaseModel, Field
-from ....utils.llms import build_json_agent, LoggingCallback, LLMLog
-from ....utils.functions import StreamDebouncer, MessageLogger
+from ....utils.llms import build_json_agent, AgentLogger
+from ....utils.functions import MessageLogger
 
 
 #---------
@@ -69,11 +69,14 @@ class SteadyStateDraftAgent:
         self,
         input_data: ProcessedData,
         predefined_steady_states: list,
-        prev_check_thought: str
-    ) -> Tuple[LLMLog, Dict[str, str]]:
+        prev_check_thought: str,
+        agent_logger: Optional[AgentLogger] = None
+    ) -> Dict[str, str]:
         # initialization
-        logger = LoggingCallback(name="steady_state_draft", llm=self.llm)
-        debouncer = StreamDebouncer()
+        cb = agent_logger and agent_logger.get_callback(
+            phase="hypothesis",
+            agent_name="steady_state_draft"
+        )
         
         # stream the response
         for steady_state in self.agent.stream({
@@ -81,14 +84,13 @@ class SteadyStateDraftAgent:
             "ce_instructions": input_data.ce_instructions,
             "predefined_steady_states": predefined_steady_states.to_str(),
             "prev_check_thought": prev_check_thought},
-            {"callbacks": [logger]}
+            {"callbacks": [cb]} if cb else {}
         ):
             text = ""
-            if debouncer.should_update():
-                if (name := steady_state.get("name")) is not None:
-                    text += f"#### Steady state #{predefined_steady_states.count+1}: {name}\n"
-                if (thought := steady_state.get("thought")) is not None:
-                    text += thought
-                self.message_logger.stream(text)
+            if (name := steady_state.get("name")) is not None:
+                text += f"#### Steady state #{predefined_steady_states.count+1}: {name}\n"
+            if (thought := steady_state.get("thought")) is not None:
+                text += thought
+            self.message_logger.stream(text)
         self.message_logger.stream(text, final=True)
-        return logger.log, steady_state
+        return steady_state

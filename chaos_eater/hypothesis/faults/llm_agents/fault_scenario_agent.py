@@ -1,9 +1,9 @@
-from typing import List, Dict, Tuple, Literal
+from typing import List, Dict, Literal, Optional
 
 from ...steady_states.steady_state_definer import SteadyStates
 from ....ce_tools.ce_tool_base import CEToolBase
 from ....utils.wrappers import LLM, LLMBaseModel, LLMField
-from ....utils.llms import build_json_agent, LLMLog, LoggingCallback
+from ....utils.llms import build_json_agent, AgentLogger
 from ....utils.functions import MessageLogger
 
 
@@ -64,16 +64,21 @@ class FaultScenarioAgent:
         self,
         user_input: str,
         ce_instructions: str,
-        steady_states: SteadyStates
-    ) -> Tuple[LLMLog, Dict[str, str]]:
-        logger = LoggingCallback(name="fault_scenario_assumption", llm=self.llm)
+        steady_states: SteadyStates,
+        agent_logger: Optional[AgentLogger] = None
+    ) -> Dict[str, str]:
+        cb = agent_logger and agent_logger.get_callback(
+            phase="hypothesis",
+            agent_name="fault_scenario_assumption"
+        )
+        
         for response in self.agent.stream({
             "user_input": user_input,
             "ce_instructions": ce_instructions,
             "steady_states": steady_states.to_overview_str(),
             "ce_tool_name": self.ce_tool.name,
             "ce_tool_fault_types": self.ce_tool.get_chaos_var_candidates()},
-            {"callbacks": [logger]}
+            {"callbacks": [cb]} if cb else {}
         ):
             text = ""
             if (event := response.get("event")) is not None:
@@ -85,7 +90,7 @@ class FaultScenarioAgent:
                 text += f"{self.convert_fault_list_to_str(faults)}"
             self.output_emitter.stream(text)
         self.output_emitter.stream(text, final=True)
-        return logger.log, response
+        return response
     
     def convert_fault_list_to_str(self, faults: List[List[Fault]]) -> str:
         fault_list = ""

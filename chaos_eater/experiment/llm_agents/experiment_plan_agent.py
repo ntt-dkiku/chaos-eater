@@ -1,11 +1,11 @@
 from collections import Counter
-from typing import List, Tuple, Literal
+from typing import List, Optional, Literal
 
 from ...preprocessing.preprocessor import ProcessedData
 from ...hypothesis.hypothesizer import Hypothesis
 from ...ce_tools.ce_tool_base import CEToolBase
 from ...utils.wrappers import LLM, LLMBaseModel, LLMField, BaseModel
-from ...utils.llms import build_json_agent, LLMLog, LoggingCallback
+from ...utils.llms import build_json_agent, AgentLogger
 from ...utils.functions import (
     parse_time,
     add_timeunit,
@@ -193,24 +193,28 @@ class ExperimentPlanAgent:
     def plan(
         self,
         data: ProcessedData,
-        hypothesis: Hypothesis
-    ) -> Tuple[LLMLog, dict]:
+        hypothesis: Hypothesis,
+        agent_logger: Optional[AgentLogger] = None
+    ) -> dict:
         #-------------------
         # initialization
         #-------------------
         self.message_logger.write("#### Planning a CE experiment")
-        logger = LoggingCallback(name="experiment_plan", llm=self.llm)
 
         #----------------------
         # plan a time schedule
         #----------------------    
         self.message_logger.write("##### :grey-background[Time Schedule]")
+        cb = agent_logger and agent_logger.get_callback(
+            phase="experiment",
+            agent_name="time_schedule"
+        )
         for time_schedule in self.time_schedule_agent.stream({
             "user_input": data.to_k8s_overview_str(),
             "ce_instructions": data.ce_instructions,
             "steady_states": hypothesis.steady_states.to_overview_str(),
             "fault_scenario": hypothesis.fault.to_overview_str()},
-            {"callbacks": [logger]}
+            {"callbacks": [cb]} if cb else {}
         ):
             text = ""
             if (time_schedule_thought := time_schedule.get("thought")) is not None:
@@ -230,6 +234,10 @@ class ExperimentPlanAgent:
         # plan pre-validation, fault-injection, post-validation phases sequentially
         #---------------------------------------------------------------------------
         self.message_logger.write(f"##### :blue-background[Pre-validation Phase ({pre_validation_time})]")
+        cb = agent_logger and agent_logger.get_callback(
+            phase="experiment",
+            agent_name="pre_validation_plan"
+        )
         for pre_validation_plan in self.pre_validation_agent.stream({
             "user_input": data.to_k8s_overview_str(),
             "ce_instructions": data.ce_instructions,
@@ -237,13 +245,17 @@ class ExperimentPlanAgent:
             "fault_scenario": hypothesis.fault.to_overview_str(),
             "phase_name": "pre-validation phase",
             "phase_total_time": pre_validation_time},
-            {"callbacks": [logger]}
+            {"callbacks": [cb]} if cb else {}
         ):
             pre_validation_overview = self.get_phase_overview_str(pre_validation_plan, "pre_validation")
             self.message_logger.stream(pre_validation_overview)
         self.message_logger.stream(pre_validation_overview, final=True)
 
         self.message_logger.write(f"##### :red-background[Fault-injection Phase ({fault_injection_time})]")
+        cb = agent_logger and agent_logger.get_callback(
+            phase="experiment",
+            agent_name="fault_injection_plan"
+        )
         for fault_injection_plan in self.fault_injection_agent.stream({
             "user_input": data.to_k8s_overview_str(),
             "ce_instructions": data.ce_instructions,
@@ -251,13 +263,17 @@ class ExperimentPlanAgent:
             "fault_scenario": hypothesis.fault.to_overview_str(),
             "phase_name": "fault-injection phase",
             "phase_total_time": fault_injection_time},
-            {"callbacks": [logger]}
+            {"callbacks": [cb]} if cb else {}
         ):
             fault_injection_overview = self.get_phase_overview_str(fault_injection_plan, "fault_injection")
             self.message_logger.stream(fault_injection_overview)
         self.message_logger.stream(fault_injection_overview, final=True)
 
         self.message_logger.write(f"##### :green-background[Post-validation Phase ({post_validation_time})]")
+        cb = agent_logger and agent_logger.get_callback(
+            phase="experiment",
+            agent_name="post_validation_plan"
+        )
         for post_validation_plan in self.post_validation_agent.stream({
             "user_input": data.to_k8s_overview_str(),
             "ce_instructions": data.ce_instructions,
@@ -265,7 +281,7 @@ class ExperimentPlanAgent:
             "fault_scenario": hypothesis.fault.to_overview_str(),
             "phase_name": "post-validation phase",
             "phase_total_time": post_validation_time},
-            {"callbacks": [logger]}    
+            {"callbacks": [cb]} if cb else {} 
         ):
             post_validation_overview = self.get_phase_overview_str(post_validation_plan, "post_validation")
             self.message_logger.stream(post_validation_overview)
@@ -283,12 +299,16 @@ class ExperimentPlanAgent:
         # summary (used for the analysis phase)
         #---------------------------------------
         self.message_logger.write("##### :gray-background[Summary]")
+        cb = agent_logger and agent_logger.get_callback(
+            phase="experiment",
+            agent_name="plan_summary"
+        )
         for summary in self.summary_agent.stream({
             "time_schedule_overview": time_schedule_thought,
             "pre_validation_overview": pre_validation_overview,
             "fault_injection_overview": fault_injection_overview,
             "post_validation_overview": post_validation_overview},
-            {"callbacks": [logger]}
+            {"callbacks": [cb]} if cb else {} 
         ):
             if (summary_str := summary.get("summary")) is not None:
                 self.message_logger.stream(summary_str)
@@ -301,15 +321,12 @@ class ExperimentPlanAgent:
         self.add_fpath_to_unittests([pre_validation_plan, fault_injection_plan, post_validation_plan], hypothesis)
         # for faults
         self.add_params_to_faults([fault_injection_plan], hypothesis)
-        return (
-            logger.log, 
-            ChaosExperimentPlan(
-                time_schedule=time_schedule,
-                pre_validation=pre_validation_plan,
-                fault_injection=fault_injection_plan,
-                post_validation=post_validation_plan,
-                summary=summary_str
-            )
+        return ChaosExperimentPlan(
+            time_schedule=time_schedule,
+            pre_validation=pre_validation_plan,
+            fault_injection=fault_injection_plan,
+            post_validation=post_validation_plan,
+            summary=summary_str
         )
 
     def add_workflowname_and_deadline(

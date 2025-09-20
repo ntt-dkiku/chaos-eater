@@ -2,7 +2,7 @@ import os
 import yaml
 import json
 import time
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional
 
 from .llm_agents.experiment_plan_agent import ExperimentPlanAgent
 from .llm_agents.experiment_replan_agent import ExperimentRePlanAgent
@@ -12,12 +12,10 @@ from ..hypothesis.hypothesizer import Hypothesis
 from ..ce_tools.ce_tool_base import CEToolBase
 from ..utils.schemas import File
 from ..utils.wrappers import LLM, BaseModel
-from ..utils.llms import LLMLog
+from ..utils.llms import AgentLogger
 from ..utils.functions import (
-    pseudo_streaming_text,
     type_cmd,
     save_json,
-    recursive_to_dict,
     limit_string_length,
     MessageLogger
 )
@@ -138,9 +136,9 @@ class Experimenter:
         self,
         data: ProcessedData,
         hypothesis: Hypothesis,
-        work_dir: str
-    ) -> Tuple[List[LLMLog], ChaosExperiment]:
-        logs = []
+        work_dir: str,
+        agent_logger: Optional[AgentLogger] = None
+    ) -> ChaosExperiment:
         # prepare a working directory
         experiment_dir = f"{work_dir}/experiment"
         os.makedirs(experiment_dir, exist_ok=True)
@@ -148,14 +146,20 @@ class Experimenter:
         #----------------------------------------------------------
         # 1. plan a CE experiment with the steady state and faults
         #----------------------------------------------------------
-        plan_log, experiment_plan = self.experiment_plan_agent.plan(data=data, hypothesis=hypothesis)
-        logs.append(plan_log)
+        experiment_plan = self.experiment_plan_agent.plan(
+            data=data,
+            hypothesis=hypothesis,
+            agent_logger=agent_logger
+        )
         save_json(f"{experiment_dir}/experiment_plan.json", experiment_plan.dict())
 
         #-----------------------------------------------------------
         # 2. convert the plan into the format of a specific CE tool 
         #-----------------------------------------------------------
-        workflow_name, workflow = self.plan2workflow_converter.convert(experiment_plan.dict(), experiment_dir)
+        workflow_name, workflow = self.plan2workflow_converter.convert(
+            experiment_plan.dict(),
+            experiment_dir
+        )
 
         chaos_experiment = ChaosExperiment(
             plan=experiment_plan.dict(),
@@ -163,8 +167,7 @@ class Experimenter:
             workflow=workflow
         )
         save_json(f"{experiment_dir}/experiment.json", chaos_experiment.dict())
-        save_json(f"{experiment_dir}/experiment_log.json", recursive_to_dict(logs))
-        return logs, chaos_experiment
+        return chaos_experiment
 
     def replan_experiment(
         self,
@@ -173,9 +176,9 @@ class Experimenter:
         curr_k8s_yamls: List[File],
         kube_context: str,
         work_dir: str,
-        max_retries: int = 3
-    ) -> Tuple[List[LLMLog], ChaosExperiment]:
-        logs = []
+        max_retries: int = 3,
+        agent_logger: Optional[AgentLogger] = None
+    ) -> ChaosExperiment:
         # prepare a working directory
         experiment_dir = f"{work_dir}/experiment"
         os.makedirs(experiment_dir, exist_ok=True)
@@ -183,15 +186,15 @@ class Experimenter:
         #----------------------------------------------------------
         # 1. replan a CE experiment with the steady state and faults
         #----------------------------------------------------------
-        replan_log, experiment_replan = self.experiment_replan_agent.replan(
+        experiment_replan = self.experiment_replan_agent.replan(
             prev_k8s_yamls,
             prev_experiment,
             curr_k8s_yamls,
             kube_context,
             work_dir=work_dir,
-            max_retries=max_retries
+            max_retries=max_retries,
+            agent_logger=agent_logger
         )
-        logs.append(replan_log)
 
         #-----------------------------------------------------------
         # 2. convert the plan into the format of a specific CE tool 
@@ -206,7 +209,7 @@ class Experimenter:
             workflow_name=workflow_name,
             workflow=workflow
         )
-        return logs, chaos_experiment
+        return chaos_experiment
 
     def run(
         self,

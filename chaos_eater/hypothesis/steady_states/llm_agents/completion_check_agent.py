@@ -1,8 +1,8 @@
-from typing import Dict, Tuple
+from typing import Dict, Optional
 
 from ....preprocessing.preprocessor import ProcessedData
 from ....utils.wrappers import LLM, BaseModel, Field
-from ....utils.llms import build_json_agent, LoggingCallback, LLMLog
+from ....utils.llms import build_json_agent, AgentLogger
 from ....utils.functions import MessageLogger
 
 
@@ -58,15 +58,19 @@ class SteadyStateCompletionCheckAgent:
         self,
         input_data: ProcessedData,
         predefined_steady_states: list,
-    ) -> Tuple[LLMLog, Dict[str, str]]:
-        logger = LoggingCallback(name="steady_state_completion_check", llm=self.llm)
-        self.message_logger.write("#### Steady state completion check")
+        agent_logger: Optional[AgentLogger] = None
+    ) -> Dict[str, str]:
+        cb = agent_logger and agent_logger.get_callback(
+            phase="hypothesis",
+            agent_name="steady_state_completion_check"
+        )
 
+        self.message_logger.write("#### Steady state completion check")
         for completion_check in self.agent.stream({
             "user_input": input_data.to_k8s_overview_str(), 
             "ce_instructions": input_data.ce_instructions,
             "predefined_steady_states": predefined_steady_states.to_str()},
-            {"callbacks": [logger]}
+            {"callbacks": [cb]} if cb else {}
         ):
             text = ""
             if (thought := completion_check["thought"]) is not None:
@@ -75,4 +79,4 @@ class SteadyStateCompletionCheckAgent:
                 text += f"An additional steady state is needed?: `{check}`"
             self.message_logger.stream(text)
         self.message_logger.stream(text, final=True)
-        return logger.log, completion_check
+        return completion_check

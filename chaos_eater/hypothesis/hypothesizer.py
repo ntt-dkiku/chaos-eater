@@ -1,11 +1,11 @@
 import os
-from typing import List, Tuple
+from typing import Optional
 
 from .steady_states.steady_state_definer import SteadyStateDefiner, SteadyStates
 from .faults.fault_definer import FaultDefiner, FaultScenario
 from ..utils.wrappers import LLM, BaseModel
-from ..utils.functions import save_json, recursive_to_dict, MessageLogger
-from ..utils.llms import LLMLog
+from ..utils.functions import save_json, MessageLogger
+from ..utils.llms import AgentLogger
 from ..ce_tools.ce_tool_base import CEToolBase
 from ..preprocessing.preprocessor import ProcessedData
 
@@ -69,46 +69,43 @@ class Hypothesizer:
         kube_context: str,
         work_dir: str,
         max_num_steady_states: int = 2,
-        max_retries: int = 3
-    ) -> Tuple[List[LLMLog], Hypothesis]:
+        max_retries: int = 3,
+        agent_logger: Optional[AgentLogger] = None
+    ) -> Hypothesis:
         #----------------
         # initialization
         #----------------
         hypothesis_dir = f"{work_dir}/hypothesis"
         os.makedirs(hypothesis_dir, exist_ok=True)
-        logs = []
 
         #-------------------------
         # 1. define steady states
         #-------------------------
-        steady_state_logs, steady_states = self.steady_state_definer.define_steady_states(
+        steady_states = self.steady_state_definer.define_steady_states(
             input_data=data, 
             kube_context=kube_context,
             work_dir=hypothesis_dir,
             max_num_steady_states=max_num_steady_states,
-            max_retries=max_retries
+            max_retries=max_retries,
+            agent_logger=agent_logger
         )
-        logs += steady_state_logs
         save_json(f"{hypothesis_dir}/steady_states.json", steady_states.dict())
-        save_json(f"{hypothesis_dir}/steady_states.json", recursive_to_dict(steady_state_logs))
 
         #------------------
         # 2. define faults
         #------------------
-        fault_logs, fault = self.fault_definer.define_faults(
+        fault = self.fault_definer.define_faults(
             data=data,
             steady_states=steady_states,
             work_dir=hypothesis_dir,
-            max_retries=max_retries
+            max_retries=max_retries,
+            agent_logger=agent_logger
         )
-        logs += fault_logs
         save_json(f"{hypothesis_dir}/faults.json", fault.dict())
-        save_json(f"{hypothesis_dir}/faults_log.json", recursive_to_dict(fault_logs))
 
         #-------------------
         # make a hypothesis
         #-------------------
         hypothesis = Hypothesis(steady_states=steady_states, fault=fault)
         save_json(f"{hypothesis_dir}/hypothesis.json", hypothesis.dict())
-        save_json(f"{hypothesis_dir}/hypothesis_log.json", recursive_to_dict(logs))
-        return logs, hypothesis
+        return hypothesis

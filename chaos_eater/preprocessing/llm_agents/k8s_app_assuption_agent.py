@@ -1,9 +1,9 @@
-from typing import List, Tuple
+from typing import List, Optional
 
 from ...utils.wrappers import LLM, LLMBaseModel, LLMField
-from ...utils.llms import build_json_agent, LoggingCallback, LLMLog
+from ...utils.llms import build_json_agent, AgentLogger
 from ...utils.schemas import File
-from ...utils.functions import MessageLogger, StreamDebouncer
+from ...utils.functions import MessageLogger
 
 
 SYS_ASSUME_K8S_APP = """\
@@ -54,10 +54,13 @@ class K8sAppAssumptionAgent:
     def assume_app(
         self,
         k8s_yamls: List[File],
-        k8s_summaries: List[str]
-    ) -> Tuple[LLMLog, K8sAppAssumption]:
-        logger = LoggingCallback(name="k8s_app", llm=self.llm)
-        debouncer = StreamDebouncer()
+        k8s_summaries: List[str],
+        agent_logger: Optional[AgentLogger] = None
+    ) -> K8sAppAssumption:
+        cb = agent_logger and agent_logger.get_callback(
+            phase="preprocessing",
+            agent_name="k8s_app"
+        )
 
         user_input = self.get_user_input(
             k8s_yamls=k8s_yamls,
@@ -66,24 +69,18 @@ class K8sAppAssumptionAgent:
 
         for output in self.agent.stream(
             {"user_input": user_input},
-            {"callbacks": [logger]}
+            {"callbacks": [cb]} if cb else {}
         ):
             text = ""
-            if debouncer.should_update():
-                if (thought := output.get("thought")) is not None:
-                    text += f"`Thoughts`:\n{thought}\n\n"
-                if (app := output.get("k8s_application")) is not None:
-                    text += f"`Assumed application`:\n{app}\n"
-                self.message_logger.stream(text)
+            if (thought := output.get("thought")) is not None:
+                text += f"`Thoughts`:\n{thought}\n\n"
+            if (app := output.get("k8s_application")) is not None:
+                text += f"`Assumed application`:\n{app}\n"
+            self.message_logger.stream(text)
         self.message_logger.stream(text, final=True)
-        thought = output.get("thought")
-        app = output.get("k8s_application")
-        return (
-            logger.log,
-            K8sAppAssumption(
-                thought=thought,
-                k8s_application=app
-            )
+        return K8sAppAssumption(
+            thought=thought,
+            k8s_application=app
         )
 
     def get_user_input(

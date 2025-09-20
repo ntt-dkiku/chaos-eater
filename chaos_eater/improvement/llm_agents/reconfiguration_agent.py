@@ -1,6 +1,6 @@
 import os
 import subprocess
-from typing import List, Tuple, Literal, Optional
+from typing import List, Optional, Literal, Optional
 
 from ...analysis.analyzer import Analysis
 from ...experiment.experimenter import ChaosExperiment, ChaosExperimentResult
@@ -8,7 +8,7 @@ from ...hypothesis.hypothesizer import Hypothesis
 from ...preprocessing.preprocessor import ProcessedData
 from ...utils.constants import SKAFFOLD_YAML_TEMPLATE_PATH
 from ...utils.wrappers import LLM, LLMBaseModel, LLMField, BaseModel
-from ...utils.llms import build_json_agent, LLMLog, LoggingCallback
+from ...utils.llms import build_json_agent, AgentLogger
 from ...utils.functions import (
     dict_to_str,
     file_list_to_str,
@@ -161,11 +161,11 @@ class ReconfigurationAgent:
         kube_context: str,
         work_dir: str,
         max_retries: int = 3,
-    ) -> Tuple[LLMLog, dict]:
+        agent_logger: Optional[AgentLogger] = None
+    ) -> dict:
         #----------------
         # initialization
         #----------------
-        logger = LoggingCallback(name="reconfiguration", llm=self.llm)
         output_history = []
         error_history = []
 
@@ -180,7 +180,7 @@ class ReconfigurationAgent:
             result_history=result_history,
             analysis_history=analysis_history,
             reconfig_history=reconfig_history,
-            logger=logger
+            agent_logger=agent_logger
         )
 
         #--------------------------------
@@ -293,7 +293,7 @@ class ReconfigurationAgent:
                 reconfig_history=reconfig_history,
                 output_history=output_history,
                 error_history=error_history,
-                logger=logger
+                agent_logger=agent_logger
             )
 
             #-----------------
@@ -301,7 +301,7 @@ class ReconfigurationAgent:
             #-----------------
             mod_count += 1
 
-        return logger.log, mod_k8s_yamls
+        return mod_k8s_yamls
     
     def generate_reconfig_yamls(
         self,
@@ -312,8 +312,16 @@ class ReconfigurationAgent:
         result_history: List[ChaosExperimentResult],
         analysis_history: List[Analysis],
         reconfig_history: List[ReconfigurationResult],
-        logger: LoggingCallback
+        agent_logger: Optional[AgentLogger] = None
     ) -> dict:
+        #----------------
+        # initialization
+        #----------------
+        cb = agent_logger and agent_logger.get_callback(
+            phase="improvement",
+            agent_name=f"improvement_{len(reconfig_history)}"
+        )
+
         #----------------------
         # prompt configuration
         #----------------------
@@ -355,7 +363,7 @@ class ReconfigurationAgent:
             "hypothesis_overview": hypothesis.to_str(),
             "experiment_plan_summary": experiment.plan["summary"],
             "experiment_result": result_history0.to_str()},
-            {"callbacks": [logger]}
+            {"callbacks": [cb]} if cb else {}
         ):
             text = ""
             if (thought := response.get("thought")) is not None:
@@ -382,10 +390,18 @@ class ReconfigurationAgent:
         result_history: List[ChaosExperimentResult],
         analysis_history: List[Analysis],
         reconfig_history: List[ReconfigurationResult],
-        logger: LoggingCallback,
         output_history: List[dict] = [],
         error_history: List[str] = [],
+        agent_logger: Optional[AgentLogger] = None
     ) -> dict:
+        #----------------
+        # initialization
+        #----------------
+        cb = agent_logger and agent_logger.get_callback(
+            phase="improvement",
+            agent_name=f"improvement_{len(reconfig_history)}_{len(output_history)}"
+        )
+
         #----------------------
         # prompt configuration
         #----------------------
@@ -458,7 +474,7 @@ class ReconfigurationAgent:
             "hypothesis_overview": hypothesis.to_str(),
             "experiment_plan_summary": experiment.plan["summary"],
             "experiment_result": result_history0.to_str()},
-            {"callbacks": [logger]}
+            {"callbacks": [cb]} if cb else {}
         ):
             text = ""
             if (thought := response.get("thought")) is not None:

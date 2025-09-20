@@ -1,9 +1,9 @@
-from typing import List, Tuple
+from typing import List, Optional
 
 from ...utils.wrappers import LLM, BaseModel, Field
-from ...utils.llms import build_json_agent, LoggingCallback, LLMLog
+from ...utils.llms import build_json_agent, AgentLogger
 from ...utils.schemas import File
-from ...utils.functions import file_to_str, MessageLogger, StreamDebouncer
+from ...utils.functions import file_to_str, MessageLogger
 
 
 #---------
@@ -51,20 +51,25 @@ class K8sSummaryAgent:
             is_async=False
         )
 
-    def summarize_manifests(self, k8s_yamls: List[File]) -> Tuple[LLMLog, List[str]]:
-        self.logger = LoggingCallback(name="k8s_summary", llm=self.llm)
-        debouncer = StreamDebouncer()
+    def summarize_manifests(
+        self,
+        k8s_yamls: List[File],
+        agent_logger: Optional[AgentLogger] = None
+    ) -> List[str]:
+        cb = agent_logger and agent_logger.get_callback(
+            phase="preprocessing",
+            agent_name="k8s_summary"
+        )
+        
         summaries = []
         for k8s_yaml in k8s_yamls:
-            self.message_logger.write(f"```{k8s_yaml.fname}```")
+            self.message_logger.write(f"`{k8s_yaml.fname}`")
             for summary in self.agent.stream(
                 {"k8s_yaml": file_to_str(k8s_yaml)}, 
-                {"callbacks": [self.logger]}
+                {"callbacks": [cb]} if cb else {}
             ):
-                if debouncer.should_update():
-                    if (summary_str := summary.get("k8s_summary")) is not None:
-                        self.message_logger.stream(summary_str)
-            summary_str = summary.get("k8s_summary")
+                if (summary_str := summary.get("k8s_summary")) is not None:
+                    self.message_logger.stream(summary_str)
             self.message_logger.stream(summary_str, final=True)
             summaries.append(summary_str)
-        return self.logger.log, summaries
+        return summaries

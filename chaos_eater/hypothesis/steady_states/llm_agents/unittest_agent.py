@@ -1,11 +1,11 @@
 import os
 import json
-from typing import List, Dict, Tuple
+from typing import List, Dict, Optional
 
 from .utils import run_pod, Inspection
 from ....preprocessing.preprocessor import ProcessedData
 from ....utils.wrappers import LLM, LLMBaseModel, LLMField
-from ....utils.llms import build_json_agent, LLMLog, LoggingCallback
+from ....utils.llms import build_json_agent, AgentLogger
 from ....utils.schemas import File
 from ....utils.functions import write_file, read_file, copy_file, sanitize_filename, MessageLogger
 from ....utils.constants import UNITTEST_BASE_PY_PATH
@@ -112,9 +112,9 @@ class UnittestAgent:
         predefined_steady_states: list,
         kube_context: str,
         work_dir: str,
-        max_retries: int = 3
-    ) -> Tuple[LLMLog, File]:
-        self.logger = LoggingCallback(name="unittest_writing", llm=self.llm)
+        max_retries: int = 3,
+        agent_logger: Optional[AgentLogger] = None
+    ) -> File:
         copy_file(UNITTEST_BASE_PY_PATH, f"{work_dir}/unittest_base.py")
         
         #----------------
@@ -132,7 +132,8 @@ class UnittestAgent:
             steady_state_draft=steady_state_draft,
             inspection=inspection,
             threshold=threshold,
-            predefined_steady_states=predefined_steady_states
+            predefined_steady_states=predefined_steady_states,
+            agent_logger=agent_logger
         )
 
         #---------------------------------------------------------
@@ -187,20 +188,18 @@ class UnittestAgent:
                 predefined_steady_states=predefined_steady_states,
                 mod_count=mod_count,
                 output_history=output_history,
-                error_history=error_history
+                error_history=error_history,
+                agent_logger=agent_logger
             )
         
         #----------
         # epilogue
         #----------
-        return (
-            self.logger.log,
-            File(
-                path=file_path,
-                content=output_history[-1]["code"],
-                work_dir=work_dir,
-                fname=os.path.basename(file_path)
-            )
+        return File(
+            path=file_path,
+            content=output_history[-1]["code"],
+            work_dir=work_dir,
+            fname=os.path.basename(file_path)
         )
 
     def generate_unittest(
@@ -211,8 +210,17 @@ class UnittestAgent:
         predefined_steady_states: list,
         mod_count: int = -1,
         output_history: List[Dict[str, str]] = [],
-        error_history: List[str] = []
+        error_history: List[str] = [],
+        agent_logger: Optional[AgentLogger] = None
     ) -> Dict[str, str]:
+        cb = agent_logger and agent_logger.get_callback(
+            phase="hypothesis",
+            agent_name=f"unittest_writing_{len(output_history)}"
+        )
+
+        #----------------------
+        # prompt configuration
+        #----------------------
         # update chat messages
         if inspection.tool_type == "k8s":
             chat_messages = [("system", SYS_WRITE_K8S_UNITTEST), ("human", USER_WRITE_K8S_UNITTEST)]
@@ -229,14 +237,16 @@ class UnittestAgent:
             is_async=False
         )
 
+        #----------------------
         # generate a unit test
+        #----------------------
         for responce in agent.stream({
             "steady_state_name": steady_state_draft["name"],
             "steady_state_thought": steady_state_draft["thought"],
             "command": inspection.script.content,
             "steady_state_threshold": threshold["threshold"],
             "steady_state_threshold_description": threshold["reason"]},
-            {"callbacks": [self.logger]}
+            {"callbacks": [cb]} if cb else {}
         ):
             text = ""
             if (thought := responce.get("thought")) is not None:

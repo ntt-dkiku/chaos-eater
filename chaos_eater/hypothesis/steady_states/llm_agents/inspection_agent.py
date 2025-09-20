@@ -1,9 +1,9 @@
-from typing import List, Dict, Tuple, Literal
+from typing import List, Dict, Tuple, Literal, Optional
 
 from .utils import Inspection, run_pod
 from ....preprocessing.preprocessor import ProcessedData
 from ....utils.wrappers import LLM, BaseModel, Field
-from ....utils.llms import build_json_agent, LLMLog, LoggingCallback
+from ....utils.llms import build_json_agent, AgentLogger
 from ....utils.schemas import File
 from ....utils.functions import (
     write_file,
@@ -97,12 +97,12 @@ class InspectionAgent:
         predefined_steady_states: list,
         kube_context: str,
         work_dir: str,
-        max_retries: int = 3
-    ) -> Tuple[LLMLog, Inspection]:
+        max_retries: int = 3,
+        agent_logger: Optional[AgentLogger] = None
+    ) -> Inspection:
         #---------------
         # intialization
         #---------------
-        self.logger = LoggingCallback(name="tool_command_writing", llm=self.llm)
         self.message_logger.write("#### 🔍 Current state inspection")
         output_history = []
         error_history = []
@@ -113,7 +113,8 @@ class InspectionAgent:
         raw_output, inspection = self.generate_inspection(
             input_data=input_data,
             steady_state_draft=steady_state_draft,
-            work_dir=work_dir
+            work_dir=work_dir,
+            agent_logger=agent_logger
         )
         output_history.append(raw_output)
 
@@ -153,10 +154,11 @@ class InspectionAgent:
                 mod_count=mod_count,
                 output_history=output_history,
                 error_history=error_history,
+                agent_logger=agent_logger
             )
             output_history.append(raw_output)
 
-        return self.logger.log, inspection
+        return inspection
     
     def generate_inspection(
         self,
@@ -166,7 +168,16 @@ class InspectionAgent:
         mod_count: int = -1,
         output_history: List[dict] = [],
         error_history: List[str] = [],
+        agent_logger: Optional[AgentLogger] = None
     ) -> Tuple[dict, Inspection]:
+        #----------------
+        # initialization
+        #----------------
+        cb = agent_logger and agent_logger.get_callback(
+            phase="hypothesis",
+            agent_name=f"state_inspection_{len(output_history)}"
+        )
+
         #---------------------------------------
         # update chat messages & build an agent
         #---------------------------------------
@@ -191,7 +202,7 @@ class InspectionAgent:
             "ce_instructions": input_data.ce_instructions,
             "steady_state_name": steady_state_draft["name"],
             "steady_state_thought": steady_state_draft["thought"]},
-            {"callbacks": [self.logger]}
+            {"callbacks": [cb]} if cb else {}
         ):
             text = ""
             if (thought := inspection.get("thought")) is not None:

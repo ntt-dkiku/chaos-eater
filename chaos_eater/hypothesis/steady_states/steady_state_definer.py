@@ -1,5 +1,5 @@
 import os
-from typing import List, Dict, Tuple
+from typing import List, Dict, Optional
 
 from .llm_agents.draft_agent import SteadyStateDraftAgent
 from .llm_agents.inspection_agent import InspectionAgent
@@ -10,7 +10,7 @@ from .llm_agents.utils import Inspection
 from ...preprocessing.preprocessor import ProcessedData
 from ...utils.wrappers  import LLM, BaseModel
 from ...utils.schemas import File
-from ...utils.llms import LLMLog
+from ...utils.llms import AgentLogger
 from ...utils.functions import int_to_ordinal, MessageLogger
 
 
@@ -100,8 +100,9 @@ class SteadyStateDefiner:
         kube_context: str,
         work_dir: str,
         max_num_steady_states: int = 2,
-        max_retries: int = 3
-    ) -> Tuple[List[LLMLog], SteadyStates]:
+        max_retries: int = 3,
+        agent_logger: Optional[AgentLogger] = None
+    ) -> SteadyStates:
         #-------------------
         # 0. initialization
         #-------------------
@@ -111,7 +112,6 @@ class SteadyStateDefiner:
         steady_state_dir = f"{work_dir}/steady_states"
         os.makedirs(steady_state_dir, exist_ok=True)
         # list initialization
-        logs = []
         steady_states = SteadyStates()
         prev_check_thought = ""
 
@@ -127,41 +127,41 @@ class SteadyStateDefiner:
             #-------------------------
             # 1. draft a steady state
             #-------------------------
-            draft_log, steady_state_draft = self.draft_agent.draft_steady_state(
+            steady_state_draft = self.draft_agent.draft_steady_state(
                 input_data=input_data,
                 predefined_steady_states=steady_states,
                 prev_check_thought=prev_check_thought,
+                agent_logger=agent_logger
             )
-            logs.append(draft_log)
 
             #--------------------------------------------------
             # 2. inspect the current value of the steady state
             #--------------------------------------------------
-            cmd_log, inspection = self.inspection_agent.inspect_current_state(
+            inspection = self.inspection_agent.inspect_current_state(
                 input_data=input_data,
                 steady_state_draft=steady_state_draft,
                 predefined_steady_states=steady_states,
                 kube_context=kube_context,
                 work_dir=work_dir,
-                max_retries=max_retries
+                max_retries=max_retries,
+                agent_logger=agent_logger
             )
-            logs.append(cmd_log)
 
             #---------------------------------------------
             # 3. define a threshold for the steady steate
             #---------------------------------------------
-            threshold_log, threshold = self.threshold_agent.define_threshold(
+            threshold = self.threshold_agent.define_threshold(
                 input_data=input_data,
                 steady_state_draft=steady_state_draft,
                 inspection=inspection,
-                predefined_steady_states=steady_states
+                predefined_steady_states=steady_states,
+                agent_logger=agent_logger
             )
-            logs.append(threshold_log)
 
             #-------------------------------------------
             # 4. write a unit test for the steady state
             #-------------------------------------------
-            unittest_log, unittest = self.unittest_agent.write_unittest(
+            unittest = self.unittest_agent.write_unittest(
                 input_data=input_data,
                 steady_state_draft=steady_state_draft,
                 inspection=inspection,
@@ -169,9 +169,9 @@ class SteadyStateDefiner:
                 predefined_steady_states=steady_states,
                 kube_context=kube_context,
                 work_dir=work_dir,
-                max_retries=max_retries
+                max_retries=max_retries,
+                agent_logger=agent_logger
             )
-            logs.append(unittest_log)
 
             #-------------------------------
             # epilogue for the steady state
@@ -189,15 +189,14 @@ class SteadyStateDefiner:
             # Check steady-state completion
             #-------------------------------
             if steady_states.count >= max_num_steady_states:
-                container = self.message_logger.container(border=True)
-                container.write(f"#### The number of steady states has reached the maximum limit ({max_num_steady_states}).")
+                self.message_logger.write(f"#### The number of steady states has reached the maximum limit ({max_num_steady_states}).")
                 break
-            check_log, check = self.completion_check_agent.check_steady_state_completion(
+            check = self.completion_check_agent.check_steady_state_completion(
                 input_data=input_data,
-                predefined_steady_states=steady_states
+                predefined_steady_states=steady_states,
+                agent_logger=agent_logger
             )
-            logs.append(check_log)
             prev_check_thought = check["thought"]
             if not check["requires_addition"]: 
                 break
-        return logs, steady_states
+        return steady_states

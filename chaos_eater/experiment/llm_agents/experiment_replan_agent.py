@@ -1,13 +1,13 @@
 import os
 import copy
-from typing import List, Tuple, Literal, Optional
+from typing import List, Literal, Optional
 
 from .experiment_plan_agent import ChaosExperimentPlan
 from ...ce_tools.ce_tool_base import CEToolBase
 from ...ce_tools.chaosmesh.faults.selectors import Selectors
 from ...hypothesis.steady_states.llm_agents.utils import Inspection, run_pod
 from ...utils.wrappers import LLM, LLMBaseModel, LLMField
-from ...utils.llms import build_json_agent, LLMLog, LoggingCallback
+from ...utils.llms import build_json_agent, AgentLogger
 from ...utils.functions import (
     file_list_to_str,
     dict_to_str,
@@ -135,12 +135,12 @@ class ExperimentRePlanAgent:
         curr_k8s_yamls: List[File],
         kube_context: str,
         work_dir: str,
-        max_retries: int = 3
-    ) -> Tuple[LLMLog, dict]:
+        max_retries: int = 3,
+        agent_logger: Optional[AgentLogger] = None
+    ) -> dict:
         #-----------------
         # initialization
         #-----------------
-        logger = LoggingCallback(name="experiment_replan", llm=self.llm)
         new_experiment_plan = copy.deepcopy(prev_experiment.plan)
 
         #------------------------
@@ -152,7 +152,7 @@ class ExperimentRePlanAgent:
             experiment_plan=new_experiment_plan,
             prev_k8s_yamls=prev_k8s_yamls,
             curr_k8s_yamls=curr_k8s_yamls,
-            logger=logger
+            agent_logger=agent_logger
         )
 
         #----------------------
@@ -163,16 +163,13 @@ class ExperimentRePlanAgent:
             experiemnt_plan=new_experiment_plan,
             prev_k8s_yamls=prev_k8s_yamls,
             curr_k8s_yamls=curr_k8s_yamls,
-            logger=logger,
             kube_context=kube_context,
             work_dir=work_dir,
-            max_retries=max_retries
+            max_retries=max_retries,
+            agent_logger=agent_logger
         )
 
-        return (
-            logger.log, 
-            ChaosExperimentPlan(**new_experiment_plan)
-        )
+        return ChaosExperimentPlan(**new_experiment_plan)
     
     def replan_scope(
         self,
@@ -180,10 +177,14 @@ class ExperimentRePlanAgent:
         experiment_plan: dict,
         prev_k8s_yamls: List[File],
         curr_k8s_yamls: List[File],
-        logger: LoggingCallback
+        agent_logger: Optional[AgentLogger] = None
     ) -> None:
         fault_injections = experiment_plan["fault_injection"]["fault_injection"]
         for fault_injection in fault_injections:
+            cb = agent_logger and agent_logger.get_callback(
+                phase="experiment_replan",
+                agent_name="scrope_adjustment"
+            )
             self.message_logger.write("Current fault injection settings:")
             self.message_logger.write(f"{self.get_fault_str(fault_injection)}")
             for response in self.scope_agent.stream({
@@ -191,7 +192,7 @@ class ExperimentRePlanAgent:
                 "experiment_plan": experiment.to_str(),
                 "curr_k8s_yamls": file_list_to_str(curr_k8s_yamls),
                 "curr_fault_injection": self.get_fault_str(fault_injection)},
-                {"callbacks": [logger]}
+                {"callbacks": [cb]} if cb else {}
             ):
                 text = ""
                 if (thought := response.get("thought")) is not None:
@@ -233,10 +234,10 @@ class ExperimentRePlanAgent:
         experiemnt_plan: dict,
         prev_k8s_yamls: List[File],
         curr_k8s_yamls: List[File],
-        logger: LoggingCallback,
         kube_context: str,
         work_dir: str,
         max_retries: int = 3, 
+        agent_logger: Optional[AgentLogger] = None
     ) -> None:
         # copy the base class
         copy_file(UNITTEST_BASE_PY_PATH, f"{work_dir}/unittest_base.py")
@@ -270,12 +271,16 @@ class ExperimentRePlanAgent:
                 #-----------------------------------------------------
                 # generate an adjusted unittest if needed (first try)
                 #-----------------------------------------------------
+                cb = agent_logger and agent_logger.get_callback(
+                    phase="experiment_replan",
+                    agent_name="unittest_adjustment_0"
+                )
                 self.message_logger.write("Adjusted unittest")
                 for response in self.unittest_agent.stream({
                     "prev_k8s_yamls": file_list_to_str(prev_k8s_yamls),
                     "prev_unittest": unittest_code,
                     "curr_k8s_yamls": file_list_to_str(curr_k8s_yamls)},
-                    {"callbacks": [logger]}
+                    {"callbacks": [cb]} if cb else {}
                 ):
                     text = ""
                     if (thought := response.get("thought")) is not None:
@@ -346,7 +351,7 @@ class ExperimentRePlanAgent:
                         curr_k8s_yamls=curr_k8s_yamls,
                         output_history=output_history,
                         error_history=error_history,
-                        logger=logger
+                        agent_logger=agent_logger
                     )
                     code = response["code"]
 
@@ -366,8 +371,16 @@ class ExperimentRePlanAgent:
         curr_k8s_yamls: List[File],
         output_history: List[dict | str],
         error_history: List[str],
-        logger: LoggingCallback
+        agent_logger: Optional[AgentLogger] = None
     ) -> dict:
+        #----------------
+        # initialization
+        #----------------
+        cb = agent_logger and agent_logger.get_callback(
+            phase="experiment_replan",
+            agent_name=f"unittest_adjustment_{len(output_history)}"
+        )
+
         #------------------------------------------
         # update chat messages & build a new agent
         #------------------------------------------
@@ -395,7 +408,7 @@ class ExperimentRePlanAgent:
             "prev_k8s_yamls": file_list_to_str(prev_k8s_yamls),
             "prev_unittest": unittest_code,
             "curr_k8s_yamls": file_list_to_str(curr_k8s_yamls)},
-            {"callbacks": [logger]}
+            {"callbacks": [cb]} if cb else {}
         ):
             text = ""
             if (thought := response.get("thought")) is not None:
