@@ -25,6 +25,7 @@ import {
 } from './lib/useSessionStore';
 import './App.css';
 import MessagesPanel from './components/MessagesPanel';
+import NumberField from "./components/NumberField";
 
 
 export default function ChaosEaterApp() {
@@ -87,7 +88,7 @@ export default function ChaosEaterApp() {
     newDeployment: true,
     temperature: 0.0,
     seed: 42,
-    maxSteadyStates: 3,
+    maxSteadyStates: 2,
     maxRetries: 3,
   });
   
@@ -568,16 +569,6 @@ export default function ChaosEaterApp() {
       }
     }
   
-    // Close WebSocket cleanly
-    try {
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
-      }
-    } catch (err) {
-      console.warn("WebSocket close failed:", err);
-    }
-  
     // Clear current state without changing session ID
     setMessages([]);
     setPanelVisible(false);
@@ -600,7 +591,7 @@ export default function ChaosEaterApp() {
       newDeployment: true,
       temperature: 0.0,
       seed: 42,
-      maxSteadyStates: 3,
+      maxSteadyStates: 2,
       maxRetries: 3,
     }));
     
@@ -637,6 +628,9 @@ export default function ChaosEaterApp() {
       clean_cluster_before_run: formData.cleanBefore,
       clean_cluster_after_run: formData.cleanAfter,
       is_new_deployment: formData.newDeployment,
+      model_name: formData.model_name,
+      temperature: formData.temperature,
+      seed: formData.seed,
       max_num_steadystates: formData.maxSteadyStates,
       max_retries: formData.maxRetries,
       namespace: 'chaos-eater'
@@ -1281,6 +1275,68 @@ export default function ChaosEaterApp() {
                   </div>
                 </div>
               )}
+
+              {/* Parameters */}
+              <div>
+                <label
+                  style={{
+                    fontSize: '12px',
+                    color: '#a9a9a9',
+                    fontWeight: '400',
+                    letterSpacing: '0.5px'
+                  }}
+                >
+                  Parameters
+                </label>
+
+                <div
+                  style={{
+                    marginTop: '8px',
+                    display: 'grid',
+                    gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
+                    columnGap: '12px',
+                    rowGap: '12px',
+                    alignItems: 'start'
+                  }}
+                >
+                  {/* Seed */}
+                  <NumberField
+                    label="Seed"
+                    value={formData.seed}
+                    step={1}
+                    min={0}
+                    onChange={(val) => setFormData(prev => ({ ...prev, seed: val }))}
+                  />
+
+                  {/* Temperature */}
+                  <NumberField
+                    label="Temperature"
+                    value={formData.temperature}
+                    step={0.1}
+                    min={0}
+                    max={1.0}
+                    onChange={(val) => setFormData(prev => ({ ...prev, temperature: val }))}
+                  />
+
+                  {/* Maximum number of steady states */}
+                  <NumberField
+                    label="Max steady states"
+                    value={formData.maxSteadyStates}
+                    step={1}
+                    min={1}
+                    onChange={(val) => setFormData(prev => ({ ...prev, maxSteadyStates: val }))}
+                  />
+
+                  {/* Max retries */}
+                  <NumberField
+                    label="Max retries"
+                    value={formData.maxRetries}
+                    step={1}
+                    min={0}
+                    onChange={(val) => setFormData(prev => ({ ...prev, maxRetries: val }))}
+                  />
+                </div>
+              </div>
 
               {/* Cluster Selection */}
               <div>

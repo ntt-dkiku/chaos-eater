@@ -47,6 +47,11 @@ class ChaosEaterJobRequest(BaseModel):
 
     Exactly one of {project_path, input_data} must be provided.
     """
+    # model setting
+    model_name: str = Field(default="openai/gpt-4o-2024-08-06")
+    temperature: float = Field(default=0.0, ge=0.0, le=1.0)
+    seed: int = Field(default=42)
+
     # One-of:
     project_path: Optional[str] = Field(None, description="Local folder containing skaffold.yaml")
     input_data: Optional[Dict[str, Any]] = Field(None, description="ChaosEaterInput data")
@@ -389,7 +394,7 @@ async def run_chaos_eater_cycle(
             llm=llm,
             ce_tool=ce_tool,
             message_logger=message_logger,
-            work_dir=request.work_dir or "sandbox",
+            work_dir="sandbox",
             namespace=request.namespace
         )
         job_manager.chaos_eaters[job_id] = chaos_eater
@@ -553,6 +558,14 @@ async def create_job(
     llm_inst=Depends(get_llm),
     ce_tool_inst=Depends(get_ce_tool),
 ):
+    # build LLM instance per request
+    llm_inst = load_llm(
+        model_name=request.model_name,
+        temperature=request.temperature,
+        seed=request.seed,
+        port=int(os.getenv("CE_PORT", "8000"))
+    )
+
     job_id = await job_mgr.create_job(request)
     task = asyncio.create_task(
         run_chaos_eater_cycle(job_id, job_mgr, request, llm_inst, ce_tool_inst)

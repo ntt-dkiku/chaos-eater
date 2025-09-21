@@ -17,3 +17,16 @@ html, body, #root {
     overflow-y: auto;
     scrollbar-gutter: stable;
 }
+
+/* Remove native spin buttons in WebKit browsers (Chrome / Edge / Safari) */
+.ce-number::-webkit-outer-spin-button,
+.ce-number::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Remove native spin buttons in Firefox */
+.ce-number[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield; /* Works for modern Chrome/Safari as well */
+}
