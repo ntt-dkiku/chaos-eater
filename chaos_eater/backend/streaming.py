@@ -85,6 +85,17 @@ class FrontendMessageLogger(MessageLogger):
             "final": final
         })
 
+    def iframe(
+        self,
+        url: str,
+        role: Literal["user", "assistant"] = "assistant",
+    ) -> None:
+        self._push({
+            "type": "iframe",
+            "role": role,
+            "url": url
+        })
+
 class FrontEndDisplayHandler:
     """Display handler implementation for Streamlit UI"""
     

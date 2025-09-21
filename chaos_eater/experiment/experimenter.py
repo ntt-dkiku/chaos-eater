@@ -231,8 +231,7 @@ class Experimenter:
         type_cmd(f'kubectl delete po --context {kube_context} -n {namespace} --selector="chaos-mesh.org/workflow={experiment.workflow_name}" --ignore-not-found')
         # run the experiment
         type_cmd(f"kubectl apply --context {kube_context} -n {namespace} -f {experiment.workflow.path}")
-        # TODO
-        # self.message_logger.iframe("http://localhost:2333/#/workflows", height=500, scrolling=True)
+        self.message_logger.iframe("http://localhost:2333/#/workflows")
 
         #--------------------------
         # wait for workflow to end

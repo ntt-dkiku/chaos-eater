@@ -92,7 +92,7 @@ done
 
 echo "Chaos dashboard is ready. Starting port-forward..."
 # Enable Chaos Mesh dashboard via port-forwarding in the background
-nohup kubectl port-forward -n chaos-mesh svc/chaos-dashboard 2333:2333 &
+nohup kubectl port-forward -n chaos-mesh svc/chaos-dashboard 2333:2333 --address 0.0.0.0 &
 # Get the PID of the background port-forward process
 PORT_FORWARD_PID=$!
 # Print the background job information and the PID

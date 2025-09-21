@@ -883,6 +883,10 @@ export default function ChaosEaterApp() {
             setMessages(m => [...m, { type: 'subheader', role: ev.role || 'assistant', content: ev.text || '' }]);
             return;
           }
+          if (ev.type === 'iframe') {
+            setMessages(m => [...m, { type: 'iframe', role: ev.role || 'assistant', content: ev.url || '' }]);
+            return;
+          }
           setMessages(m => [...m, { type: 'text', role: 'assistant', content: JSON.stringify(ev) }]);
           return;
         }

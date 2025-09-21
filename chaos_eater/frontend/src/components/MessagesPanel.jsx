@@ -176,7 +176,6 @@ export default function MessagesPanel({ messages, showResume = false, onResume }
       return <div key={i} className={msg_styles.subheader}>{m.content}</div>;
     }
     if (type === 'code') {
-      console.log(m)
       return (
         <div key={i} style={{ width: '100%', minWidth: 0 }}>
           <CodeBlock code={m.content} language={m.language} filename={m.filename} />
@@ -184,6 +183,51 @@ export default function MessagesPanel({ messages, showResume = false, onResume }
       );
     }
     if (type === 'status') return null;
+    if (type === 'iframe') {
+      const url = String(m.content || '').trim();
+      const isSafe = /^https:\/\//i.test(url) || /^http:\/\/localhost(:\d+)?/i.test(url);
+    
+      if (!isSafe) {
+        return (
+          <div key={i} style={{ color: '#fca5a5', fontSize: 12, margin: '6px 0' }}>
+            Invalid iframe URL
+          </div>
+        );
+      }
+    
+      return (
+        <div key={i} style={{ width: '100%', minWidth: 0, margin: '8px 0' }}>
+          <div
+            style={{
+              position: 'relative',
+              width: '100%',
+              paddingTop: '56.25%', // 16:9
+              border: '1px solid #374151',
+              borderRadius: 8,
+              overflow: 'hidden',
+              background: '#0b0b0b',
+            }}
+          >
+            <iframe
+              src={url}
+              title={m.title || 'Embedded content'}
+              style={{
+                position: 'absolute',
+                inset: 0,
+                width: '100%',
+                height: '100%',
+                border: '0',
+              }}
+              loading="lazy"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+              referrerPolicy="no-referrer"
+            />
+          </div>
+        </div>
+      );
+    }
 
     return (
       <div key={i} style={{ 
@@ -195,7 +239,18 @@ export default function MessagesPanel({ messages, showResume = false, onResume }
         <ReactMarkdown
           className="markdown-body"
           remarkPlugins={[remarkGfm]}
+          
           components={{
+            a({node, ...props}) {
+              return (
+                <a
+                  {...props}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: '#60a5fa' }}
+                />
+              );
+            },
             code({ node, inline, className, children, ...props }) {
               // Inline code → keep default <code>
               if (inline) {
