@@ -5,6 +5,9 @@ import {
   Send,
   Pause,
   CheckCircle,
+  PlusCircle,
+  Wrench,
+  History,
   Eye,
   EyeOff,
   Loader,
@@ -13,6 +16,13 @@ import {
   PanelLeftOpen,
   PanelLeftClose
 } from 'lucide-react';
+import {
+  ensureSession,
+  listSnapshots,
+  getSnapshot,
+  createSnapshot,
+  updateSnapshot
+} from './lib/useSessionStore';
 import './App.css';
 import MessagesPanel from './components/MessagesPanel';
 
@@ -541,6 +551,70 @@ export default function ChaosEaterApp() {
     await handleSubmit();
   };
 
+  // Refresh session: start a new cycle
+  // Refresh session: start a new cycle
+  // Refresh session: start a new cycle
+  const handleNewCycle = async () => {
+    // Stop running job if exists
+    if (jobId && runState === 'running') {
+      try {
+        await fetch(`${API_BASE}/jobs/${jobId}`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        console.log(`Stopped job ${jobId} before new cycle`);
+      } catch (err) {
+        console.warn("Job stop failed:", err);
+      }
+    }
+  
+    // Close WebSocket cleanly
+    try {
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+    } catch (err) {
+      console.warn("WebSocket close failed:", err);
+    }
+  
+    // Clear current state without changing session ID
+    setMessages([]);
+    setPanelVisible(false);
+    setJobId(null);
+    setRunState('idle');
+    setIsLoading(false);
+    setUploadedFiles([]);
+    setBackendProjectPath(null);
+    setCurrentSnapshotId(null);  // Detach from current snapshot
+    partialStateRef.current = null;
+    messageQueueRef.current = [];
+    
+    // Reset form to defaults but keep API key and cluster
+    setFormData(prev => ({
+      ...prev,
+      instructions: '',
+      projectName: 'chaos-project',
+      cleanBefore: true,
+      cleanAfter: true,
+      newDeployment: true,
+      temperature: 0.0,
+      seed: 42,
+      maxSteadyStates: 3,
+      maxRetries: 3,
+    }));
+    
+    // Clear any pending timers
+    if (processTimerRef.current) {
+      clearTimeout(processTimerRef.current);
+      processTimerRef.current = null;
+    }
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+  };
+
   const handleSubmit = async () => {
     if (!formData.cluster) {
       setNotification({ type: 'error', message: 'Please select a cluster' });
@@ -552,7 +626,7 @@ export default function ChaosEaterApp() {
     }
     setIsLoading(true);
     setRunState('running');
-
+    
     // 1. prepare request body for /jobs
     const payload = {
       project_path: backendProjectPath,
@@ -587,7 +661,6 @@ export default function ChaosEaterApp() {
 
       // display dialog
       setPanelVisible(true);
-      setMessages([]);
 
       // 3. show user instruction as a chat message
       if (formData.instructions.trim()) {
@@ -596,6 +669,29 @@ export default function ChaosEaterApp() {
 
       setNotification({ type: 'success', message: `Job created: ${data.job_id}` });
       
+      // Create a snapshot only on the first submit in this tab/session.
+      try {
+        if (!currentSnapshotId && !creatingSnapshotRef.current) {
+          creatingSnapshotRef.current = true;
+          const snap = await createSnapshot(
+            sessionIdRef.current,
+            `Cycle ${new Date().toLocaleString()}`, // title is up to you
+            {
+              messages,
+              panelVisible: true,
+              backendProjectPath,
+              uploadedFilesMeta: uploadedFiles.map(f => ({ name: f.name, size: f.size })),
+              formData: { ...formData, apiKey: '' },
+            }
+          );
+          setCurrentSnapshotId(snap.id);
+          // Prepend the new snapshot to keep newest-first by creation, without reordering later.
+          setSnapshots(prev => [snap, ...prev]);
+        }
+      } finally {
+        creatingSnapshotRef.current = false;
+      }
+
       // 4. connect WebSocket for streaming
       const socket = new WebSocket(wsUrl(`/jobs/${data.job_id}/stream`));
       wsRef.current = socket;
@@ -846,6 +942,67 @@ export default function ChaosEaterApp() {
     };
   }, []);
 
+  //-----------------
+  // snapshot saving
+  //-----------------
+  // IndexedDB linking
+  const [snapshots, setSnapshots] = useState([]);
+  const [currentSnapshotId, setCurrentSnapshotId] = useState(null);
+  const creatingSnapshotRef = useRef(false);   // prevent duplicate create on rapid clicks
+  const persistDebounceRef = useRef(null);     // debounce timer id
+
+  useEffect(() => {
+    // Ensure IndexedDB session and load snapshot list
+    (async () => {
+      const sid = sessionIdRef.current;
+      if (!sid) return;
+      await ensureSession(sid);
+      const list = await listSnapshots(sid);
+      // Order by createdAt (newest first). This list is fixed afterwards.
+      const sorted = [...list].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      setSnapshots(sorted);
+      // If you want to auto-attach the latest snapshot on reload, uncomment:
+      // if (sorted.length > 0) {
+      //   const last = sorted[0];
+      //   setCurrentSnapshotId(last.id);
+      //   setMessages(last.messages || []);
+      //   setPanelVisible(!!last.panelVisible);
+      //   setBackendProjectPath(last.backendProjectPath || null);
+      //   setUploadedFiles((last.uploadedFilesMeta || []).map(m => ({ name: m.name, size: m.size, content: '' })));
+      //   setFormData(prev => ({ ...prev, ...(last.formData || {}), apiKey: '' }));
+      // }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!currentSnapshotId) return;
+  
+    const payload = {
+      messages,
+      panelVisible,
+      backendProjectPath,
+      uploadedFilesMeta: uploadedFiles.map(f => ({ name: f.name, size: f.size })),
+      formData: { ...formData, apiKey: '' },
+    };
+  
+    // debounce to avoid excessive writes
+    if (persistDebounceRef.current) clearTimeout(persistDebounceRef.current);
+    persistDebounceRef.current = setTimeout(async () => {
+      try {
+        await updateSnapshot(currentSnapshotId, payload);
+      } catch (e) {
+        console.error('snapshot update failed', e);
+      }
+    }, 600);
+  
+    return () => {
+      if (persistDebounceRef.current) {
+        clearTimeout(persistDebounceRef.current);
+        persistDebounceRef.current = null;
+      }
+    };
+  }, [messages, panelVisible, backendProjectPath, uploadedFiles, formData, currentSnapshotId]);
+
 
   //
   //
@@ -870,7 +1027,7 @@ export default function ChaosEaterApp() {
           pointerEvents: sidebarOpen ? 'auto' : 'none'
         }}>
           {/* Logo with Close Button */}
-          <div style={{ padding: '16px', display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid #374151' }}>
+          <div style={{ padding: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <img src="/chaoseater_logo.png" style={{ width: 'auto', height: '52px'}} />
             {/* <span style={{ fontSize: '20px', fontWeight: '600', fontVariant: 'small-caps' }}>ChaosEater</span> */}
 
@@ -905,14 +1062,70 @@ export default function ChaosEaterApp() {
               <PanelLeftClose size={16} />
             </button>
           </div>
+          
+          {/* New cycle row */}
+          <div>
+            <button
+              onClick={handleNewCycle}
+              title="Start a new cycle (fresh session)"
+              style={{
+                width: '100%',
+                padding: '12px 16px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                backgroundColor: 'transparent',
+                border: 'none',
+                color: '#e5e7eb',
+                cursor: 'pointer',
+                transition: 'background-color 0.2s ease, color 0.2s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = '#1a1a1a';
+                e.currentTarget.style.color = '#84cc16';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+                e.currentTarget.style.color = '#e5e7eb';
+              }}
+            >
+              <PlusCircle size={16} />
+              <span style={{ fontSize: '14px', fontWeight: 500 }}>New cycle</span>
+            </button>
+          </div>
+
 
         {/* General Settings */}
-        <div style={{ borderBottom: '1px solid #374151' }}>
+        <div>
           <button
-            onClick={() => setSidebarCollapsed(prev => ({ ...prev, general: !prev.general }))}
-            style={{ width: '100%', padding: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: 'transparent', border: 'none', color: '#e5e7eb', cursor: 'pointer' }}
+            onClick={() =>
+              setSidebarCollapsed(prev => ({ ...prev, general: !prev.general }))
+            }
+            style={{
+              width: '100%',
+              padding: '12px 16px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              backgroundColor: 'transparent',
+              border: 'none',
+              color: '#e5e7eb',
+              cursor: 'pointer',
+              transition: 'background-color 0.2s ease, color 0.2s ease'
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.backgroundColor = '#1a1a1a';
+              e.currentTarget.style.color = '#84cc16';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+              e.currentTarget.style.color = '#e5e7eb';
+            }}
           >
-            <span style={{ fontSize: '14px', fontWeight: '500' }}>General settings</span>
+            <Wrench size={16} />
+            <span style={{ fontSize: '14px', fontWeight: '500' }}>
+              Settings
+            </span>
             {sidebarCollapsed.general ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
           </button>
           
@@ -920,7 +1133,7 @@ export default function ChaosEaterApp() {
             <div style={{ padding: '0 16px 16px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
               {/* Model Selection */}
               <div>
-                <label style={{ fontSize: '12px', color: '#6b7280', fontWeight: '400', letterSpacing: '0.5px' }}>Model</label>
+                <label style={{ fontSize: '12px', color: '#a9a9a9', fontWeight: '400', letterSpacing: '0.5px' }}>Model</label>
                 <select 
                   style={{ 
                     width: '100%', 
@@ -954,7 +1167,7 @@ export default function ChaosEaterApp() {
               
               {selectModelValue === 'custom' && (
                 <div>
-                  <label style={{ fontSize: '12px', color: '#6b7280', fontWeight: '400', letterSpacing: '0.5px' }}>Custom model</label>
+                  <label style={{ fontSize: '12px', color: '#a9a9a9', fontWeight: '400', letterSpacing: '0.5px' }}>Custom model</label>
                   <input
                     type="text"
                     placeholder="ollama/gpt-oss:20b"
@@ -997,7 +1210,7 @@ export default function ChaosEaterApp() {
               {/* API Key */}
               {providerFromModel(formData.model) !== "ollama" && ( // Ollama does not require API key
                 <div>
-                  <label style={{ fontSize: '12px', color: '#6b7280', fontWeight: '400', letterSpacing: '0.5px' }}>API key</label>
+                  <label style={{ fontSize: '12px', color: '#a9a9a9', fontWeight: '400', letterSpacing: '0.5px' }}>API key</label>
                   <div style={{ position: 'relative' }}>
                     <input
                       type={formData.apiKeyVisible ? "text" : "password"}
@@ -1071,7 +1284,7 @@ export default function ChaosEaterApp() {
 
               {/* Cluster Selection */}
               <div>
-                <label style={{ fontSize: '12px', color: '#6b7280', fontWeight: '400', letterSpacing: '0.5px' }}>Cluster selection</label>
+                <label style={{ fontSize: '12px', color: '#a9a9a9', fontWeight: '400', letterSpacing: '0.5px' }}>Cluster selection</label>
                 <select 
                   style={{ 
                     width: '100%', 
@@ -1300,6 +1513,60 @@ export default function ChaosEaterApp() {
             </div>
           )}
         </div>
+
+        {/* History (Snapshots) */}
+        <div>
+          <div style={{
+            width: '100%',
+            padding: '12px 16px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            color: '#a9a9a9'
+          }}>
+            <History size={16} />
+            <span style={{ fontSize: '14px', fontWeight: '500' }}>
+              Cycles
+            </span>
+          </div>
+          <div style={{ padding: '0 8px 12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {snapshots.length === 0 && (
+              <div style={{ color: '#6b7280', fontSize: 12, padding: '0 8px 8px' }}>No cycles yet</div>
+            )}
+            {snapshots.map((s) => (
+              <button
+                key={s.id}
+                onClick={async () => {
+                  // Restore snapshot into UI state
+                  const loaded = await getSnapshot(s.id);
+                  if (!loaded) return;
+                  setPanelVisible(!!loaded.panelVisible);
+                  setMessages(loaded.messages || []);
+                  setBackendProjectPath(loaded.backendProjectPath || null);
+                  setUploadedFiles((loaded.uploadedFilesMeta || []).map(m => ({ name: m.name, size: m.size, content: '' })));
+                  setFormData(prev => ({ ...prev, ...(loaded.formData || {}), apiKey: '' }));
+                  setCurrentSnapshotId(loaded.id);
+                  setNotification({ type: 'success', message: `Restored: ${loaded.title}` });
+                }}
+                style={{
+                  textAlign: 'left',
+                  padding: '10px 12px',
+                  backgroundColor: currentSnapshotId === s.id ? '#1f2937' : '#111827',
+                  border: '1px solid #374151',
+                  color: '#e5e7eb',
+                  borderRadius: 8,
+                  cursor: 'pointer'
+                }}
+                title={new Date(s.createdAt || s.updatedAt || Date.now()).toLocaleString()}
+              >
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 2 }}>
+                  {s.title}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+
         </div>
         
         {/* Resize Handle */}
