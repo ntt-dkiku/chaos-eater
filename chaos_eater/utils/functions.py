@@ -106,6 +106,12 @@ def remove_files_in(dir: str) -> None:
         if os.path.isfile(p):
             os.remove(p)
 
+def make_artifact(src_dir: str, dest_zip: str) -> str:
+    os.makedirs(os.path.dirname(dest_zip), exist_ok=True)
+    base_name, _ = os.path.splitext(dest_zip)
+    shutil.make_archive(base_name, "zip", root_dir=src_dir)
+    return base_name + ".zip"
+
 def remove_all(
     dir: str, 
     context: str,

@@ -2,7 +2,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Copy, ArrowDown } from "lucide-react";
+import { Copy, ArrowDown, RotateCcw, Download } from "lucide-react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 
@@ -87,7 +87,13 @@ function CodeBlock({ code, language = "text", filename }) {
   );
 }
 
-export default function MessagesPanel({ messages, showResume = false, onResume }) {
+export default function MessagesPanel({
+  messages,
+  showResume = false,
+  showNextRun = false,
+  onResume,
+  onDownload
+}) {
   const containerRef = useRef(null);
   const contentRef = useRef(null);           // Content wrapper to observe size changes
   const bottomElRef = useRef(null);          // Real ref for the bottom element
@@ -228,7 +234,7 @@ export default function MessagesPanel({ messages, showResume = false, onResume }
         </div>
       );
     }
-
+    
     return (
       <div key={i} style={{ 
         margin: '6px 0', 
@@ -302,37 +308,112 @@ export default function MessagesPanel({ messages, showResume = false, onResume }
       <div ref={contentRef}>
         {messages.length === 0 ? <div /> : messages.map(renderMsg)}
 
-        {/* Resume button - placed after messages */}
-        {showResume && (
-          <div style={{ 
-            display: 'flex', 
-            justifyContent: 'flex-end',
-            marginTop: '12px',
-            marginBottom: '12px',
-            paddingRight: '6px'
-          }}>
+        {/* download & resume buttons */}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'flex-end',
+          gap: 8,
+          flexWrap: 'wrap',
+          marginTop: 12,
+          marginBottom: 12,
+          paddingRight: 6
+        }}>
+          {/* artifact download */}
+          {(showResume || showNextRun) && (
+            <button
+              onClick={onDownload}
+              title='Download artifact'
+              style={{
+                padding: '6px 10px',
+                backgroundColor: '#1f1f1f',
+                border: '1px solid #374151',
+                color: '#e5e7eb',
+                borderRadius: 6,
+                fontSize: 13,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                transition: 'all 0.2s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = '#2a2a2a';
+                e.currentTarget.style.color = '#84cc16';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = '#1f1f1f';
+                e.currentTarget.style.color = '#e5e7eb';
+              }}
+            >
+              <Download size={16} />
+              <span>Artifact</span>
+            </button>
+          )}
+
+          {/* Resume button - placed after messages */}
+          {showResume && (
             <button
               onClick={onResume}
-              title="Resume chaos eater"
+              title="Resume cycle"
               aria-label="Resume"
               style={{
-                padding: '8px 12px',
-                backgroundColor: '#84cc16',
-                border: '1px solid #4d7c0f',
-                color: '#000',
-                borderRadius: 8,
-                fontSize: 14,
-                fontWeight: 600,
+                padding: '6px 10px',
+                backgroundColor: '#1f1f1f',
+                border: '1px solid #374151',
+                color: '#e5e7eb',
+                borderRadius: 6,
+                fontSize: 13,
                 cursor: 'pointer',
-                boxShadow: '0 2px 8px rgba(132, 204, 22, 0.3)',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                transition: 'all 0.2s ease'
               }}
-              onMouseEnter={(e) => { e.currentTarget.style.filter = 'brightness(1.05)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.filter = 'none'; }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = '#2a2a2a';
+                e.currentTarget.style.color = '#84cc16';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = '#1f1f1f';
+                e.currentTarget.style.color = '#e5e7eb';
+              }}
             >
+              <RotateCcw size={16} />
               Resume
             </button>
-          </div>
-        )}
+          )}
+
+          {/* Next run button */}
+          {showNextRun && (
+            <button
+              onClick={onResume} // TODO: onNextRun
+              title="Run next cycle"
+              aria-label="Resume"
+              style={{
+                padding: '6px 10px',
+                backgroundColor: '#1f1f1f',
+                border: '1px solid #374151',
+                color: '#e5e7eb',
+                borderRadius: 6,
+                fontSize: 13,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                transition: 'all 0.2s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = '#2a2a2a';
+                e.currentTarget.style.color = '#84cc16';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = '#1f1f1f';
+                e.currentTarget.style.color = '#e5e7eb';
+              }}
+            >
+              Next Cycle
+            </button>
+          )}
+        </div>
 
         {/* Sentinel element for Intersection Observer */}
         <div ref={attachBottom} style={{ height: 1 }} />

@@ -1,4 +1,5 @@
-from typing import Literal, Callable, Dict, Any, List, Optional
+from typing import Literal, Callable, Dict, Any, Optional
+from pathlib import Path
 from ..utils.functions import MessageLogger, limit_string_length
 
 
@@ -12,13 +13,19 @@ class FrontendMessageLogger(MessageLogger):
     """
     def __init__(
         self,
-        emitter: StreamEmitter | None = None
+        emitter: Optional[StreamEmitter] = None,
+        job_id: Optional[str] = None
     ) -> None:
         super().__init__()
         self._emit: StreamEmitter | None = emitter
+        self._job_id = job_id
+        self._base_route = "/jobs"
 
     def set_emitter(self, emitter: StreamEmitter) -> None:
         self._emit = emitter
+
+    def set_job(self, job_id: str) -> None:
+        self._job_id = job_id
 
     def _push(self, event: Dict[str, Any]) -> None:
         self.messages.append(event)

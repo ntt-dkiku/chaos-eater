@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field, model_validator
 from ..chaos_eater import ChaosEater, ChaosEaterInput, ChaosEaterOutput
 from ..ce_tools.ce_tool import CEToolType, CETool
 from ..utils.llms import load_llm
+from ..utils.functions import make_artifact, get_timestamp
 
 
 # ---------------------------------------------------------------------
@@ -85,6 +86,7 @@ class JobInfo(BaseModel):
     progress: Optional[str] = None
     error: Optional[str] = None
     result: Optional[Dict[str, Any]] = None
+    work_dir: Optional[str] = None
 
 
 class JobResponse(BaseModel):
@@ -211,6 +213,7 @@ class JobManager:
                 created_at=datetime.now(),
                 updated_at=datetime.now(),
                 progress="Job created",
+                work_dir=f"sandbox/cycle_{get_timestamp()}"
             )
         return job_id
 
@@ -385,9 +388,10 @@ async def run_chaos_eater_cycle(
         async with job_manager.lock:
             job_manager.jobs[job_id].status = JobStatus.RUNNING
             job_manager.jobs[job_id].updated_at = datetime.now()
+            job_work_dir = job_manager.jobs[job_id].work_dir
 
         # Logger without Streamlit
-        message_logger = FrontendMessageLogger()
+        message_logger = FrontendMessageLogger(job_id=job_id)
 
         # Instance
         chaos_eater = ChaosEater(
@@ -427,7 +431,7 @@ async def run_chaos_eater_cycle(
             chaos_eater.run_ce_cycle,
             ce_input,
             request.kube_context,
-            request.work_dir,
+            job_work_dir, 
             request.project_name,
             request.clean_cluster_before_run,
             request.clean_cluster_after_run,
@@ -634,7 +638,6 @@ async def get_job_logs(job_id: str, job_mgr: JobManager = Depends(get_job_manage
             return FileResponse(log_file, media_type="application/octet-stream", filename="message_log.pkl")
     raise HTTPException(status_code=404, detail="Log file not found")
 
-
 @app.get("/jobs/{job_id}/output")
 async def get_job_output(job_id: str, job_mgr: JobManager = Depends(get_job_manager)):
     job = await job_mgr.get_job(job_id)
@@ -650,6 +653,25 @@ async def get_job_output(job_id: str, job_mgr: JobManager = Depends(get_job_mana
             return FileResponse(output_json, media_type="application/json", filename="output.json")
     raise HTTPException(status_code=404, detail="Output file not found")
 
+@app.get("/jobs/{job_id}/artifact")
+async def get_job_artifact(job_id: str, job_mgr: JobManager = Depends(get_job_manager)):
+    job = await job_mgr.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    if not job.work_dir:
+        raise HTTPException(status_code=400, detail="work_dir is not set for this job")
+    
+    # generate artifact
+    artifact_path = os.path.join(
+        "/tmp",
+        Path(job.work_dir).name,
+        "artifact.zip"
+    )
+    zip_path = make_artifact(job.work_dir, artifact_path)
+
+    if os.path.exists(artifact_path):
+        return FileResponse(zip_path, media_type="application/zip", filename="artifact.zip")
+    raise HTTPException(status_code=404, detail="Artifact not found")
 
 @app.get("/health")
 async def health_check():

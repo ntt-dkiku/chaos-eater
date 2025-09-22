@@ -553,8 +553,6 @@ export default function ChaosEaterApp() {
   };
 
   // Refresh session: start a new cycle
-  // Refresh session: start a new cycle
-  // Refresh session: start a new cycle
   const handleNewCycle = async () => {
     // Stop running job if exists
     if (jobId && runState === 'running') {
@@ -603,6 +601,21 @@ export default function ChaosEaterApp() {
     if (rafRef.current) {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
+    }
+  };
+
+  // Download artifact (.zip)
+  const handleDownload = async (pathOrUrl, fallbackName) => {
+    try {
+      await downloadFromApi({
+        API_BASE,
+        pathOrUrl,
+        suggestedFilename: fallbackName,
+        // headers: { ...(formData.apiKey ? { 'x-api-key': formData.apiKey } : {}) } // if you need auth
+      });
+      setNotification({ type: 'success', message: 'Download started' });
+    } catch (err) {
+      setNotification({ type: 'error', message: err.message || 'Download failed' });
     }
   };
 
@@ -669,7 +682,7 @@ export default function ChaosEaterApp() {
           creatingSnapshotRef.current = true;
           const snap = await createSnapshot(
             sessionIdRef.current,
-            `Cycle ${new Date().toLocaleString()}`, // title is up to you
+            `Project ${new Date().toLocaleString()}`, // title is up to you
             {
               messages,
               panelVisible: true,
@@ -702,7 +715,7 @@ export default function ChaosEaterApp() {
       socket.onclose = () => {
         setMessages((m) => [...m, { type: 'status', role: 'assistant', content: 'Stream closed' }]);
         setIsLoading(false);
-        setRunState((prev) => (prev === 'paused' ? 'paused' : 'idle'));
+        setRunState((prev) => (prev === 'paused' ? 'paused' : 'completed'));
       };
     } catch (err) {
       console.error(err);
@@ -1001,6 +1014,53 @@ export default function ChaosEaterApp() {
     };
   }, [messages, panelVisible, backendProjectPath, uploadedFiles, formData, currentSnapshotId]);
 
+  //-------------------
+  // artifact download
+  //-------------------
+  function resolveApiUrl(API_BASE, pathOrUrl) {
+    try {
+      const u = new URL(pathOrUrl);
+      return u.toString(); // already absolute
+    } catch {
+      return `${API_BASE}${pathOrUrl.startsWith('/') ? '' : '/'}${pathOrUrl}`;
+    }
+  }
+
+  /**
+   * Download a file and trigger a save dialog.
+   * Respects Content-Disposition if present; falls back to suggestedFilename.
+   */
+  async function downloadFromApi({ API_BASE, pathOrUrl, suggestedFilename, headers = {} }) {
+    const url = resolveApiUrl(API_BASE, pathOrUrl);
+    const res = await fetch(url, { method: 'GET', headers });
+
+    if (!res.ok) {
+      let detail = '';
+      try { detail = (await res.json())?.detail || ''; } catch {}
+      throw new Error(detail || `Download failed (HTTP ${res.status})`);
+    }
+
+    // Try parse filename from Content-Disposition
+    let filename = suggestedFilename || 'download';
+    const cd = res.headers.get('Content-Disposition') || res.headers.get('content-disposition');
+    if (cd && /filename\*=UTF-8''([^;]+)/i.test(cd)) {
+      filename = decodeURIComponent(cd.match(/filename\*=UTF-8''([^;]+)/i)[1]);
+    } else if (cd && /filename="?([^"]+)"?/i.test(cd)) {
+      filename = cd.match(/filename="?([^"]+)"?/i)[1];
+    }
+
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(blobUrl);
+  }
+
 
   //
   //
@@ -1088,7 +1148,7 @@ export default function ChaosEaterApp() {
               }}
             >
               <PlusCircle size={16} />
-              <span style={{ fontSize: '14px', fontWeight: 500 }}>New cycle</span>
+              <span style={{ fontSize: '14px', fontWeight: 500 }}>New project</span>
             </button>
           </div>
 
@@ -1586,7 +1646,7 @@ export default function ChaosEaterApp() {
           }}>
             <History size={16} />
             <span style={{ fontSize: '14px', fontWeight: '500' }}>
-              Cycles
+              History
             </span>
           </div>
           <div style={{ padding: '0 8px 12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -1714,11 +1774,17 @@ export default function ChaosEaterApp() {
           overflow: 'hidden',
           minHeight: 0,
         }}>
-          {/* <MessagesPanel messages={messages} /> */}
           <MessagesPanel
             messages={messages}
             showResume={runState === 'paused'}
+            showNextRun={runState === 'completed'}
             onResume={handleResume}
+            onDownload={() => {
+              if (!jobId) return;
+              const path = `/jobs/${jobId}/artifact`; 
+              const filename = `artifact.zip`;
+              handleDownload(path, filename);
+            }}
           />
         </div>
 
