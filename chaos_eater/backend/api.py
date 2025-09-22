@@ -190,6 +190,40 @@ def build_input_from_project_path(project_path: str, override_instructions: Opti
     }
     return ce_input
 
+# 消してよいベースディレクトリ（必要に応じて調整）
+ALLOWED_DELETE_BASES = [
+    Path("sandbox").resolve(),
+    Path("/tmp").resolve(),
+    Path(os.getenv("CE_TEMP_BASE", "/tmp/chaos-eater")).resolve(),
+]
+
+def _safe_rmtree(target: str | Path) -> dict:
+    """
+    Safely delete a work_dir.
+    - Only allowed if under one of the ALLOWED_DELETE_BASES
+    - No-op if the path does not exist
+    """
+    p = Path(target).resolve()
+    logger.info(f"[PURGE] try delete: {p}")
+    # Check if it's under one of the allowed base directories
+    if not any(str(p).startswith(str(base) + os.sep) or p == base for base in ALLOWED_DELETE_BASES):
+        return {"deleted": False, "reason": f"denied: {p} is outside allowed bases"}
+
+    # Return if path not found
+    if not p.exists():
+        return {"deleted": False, "reason": "path not found", "path": str(p)}
+
+    # Return if not a directory
+    if not p.is_dir():
+        return {"deleted": False, "reason": "not a directory", "path": str(p)}
+
+    try:
+        shutil.rmtree(p)
+        logger.info(f"[PURGE OK] {p}")
+        return {"deleted": True, "path": str(p)}
+    except Exception as e:
+        logger.exception(f"[PURGE FAIL] {p}: {e}")
+        return {"deleted": False, "reason": str(e), "path": str(p)}
 
 # ---------------------------------------------------------------------
 # Job Manager
@@ -285,6 +319,36 @@ class JobManager:
                 t = self.tasks.pop(job_id, None)
                 if t and not t.done():
                     t.cancel()
+
+    async def purge_job(self, job_id: str, delete_files: bool = True) -> dict:
+        """
+        Delete the job's in-memory information and (optionally) its work directory.
+        If the job is in RUNNING or PENDING state, return an error equivalent to 409.
+        """
+        async with self.lock:
+            job = self.jobs.get(job_id)
+            if not job:
+                return {"ok": False, "status": 404, "detail": f"Job {job_id} not found"}
+
+            if job.status in {JobStatus.PENDING, JobStatus.RUNNING}:
+                return {"ok": False, "status": 409, "detail": f"Job {job_id} is {job.status}, cancel it first"}
+
+            # Delete files first (if needed)
+            file_results = []
+            if delete_files and job.work_dir:
+                file_results.append(_safe_rmtree(job.work_dir))
+                file_results.append(_safe_rmtree(f"/tmp/{Path(job.work_dir).name}"))
+
+            # Cleanup in-memory state
+            self.jobs.pop(job_id, None)
+            self.chaos_eaters.pop(job_id, None)
+            self.events.pop(job_id, None)
+            cb = self.callbacks.pop(job_id, None)
+            task = self.tasks.pop(job_id, None)
+            if task and not task.done():
+                task.cancel()
+
+            return {"ok": True, "status": 200, "deleted_files": file_results}
 
 
 # ---------------------------------------------------------------------
@@ -828,10 +892,10 @@ async def compute_available(session_id: Optional[str]) -> Dict[str, Any]:
 @app.get("/clusters")
 async def list_clusters(session_id: Optional[str] = None):
     """
-    kind のコンテキスト一覧。
-    - available: 未使用 + 自分が確保済みのもの
-    - used: 他セッションが使用中のもの
-    - mine: 自分の確保済み（なければ null）
+    List available kind contexts.
+    - available: Unused contexts + those reserved by the current session
+    - used: Contexts currently in use by other sessions
+    - mine: The context reserved by the current session (null if none)
     """
     return await compute_available(session_id)
 
@@ -954,6 +1018,29 @@ async def delete_api_key(provider: Provider = Query(...), persist: bool = Query(
         provider=provider,
         configured=False,
     )
+
+#----------------
+# job management
+#----------------
+@app.delete("/jobs/{job_id}/purge")
+async def purge_job_storage(
+    job_id: str,
+    delete_files: bool = Query(True, description="Whether to delete the work_dir"),
+    job_mgr: JobManager = Depends(get_job_manager),
+):
+    """
+    For completed/failed/cancelled jobs:
+      - Optionally delete the work_dir
+      - Clean up jobs / tasks / events / callbacks / chaos_eaters inside JobManager
+    If the job is RUNNING or PENDING, return 409.
+    """
+    result = await job_mgr.purge_job(job_id, delete_files=delete_files)
+    if not result["ok"]:
+        raise HTTPException(status_code=result["status"], detail=result["detail"])
+    return {
+        "message": f"Job {job_id} purged",
+        "deleted_files": result.get("deleted_files"),
+    }
 
 # ---------------------------------------------------------------------
 # Main

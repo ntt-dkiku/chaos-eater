@@ -58,3 +58,17 @@ export async function listSnapshots(sessionId) {
 export async function getSnapshot(id) {
   return db.snapshots.get(id);
 }
+
+export async function deleteSnapshot(id) {
+  await db.snapshots.delete(id);
+}
+
+export async function renameSnapshot(id, title) {
+  const updatedAt = Date.now();
+  await db.snapshots.update(id, { title, updatedAt });
+  return db.snapshots.get(id);
+}
+
+export async function clearSnapshots(sessionId) {
+  await db.snapshots.where('sessionId').equals(sessionId).delete();
+}

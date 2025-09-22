@@ -8,6 +8,9 @@ import {
   PlusCircle,
   Wrench,
   History,
+  MoreHorizontal,
+  Trash2,
+  Edit3,
   Eye,
   EyeOff,
   Loader,
@@ -21,7 +24,10 @@ import {
   listSnapshots,
   getSnapshot,
   createSnapshot,
-  updateSnapshot
+  updateSnapshot,
+  renameSnapshot,
+  deleteSnapshot,
+  clearSnapshots
 } from './lib/useSessionStore';
 import './App.css';
 import MessagesPanel from './components/MessagesPanel';
@@ -619,6 +625,87 @@ export default function ChaosEaterApp() {
     }
   };
 
+  // History management
+  async function purgeBySnapshot(snap) {
+    const jid = snap?.jobId;
+    if (!jid) return;
+    try {
+      const res = await fetch(`${API_BASE}/jobs/${encodeURIComponent(jid)}/purge?delete_files=true`, {
+        method: 'DELETE'
+      });
+      const body = await res.json().catch(()=> ({}));
+      if (!res.ok) {
+        throw new Error(body?.detail || `HTTP ${res.status}`);
+      }
+
+      const deleted = Array.isArray(body?.deleted_files) ? body.deleted_files : [];
+      console.debug('[purge result]', jid, deleted);
+      const failed = deleted.filter(d => d && d.deleted === false);
+      if (failed.length) {
+        setNotification({ 
+          type: 'error', 
+          message: `Some paths not deleted: ${failed.map(f=>`${f.path || ''} (${f.reason || 'unknown'})`).join(', ')}`
+        });
+      }
+    } catch (_) {
+    }
+  }
+
+  const handleClearAllSnapshots = async () => {
+    if (!sessionIdRef.current) return;
+    const ok = window.confirm('All snapshots will be deleted. Continue?');
+    if (!ok) return;
+    
+    try {
+      const all = await listSnapshots(sessionIdRef.current);
+      await Promise.allSettled(all.map(purgeBySnapshot));
+
+      await clearSnapshots(sessionIdRef.current);
+      setSnapshots([]);
+      if (currentSnapshotId) setCurrentSnapshotId(null);
+      setNotification({ type: 'success', message: 'All snapshots deleted' });
+    } catch (e) {
+      setNotification({ type: 'error', message: `Delete failed: ${e.message || e}` });
+    }
+  };
+
+  const handleDeleteSnapshot = async (id) => {
+    const ok = window.confirm('Delete this snapshot?');
+    if (!ok) return;
+
+    try {
+      const snap = await getSnapshot(id); 
+      await purgeBySnapshot(snap);
+      await deleteSnapshot(id);
+      setSnapshots(prev => prev.filter(s => s.id !== id));
+      if (currentSnapshotId === id) {
+        setCurrentSnapshotId(null);
+      }
+      setNotification({ type: 'success', message: 'Snapshot deleted' });
+    } catch (e) {
+      setNotification({ type: 'error', message: `Delete failed: ${e.message || e}` });
+    } finally {
+      setOpenMenuId(null);
+    }
+  };
+  
+  const handleRenameSnapshot = async (id, oldTitle) => {
+    const title = window.prompt('New name', oldTitle || '');
+    if (title == null) return; // canceled
+    const newTitle = title.trim();
+    if (!newTitle) return;
+    try {
+      await renameSnapshot(id, newTitle);
+      setSnapshots(prev => prev.map(s => (s.id === id ? { ...s, title: newTitle } : s)));
+      setNotification({ type: 'success', message: 'Renamed' });
+    } catch (e) {
+      setNotification({ type: 'error', message: `Rename failed: ${e.message || e}` });
+    } finally {
+      setOpenMenuId(null);
+    }
+  };
+    
+  // submission
   const handleSubmit = async () => {
     if (!formData.cluster) {
       setNotification({ type: 'error', message: 'Please select a cluster' });
@@ -641,7 +728,7 @@ export default function ChaosEaterApp() {
       clean_cluster_before_run: formData.cleanBefore,
       clean_cluster_after_run: formData.cleanAfter,
       is_new_deployment: formData.newDeployment,
-      model_name: formData.model_name,
+      model_name: formData.model,
       temperature: formData.temperature,
       seed: formData.seed,
       max_num_steadystates: formData.maxSteadyStates,
@@ -684,6 +771,7 @@ export default function ChaosEaterApp() {
             sessionIdRef.current,
             `Project ${new Date().toLocaleString()}`, // title is up to you
             {
+              jobId: data.job_id,
               messages,
               panelVisible: true,
               backendProjectPath,
@@ -959,6 +1047,7 @@ export default function ChaosEaterApp() {
   // IndexedDB linking
   const [snapshots, setSnapshots] = useState([]);
   const [currentSnapshotId, setCurrentSnapshotId] = useState(null);
+  const [openMenuId, setOpenMenuId] = useState(null); // kebab menu open target
   const creatingSnapshotRef = useRef(false);   // prevent duplicate create on rapid clicks
   const persistDebounceRef = useRef(null);     // debounce timer id
 
@@ -1013,6 +1102,13 @@ export default function ChaosEaterApp() {
       }
     };
   }, [messages, panelVisible, backendProjectPath, uploadedFiles, formData, currentSnapshotId]);
+
+  // close kebab menu when clicking outside
+  useEffect(() => {
+    const onDocClick = () => setOpenMenuId(null);
+    document.addEventListener('click', onDocClick);
+    return () => document.removeEventListener('click', onDocClick);
+  }, []);
 
   //-------------------
   // artifact download
@@ -1636,8 +1732,8 @@ export default function ChaosEaterApp() {
 
         {/* History (Snapshots) */}
         <div>
+          {/* title */}
           <div style={{
-            width: '100%',
             padding: '12px 16px',
             display: 'flex',
             alignItems: 'center',
@@ -1645,44 +1741,126 @@ export default function ChaosEaterApp() {
             color: '#a9a9a9'
           }}>
             <History size={16} />
-            <span style={{ fontSize: '14px', fontWeight: '500' }}>
+            <span style={{ fontSize: '14px', fontWeight: '500', flex: 1 }}>
               History
             </span>
+            <button
+              onClick={handleClearAllSnapshots}
+              title="Clear all snapshots"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 28,
+                height: 28,
+                borderRadius: 6,
+                backgroundColor: 'transparent',
+                border: '1px solid #374151',
+                color: '#9ca3af',
+                cursor: 'pointer',
+                marginRight: '0px'
+              }}
+              onMouseEnter={e => { e.currentTarget.style.color = '#ef4444'; e.currentTarget.style.borderColor = '#4b5563'; }}
+              onMouseLeave={e => { e.currentTarget.style.color = '#9ca3af'; e.currentTarget.style.borderColor = '#374151'; }}
+            >
+              <Trash2 size={16} />
+            </button>
           </div>
-          <div style={{ padding: '0 8px 12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          
+          {/* items */}
+          <div style={{
+            padding: '0 8px 12px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px'
+          }}>
             {snapshots.length === 0 && (
               <div style={{ color: '#6b7280', fontSize: 12, padding: '0 8px 8px' }}>No cycles yet</div>
             )}
             {snapshots.map((s) => (
-              <button
-                key={s.id}
-                onClick={async () => {
-                  // Restore snapshot into UI state
-                  const loaded = await getSnapshot(s.id);
-                  if (!loaded) return;
-                  setPanelVisible(!!loaded.panelVisible);
-                  setMessages(loaded.messages || []);
-                  setBackendProjectPath(loaded.backendProjectPath || null);
-                  setUploadedFiles((loaded.uploadedFilesMeta || []).map(m => ({ name: m.name, size: m.size, content: '' })));
-                  setFormData(prev => ({ ...prev, ...(loaded.formData || {}), apiKey: '' }));
-                  setCurrentSnapshotId(loaded.id);
-                  setNotification({ type: 'success', message: `Restored: ${loaded.title}` });
-                }}
-                style={{
-                  textAlign: 'left',
-                  padding: '10px 12px',
-                  backgroundColor: currentSnapshotId === s.id ? '#1f2937' : '#111827',
-                  border: '1px solid #374151',
-                  color: '#e5e7eb',
-                  borderRadius: 8,
-                  cursor: 'pointer'
-                }}
-                title={new Date(s.createdAt || s.updatedAt || Date.now()).toLocaleString()}
-              >
-                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 2 }}>
-                  {s.title}
-                </div>
-              </button>
+              <div key={s.id} style={{ position: 'relative' }}>
+                <button
+                  onClick={async () => {
+                    const loaded = await getSnapshot(s.id);
+                    if (!loaded) return;
+                    setPanelVisible(!!loaded.panelVisible);
+                    setMessages(loaded.messages || []);
+                    setBackendProjectPath(loaded.backendProjectPath || null);
+                    setUploadedFiles((loaded.uploadedFilesMeta || []).map(m => ({ name: m.name, size: m.size, content: '' })));
+                    setFormData(prev => ({ ...prev, ...(loaded.formData || {}), apiKey: '' }));
+                    setCurrentSnapshotId(loaded.id);
+                    setNotification({ type: 'success', message: `Restored: ${loaded.title}` });
+                  }}
+                  style={{
+                    width: '100%',
+                    textAlign: 'left',
+                    padding: '10px 12px',
+                    backgroundColor: currentSnapshotId === s.id ? '#1f2937' : '#111827',
+                    border: '1px solid #374151',
+                    color: '#e5e7eb',
+                    borderRadius: 8,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 8
+                  }}
+                  title={new Date(s.createdAt || s.updatedAt || Date.now()).toLocaleString()}
+                >
+                  <div style={{ fontSize: 13, fontWeight: 600, marginRight: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {s.title}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); setOpenMenuId(prev => prev === s.id ? null : s.id); }}
+                    title="Options"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 28,
+                      height: 28,
+                      borderRadius: 6,
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#9ca3af',
+                      cursor: 'pointer',
+                      marginRight: '-4px'
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.color = '#e5e7eb'; }}
+                    onMouseLeave={e => { e.currentTarget.style.color = '#9ca3af'; }}
+                  >
+                    <MoreHorizontal size={16} />
+                  </button>
+                </button>
+            
+                {openMenuId === s.id && (
+                  <div
+                    style={{
+                      position: 'absolute', right: 12, top: 44, zIndex: 10,
+                      minWidth: 160, backgroundColor: '#111827', border: '1px solid #374151',
+                      borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.35)', overflow: 'hidden'
+                    }}
+                  >
+                    <button
+                      onClick={() => handleRenameSnapshot(s.id, s.title)}
+                      style={{ width: '100%', padding: '8px 10px', background: 'transparent', border: 'none', color: '#e5e7eb', textAlign: 'left', display: 'flex', gap: 8, alignItems: 'center', cursor: 'pointer' }}
+                      onMouseEnter={e => e.currentTarget.style.backgroundColor = '#1f2937'}
+                      onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                    >
+                      <Edit3 size={16} /><span style={{ fontSize: 13 }}>Rename</span>
+                    </button>
+                    <button
+                      onClick={() => handleDeleteSnapshot(s.id)}
+                      style={{ width: '100%', padding: '8px 10px', background: 'transparent', border: 'none', color: '#ef4444', textAlign: 'left', display: 'flex', gap: 8, alignItems: 'center', cursor: 'pointer' }}
+                      onMouseEnter={e => e.currentTarget.style.backgroundColor = '#1f2937'}
+                      onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                    >
+                      <Trash2 size={16} /><span style={{ fontSize: 13 }}>Delete</span>
+                    </button>
+                  </div>
+                )}
+              </div>
             ))}
           </div>
         </div>
