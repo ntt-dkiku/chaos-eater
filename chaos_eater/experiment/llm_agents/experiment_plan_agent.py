@@ -204,7 +204,7 @@ class ExperimentPlanAgent:
         #----------------------
         # plan a time schedule
         #----------------------    
-        self.message_logger.write("##### :grey-background[Time Schedule]")
+        self.message_logger.tag("Time Schedule", color="white", background="#6b7280")
         cb = agent_logger and agent_logger.get_callback(
             phase="experiment",
             agent_name="time_schedule"
@@ -233,7 +233,7 @@ class ExperimentPlanAgent:
         #---------------------------------------------------------------------------
         # plan pre-validation, fault-injection, post-validation phases sequentially
         #---------------------------------------------------------------------------
-        self.message_logger.write(f"##### :blue-background[Pre-validation Phase ({pre_validation_time})]")
+        self.message_logger.tag(f"Pre-validation Phase ({pre_validation_time})", color="white", background="#1e90ff")
         cb = agent_logger and agent_logger.get_callback(
             phase="experiment",
             agent_name="pre_validation_plan"
@@ -251,7 +251,7 @@ class ExperimentPlanAgent:
             self.message_logger.stream(pre_validation_overview)
         self.message_logger.stream(pre_validation_overview, final=True)
 
-        self.message_logger.write(f"##### :red-background[Fault-injection Phase ({fault_injection_time})]")
+        self.message_logger.tag(f"Fault-injection Phase ({fault_injection_time})", color="white", background="#b22222")
         cb = agent_logger and agent_logger.get_callback(
             phase="experiment",
             agent_name="fault_injection_plan"
@@ -269,7 +269,7 @@ class ExperimentPlanAgent:
             self.message_logger.stream(fault_injection_overview)
         self.message_logger.stream(fault_injection_overview, final=True)
 
-        self.message_logger.write(f"##### :green-background[Post-validation Phase ({post_validation_time})]")
+        self.message_logger.tag(f"Post-validation Phase ({post_validation_time})", color="white", background="#3cb371")
         cb = agent_logger and agent_logger.get_callback(
             phase="experiment",
             agent_name="post_validation_plan"
@@ -298,7 +298,7 @@ class ExperimentPlanAgent:
         #---------------------------------------
         # summary (used for the analysis phase)
         #---------------------------------------
-        self.message_logger.write("##### :gray-background[Summary]")
+        self.message_logger.tag("Summary", color="white", background="#6b7280")
         cb = agent_logger and agent_logger.get_callback(
             phase="experiment",
             agent_name="plan_summary"

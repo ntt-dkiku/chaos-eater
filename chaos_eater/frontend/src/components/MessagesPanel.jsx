@@ -176,7 +176,8 @@ export default function MessagesPanel({
 
   const renderMsg = (m, i) => {
     const type = m.type || 'text';
-    const roleColor = m.role === 'user' ? '#60a5fa' : '#e5e7eb';
+    const roleColor = m.role === 'user' ? '#84cc16' : '#e5e7eb';
+    const roleBorder = m.role === 'user' ? '1px solid #374151' : 'none';
 
     if (type === 'subheader') {
       return <div key={i} className={msg_styles.subheader}>{m.content}</div>;
@@ -234,11 +235,28 @@ export default function MessagesPanel({
         </div>
       );
     }
-    
+    if (type === 'tag') {
+      return (
+        <span style={{
+          color: m.color,
+          backgroundColor: m.background,
+          padding: '2px 6px',
+          borderRadius: '4px'
+        }}>
+          {m.content}
+        </span>
+      );
+    }
+
+
     return (
       <div key={i} style={{ 
         margin: '6px 0', 
-        color: roleColor, 
+        color: roleColor,
+        border: roleBorder,
+        borderRadius: m.role === 'user' ? 6 : 0,
+        padding: m.role === 'user' ? '6px 10px' : '0',
+        backgroundColor: m.role === 'user' ? '#1f1f1f': 'transparent',
         whiteSpace: 'normal', 
         wordBreak: 'break-word' 
       }}>

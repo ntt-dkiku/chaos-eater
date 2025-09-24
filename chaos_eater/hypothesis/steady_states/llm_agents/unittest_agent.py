@@ -133,6 +133,7 @@ class UnittestAgent:
             inspection=inspection,
             threshold=threshold,
             predefined_steady_states=predefined_steady_states,
+            fname_prefix=fname_prefix,
             agent_logger=agent_logger
         )
 
@@ -186,6 +187,7 @@ class UnittestAgent:
                 inspection=inspection,
                 threshold=threshold,
                 predefined_steady_states=predefined_steady_states,
+                fname_prefix=fname_prefix,
                 mod_count=mod_count,
                 output_history=output_history,
                 error_history=error_history,
@@ -208,6 +210,7 @@ class UnittestAgent:
         inspection: Inspection,
         threshold: Dict[str, str],
         predefined_steady_states: list,
+        fname_prefix: str,
         mod_count: int = -1,
         output_history: List[Dict[str, str]] = [],
         error_history: List[str] = [],
@@ -252,8 +255,13 @@ class UnittestAgent:
             if (thought := responce.get("thought")) is not None:
                 text += f"{thought}\n"
             if (code := responce.get("code")) is not None:
-                language = "python" if inspection.tool_type == "k8s" else "javascript"
-                text += f"```{language} test.py\n{code}\n```"
+                if inspection.tool_type == "k8s":
+                    language = "python"
+                    extension = ".py"
+                else:
+                    language = "javascript"
+                    extension = ".js"
+                text += f"```{language} {fname_prefix}{extension}\n{code}\n```"
             self.message_logger.stream(text)
         self.message_logger.stream(text, final=True)
         return {"thought": thought, "code": code}

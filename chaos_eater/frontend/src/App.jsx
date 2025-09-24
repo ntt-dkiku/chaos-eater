@@ -1,13 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   ChevronDown,
-  ChevronUp,
   Send,
   Pause,
   CheckCircle,
   PlusCircle,
   Wrench,
-  History,
   MoreHorizontal,
   Trash2,
   Edit3,
@@ -102,6 +100,12 @@ export default function ChaosEaterApp() {
   const [uploadedFiles, setUploadedFiles] = useState([]);
   const [backendProjectPath, setBackendProjectPath] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  // for drafting
+  const [draftInstructions, setDraftInstructions] = useState('');
+  const [draftFiles, setDraftFiles] = useState([]);
+  // define a key for resetting the height of textarea
+  const [composerKey, setComposerKey] = useState(0);
+
 
   const [notification, setNotification] = useState(null);
   const [hoveredExample, setHoveredExample] = useState(null);
@@ -327,7 +331,9 @@ export default function ChaosEaterApp() {
         setBackendProjectPath(projectPath);
         setNotification({ type: 'success', message: 'File Uploaded!' });
         // Also show in the UI that a zip was chosen
-        setUploadedFiles([{ name: files[0].name, size: files[0].size, content: '(zip uploaded to server)' }]);
+        const one = { name: files[0].name, size: files[0].size, content: '(zip uploaded to server)' };
+        setUploadedFiles([one]);
+        setDraftFiles([one]);
         return;
       }
   
@@ -348,6 +354,7 @@ export default function ChaosEaterApp() {
 
       const results = await Promise.all(filePromises);
       setUploadedFiles(prev => [...prev, ...results]);
+      setDraftFiles(prev => [...prev, ...results]);
       setNotification({ type: 'info', message: 'Files loaded. Click Send to start.' });
     } catch (err) {
       console.error(err);
@@ -394,15 +401,38 @@ export default function ChaosEaterApp() {
           project_path: 'examples/sock-shop-2',
           content: ''
         }],
-        instructions: '- The Chaos-Engineering experiment must be completed within 1 minute.\n- Test with URL: http://front-end.sock-shop.svc.cluster.local/'
+        instructions: [
+          '- The Chaos-Engineering experiment must be completed within 1 minute.',
+          '- When using k6 in steady-state definition, always select a request URL from the following options (other requests are invalid):',
+          '  1. http://front-end.sock-shop.svc.cluster.local/',
+          '  2. http://front-end.sock-shop.svc.cluster.local/catalogue?size=10',
+          '  3. http://front-end.sock-shop.svc.cluster.local/detail.html?id=<ID>',
+          '     Replace <ID> with an available ID: [`03fef6ac-1896-4ce8-bd69-b798f85c6e0b`, `3395a43e-2d88-40de-b95f-e00e1502085b`, `510a0d7e-8e83-4193-b483-e27e09ddc34d`, `808a2de1-1aaa-4c25-a9b9-6612e8f29a38`, `819e1fbf-8b7e-4f6d-811f-693534916a8b`, `837ab141-399e-4c1f-9abc-bace40296bac`, `a0a4f044-b040-410d-8ead-4de0446aec7e`, `d3588630-ad8e-49df-bbd7-3167f7efb246`, `zzz4f044-b040-410d-8ead-4de0446aec7e`]',
+          '  4. http://front-end.sock-shop.svc.cluster.local/category/',
+          '  5. http://front-end.sock-shop.svc.cluster.local/category?tags=<TAG>',
+          '     Replace <TAG> with an available tag: [`magic`, `action`, `blue`, `brown`, `black`, `sport`, `formal`, `red`, `green`, `skin`, `geek`]',
+          '  6. http://front-end.sock-shop.svc.cluster.local/basket.html',
+        ].join('\n'),
       }
     };
     
     const example = examples[exampleType];
     if (example) {
       setUploadedFiles(example.files);
+      setDraftFiles(example.files);
       setBackendProjectPath(example.files[0].project_path)
-      setFormData(prev => ({ ...prev, instructions: example.instructions }));
+      setDraftInstructions(example.instructions);
+
+      // Auto-adjust textarea height after setting the text
+      setTimeout(() => {
+        const textarea = document.querySelector('textarea');
+        if (textarea) {
+          textarea.style.height = 'auto';
+          const max = 200;
+          const newHeight = Math.min(textarea.scrollHeight, max);
+          textarea.style.height = `${newHeight}px`;
+        }
+      }, 0);
     }
   };
 
@@ -553,6 +583,8 @@ export default function ChaosEaterApp() {
     setRunState('idle');
     setIsLoading(false);
     setUploadedFiles([]);
+    setDraftFiles([]);
+    setDraftInstructions('');
     setBackendProjectPath(null);
     setCurrentSnapshotId(null);  // Detach from current snapshot
     partialStateRef.current = null;
@@ -684,17 +716,20 @@ export default function ChaosEaterApp() {
       setNotification({ type: 'error', message: 'Please select a cluster' });
       return;
     }
-    if (uploadedFiles.length === 0 && !formData.instructions.trim()) {
-      setNotification({ type: 'error', message: 'Please upload files or provide instructions' });
+    if (uploadedFiles.length === 0) {
+      setNotification({ type: 'error', message: 'Please upload your project' });
       return;
     }
     setIsLoading(true);
     setRunState('running');
     
     // 1. prepare request body for /jobs
+    const effectiveInstructions = draftInstructions?.trim() || formData.instructions?.trim() || "";
+    setFormData(prev => ({ ...prev, instructions: effectiveInstructions }));
+
     const payload = {
       project_path: backendProjectPath,
-      ce_instructions: formData.instructions?.trim() || null,
+      ce_instructions: effectiveInstructions,
       kube_context: formData.cluster,
       project_name: formData.projectName || 'chaos-eater',
       work_dir: null,
@@ -729,13 +764,27 @@ export default function ChaosEaterApp() {
       // display dialog
       setPanelVisible(true);
 
-      // 3. show user instruction as a chat message
-      if (formData.instructions.trim()) {
-        setMessages((m) => [...m, { type: 'text', role: 'user', content: formData.instructions.trim() }]);
+      // 3. show user inputs as a chat message
+      const fileLines = uploadedFiles.map(f => `${f.name}`).join(', ');
+      const combinedUserMsg = [
+        uploadedFiles.length ? `**Project:** ${fileLines}` : null,
+        effectiveInstructions ? `**Instructions:**\n${effectiveInstructions}` : null,
+      ].filter(Boolean).join('\n\n');
+
+      if (combinedUserMsg) {
+        setMessages((m) => [...m, {
+          type: 'text',
+          role: 'user',
+          content: combinedUserMsg }]);
       }
 
       setNotification({ type: 'success', message: `Job created: ${data.job_id}` });
       
+      // reset draft
+      setDraftInstructions('');
+      setDraftFiles([]);
+      setComposerKey(k => k + 1);
+
       // Create a snapshot only on the first submit in this tab/session.
       try {
         if (!currentSnapshotId && !creatingSnapshotRef.current) {
@@ -959,6 +1008,10 @@ export default function ChaosEaterApp() {
           }
           if (ev.type === 'iframe') {
             setMessages(m => [...m, { type: 'iframe', role: ev.role || 'assistant', content: ev.url || '' }]);
+            return;
+          }
+          if (ev.type === 'tag') {
+            setMessages(m => [...m, { type: 'tag', role: ev.role || 'assistant', content: ev.text || '', color: ev.color, background: ev.background }]);
             return;
           }
           setMessages(m => [...m, { type: 'text', role: 'assistant', content: JSON.stringify(ev) }]);
@@ -1185,7 +1238,7 @@ export default function ChaosEaterApp() {
               onClick={() => setSidebarOpen(false)}
               title="Close sidebar"
               style={{
-                marginLeft: '89px', // 'auto'
+                marginLeft: '88px', // 'auto'
                 width: '32px',
                 height: '32px',
                 borderRadius: '8px',
@@ -1208,7 +1261,7 @@ export default function ChaosEaterApp() {
                 e.currentTarget.style.color = '#d1d5db';
               }}
             >
-              <PanelLeftClose size={16} />
+              <PanelLeftClose size={20} />
             </button>
           </div>
           
@@ -1282,10 +1335,10 @@ export default function ChaosEaterApp() {
             {/* Rotate chevron with transition */}
             <span
               style={{
-                marginLeft: 'auto',
+                gap: '8px',
                 display: 'inline-flex',
                 transition: 'transform 180ms ease',
-                transform: sidebarCollapsed.general ? 'rotate(0deg)' : 'rotate(180deg)'
+                transform: sidebarCollapsed.general ? 'rotate(0deg)' : 'rotate(180deg)',
               }}
             >
               <ChevronDown size={16} />
@@ -1592,28 +1645,32 @@ export default function ChaosEaterApp() {
                 </select>
               </div>
               
-              <button 
+              <button
+                title="Clean resources within the selected cluster"
                 style={{
-                  width: '100%',
                   padding: '10px 16px',
-                  backgroundColor: 'transparent',
-                  color: '#9ca3af',
-                  border: '1px solid #1f2937',
-                  borderRadius: '4px',
-                  fontSize: '14px',
-                  fontWeight: '400',
+                  backgroundColor: '#1f1f1f',
+                  border: '1px solid #374151',
+                  color: '#e5e7eb',
+                  borderRadius: 6,
+                  fontSize: 13,
                   cursor: 'pointer',
-                  transition: 'all 0.2s ease',
-                  ...(buttonHovered.clean ? { 
-                    borderColor: '#374151', 
-                    color: '#e5e7eb',
-                    transform: 'translateY(-1px)'
-                  } : {})
+                  display: 'flex',
+                  justifyContent: 'center', 
+                  alignItems: 'center',
+                  gap: 8,
+                  transition: 'all 0.2s ease'
                 }}
-                onMouseEnter={() => setButtonHovered(prev => ({...prev, clean: true}))}
-                onMouseLeave={() => setButtonHovered(prev => ({...prev, clean: false}))}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#2a2a2a';
+                  e.currentTarget.style.color = '#84cc16';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = '#1f1f1f';
+                  e.currentTarget.style.color = '#e5e7eb';
+                }}
               >
-                Clean the cluster
+                Clean cluster
               </button>
               
               {/* Checkboxes */}
@@ -1777,7 +1834,7 @@ export default function ChaosEaterApp() {
               onMouseEnter={e => { e.currentTarget.style.color = '#ef4444'; e.currentTarget.style.borderColor = '#4b5563'; }}
               onMouseLeave={e => { e.currentTarget.style.color = '#9ca3af'; e.currentTarget.style.borderColor = '#374151'; }}
             >
-              <Trash2 size={16} />
+              <Trash2 size={14} />
             </button>
           </div>
           
@@ -2147,7 +2204,7 @@ export default function ChaosEaterApp() {
           />
           
           {/* Uploaded files display */}
-          {uploadedFiles.length > 0 && (
+          {draftFiles.length > 0 && (
             <div style={{ 
               marginBottom: '12px',
               padding: '12px',
@@ -2156,10 +2213,10 @@ export default function ChaosEaterApp() {
               border: '1px solid #374151'
             }}>
               <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '10px', fontWeight: '500' }}>
-                Uploaded files ({uploadedFiles.length}):
+                Uploaded files ({draftFiles.length}):
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                {uploadedFiles.map((file, index) => (
+                {draftFiles.map((file, index) => (
                   <div key={index} style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -2175,7 +2232,7 @@ export default function ChaosEaterApp() {
                       {file.name}
                     </span>
                     <button
-                      onClick={() => setUploadedFiles(files => files.filter((_, i) => i !== index))}
+                      onClick={() => setDraftFiles(files => files.filter((_, i) => i !== index))}
                       style={{
                         background: 'none',
                         border: 'none',
@@ -2217,9 +2274,9 @@ export default function ChaosEaterApp() {
             }}
           >
             {/* Upper section - Text area */}
-            <div style={{ position: 'relative' }}>
+            <div style={{ position: 'relative' }} key={composerKey}>
               {/* Custom placeholder text positioned left aligned */}
-              {!formData.instructions.trim() && (
+              {!draftInstructions.trim() && (
                 <div style={{
                   position: 'absolute',
                   top: '16px',
@@ -2234,8 +2291,8 @@ export default function ChaosEaterApp() {
               )}
               
               <textarea
-                value={formData.instructions}
-                onChange={(e) => setFormData({ ...formData, instructions: e.target.value })}
+                value={draftInstructions}
+                onChange={(e) => setDraftInstructions(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
                     e.preventDefault();

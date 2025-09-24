@@ -101,25 +101,108 @@
 }
 
 
-/* For <p> and <li> elements, use pre-line (preserve line breaks, collapse consecutive spaces) */
-:global(.markdown-body p),
-:global(.markdown-body li) {
-    white-space: pre-line !important;  /* Preserve line breaks, collapse spaces */
-}
 
+/* Paragraph: minimal margin, small spacing below */
 :global(.markdown-body p) {
-    margin: 0 !important;
-    padding-bottom: 0.3em !important;
+  white-space: pre-line;
+  margin: 0 !important;
+  padding-bottom: 0.3em !important;
 }
 
-:global(.markdown-body p + ul) {
-    margin-top: 0em !important;  /* space btween p and ul */
+/* Paragraph followed by a list: remove extra gap */
+:global(.markdown-body p + ul),
+:global(.markdown-body p + ol) {
+  margin-top: 0 !important;
 }
 
-:global(.markdown-body ul) {
-    margin: 0 !important;
+/* Base style for unordered and ordered lists */
+:global(.markdown-body ul),
+:global(.markdown-body ol) {
+  margin: 0.15rem 0 !important;
+  /* padding-left: 1.25rem !important; left indent */
+  list-style-position: outside !important;
 }
 
+/* List item spacing and line height */
 :global(.markdown-body li) {
-    margin: 0.3em 0 !important;
+    margin: 0.3rem 0 !important;
+    /* line-height: 1.5 !important; */
+}
+
+/* Nested lists: tighter spacing and smaller indent */
+:global(.markdown-body ul ul),
+:global(.markdown-body ol ol),
+:global(.markdown-body ul ol),
+:global(.markdown-body ol ul) {
+  margin: 0.1rem 0 !important;
+  padding-left: 1.1rem !important;
+}
+
+/* Add slightly more space between sibling list items */
+:global(.markdown-body li + li) {
+  margin-top: 0.2rem !important;
+}
+
+/* First paragraph inside li: small bottom spacing before sublist */
+:global(.markdown-body li > p:first-child) {
+  margin: 0 0 0.15rem 0 !important;
+}
+
+/* Sublist inside li: remove excess top margin */
+:global(.markdown-body li > ul),
+:global(.markdown-body li > ol) {
+  margin-top: 0.1rem !important;
+}
+
+/* Marker (bullet/number) color for dark UI */
+:global(.markdown-body ul > li::marker),
+:global(.markdown-body ol > li::marker) {
+  color: #9ca3af; /* gray-400 */
+}
+
+/* Different bullet types by nesting depth */
+:global(.markdown-body ul) { list-style-type: disc !important; }
+:global(.markdown-body ul ul) { list-style-type: circle !important; }
+:global(.markdown-body ul ul ul) { list-style-type: square !important; }
+
+/* Top-level ordered list: slightly emphasized */
+:global(.markdown-body > ol) {
+  list-style-type: decimal !important;
+  margin: 0.25rem 0 !important;
+  padding-left: 1.25rem !important;
+}
+
+/* Top-level ordered list items: add divider between sections */
+:global(.markdown-body > ol > li + li) {
+  margin-top: 0.35rem !important;
+  padding-top: 0.35rem !important;
+  border-top: 1px solid #222; /* subtle divider for dark background */
+}
+
+/* Strong element in first paragraph of li: emphasize as section heading */
+:global(.markdown-body li > p:first-child > strong) {
+  display: inline;
+  margin-bottom: 0 !important;
+  font-weight: 700;
+}
+
+/* General line height baseline */
+:global(.markdown-body) {
+  line-height: 1.6;
+}
+
+/* If the first paragraph inside a list item (<li>) is displayed as a block,
+   the number marker and the text content are separated into different line boxes.
+   Force it to inline so the number and the text stay on the same line */
+:global(.markdown-body li > p) {
+  display: inline;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+/* For the second and later paragraphs inside the same list item,
+   switch back to block display to break onto a new line */
+:global(.markdown-body li > p + p) {
+  display: block;
+  margin-top: .35rem !important;
 }

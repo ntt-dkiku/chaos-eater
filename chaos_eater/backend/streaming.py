@@ -103,6 +103,21 @@ class FrontendMessageLogger(MessageLogger):
             "url": url
         })
 
+    def tag(
+        self,
+        text: str,
+        color: str,
+        background: str,
+        role: Literal["user", "assistant"] = "assistant",
+    ) -> None:
+        self._push({
+            "type": "tag",
+            "role": role,
+            "text": text,
+            "color": color,
+            "background": background
+        })
+
 class FrontEndDisplayHandler:
     """Display handler implementation for Streamlit UI"""
     

@@ -79,7 +79,7 @@ export default function NumberField({
               border: "none",
               color: "#9ca3af",
               cursor: "pointer",
-              padding: "0px 2px",
+              padding: "0px 8px",
             }}
             onMouseEnter={(e) => (e.currentTarget.style.color = "#84cc16")}
             onMouseLeave={(e) => (e.currentTarget.style.color = "#9ca3af")}
@@ -93,7 +93,7 @@ export default function NumberField({
               border: "none",
               color: "#9ca3af",
               cursor: "pointer",
-              padding: "0px",
+              padding: "0px 8px",
             }}
             onMouseEnter={(e) => (e.currentTarget.style.color = "#84cc16")}
             onMouseLeave={(e) => (e.currentTarget.style.color = "#9ca3af")}

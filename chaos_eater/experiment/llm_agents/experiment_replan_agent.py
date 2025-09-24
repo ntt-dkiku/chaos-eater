@@ -286,7 +286,7 @@ class ExperimentRePlanAgent:
                     if (thought := response.get("thought")) is not None:
                         text += f"{thought}\n"
                     if (code := response.get("code")) is not None:
-                        text += f"```{language} {unittest['file_path']}\n{code}\n```"
+                        text += f"```{language} {os.path.basename(unittest['file_path'])}\n{code}\n```"
                     self.message_logger.stream(text)
                 self.message_logger.stream(text, final=True)
 
@@ -414,7 +414,7 @@ class ExperimentRePlanAgent:
             if (thought := response.get("thought")) is not None:
                 text += f"{thought}\n"
             if (code := response.get("code")) is not None:
-                text += f"```{language} {filename}\n{code}\n```"
+                text += f"```{language} {os.path.basename(filename)}\n{code}\n```"
             self.message_logger.stream(text)
         self.message_logger.stream(text, final=True)
         return response
