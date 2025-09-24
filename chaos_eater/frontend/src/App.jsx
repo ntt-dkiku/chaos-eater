@@ -32,6 +32,7 @@ import {
 import './App.css';
 import MessagesPanel from './components/MessagesPanel';
 import NumberField from "./components/NumberField";
+import Collapse from "./components/Collapse";
 
 
 export default function ChaosEaterApp() {
@@ -72,8 +73,7 @@ export default function ChaosEaterApp() {
   // ---------------------------------------------------------
   // State management
   // ---------------------------------------------------------
-  const [sidebarWidth, setSidebarWidth] = useState(320);
-  const [isResizing, setIsResizing] = useState(false);
+  const SIDEBAR_WIDTH = 280
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
   const [sidebarCollapsed, setSidebarCollapsed] = useState({
@@ -262,33 +262,6 @@ export default function ChaosEaterApp() {
       }
     };
   }, [notification]);
-
-  // Handle sidebar resize
-  const startResizing = React.useCallback(() => {
-    setIsResizing(true);
-  }, []);
-
-  const stopResizing = React.useCallback(() => {
-    setIsResizing(false);
-  }, []);
-
-  const resize = React.useCallback((e) => {
-    if (isResizing) {
-      const newWidth = e.clientX;
-      if (newWidth >= 280 && newWidth <= 600) {
-        setSidebarWidth(newWidth);
-      }
-    }
-  }, [isResizing]);
-
-  useEffect(() => {
-    window.addEventListener('mousemove', resize);
-    window.addEventListener('mouseup', stopResizing);
-    return () => {
-      window.removeEventListener('mousemove', resize);
-      window.removeEventListener('mouseup', stopResizing);
-    };
-  }, [resize, stopResizing]);
 
   //--------
   // Styles
@@ -1048,6 +1021,7 @@ export default function ChaosEaterApp() {
   const [snapshots, setSnapshots] = useState([]);
   const [currentSnapshotId, setCurrentSnapshotId] = useState(null);
   const [openMenuId, setOpenMenuId] = useState(null); // kebab menu open target
+  const [hoveredSnapshotId, setHoveredSnapshotId] = useState(null);
   const creatingSnapshotRef = useRef(false);   // prevent duplicate create on rapid clicks
   const persistDebounceRef = useRef(null);     // debounce timer id
 
@@ -1162,40 +1136,61 @@ export default function ChaosEaterApp() {
   //
   //
   return (
-    <div style={{ display: 'flex', height: '100vh', backgroundColor: '#0a0a0a', color: '#e5e7eb', position: 'relative' }}>      
+    <div style={{
+      display: 'flex',
+      height: '100vh',
+      backgroundColor: '#191919',
+      color: '#e5e7eb',
+      position: 'relative'
+    }}>      
       {/* Sidebar */}
-      <div style={{ 
-        width: sidebarOpen ? `${sidebarWidth}px` : '0px',
-        minWidth: sidebarOpen ? `${sidebarWidth}px` : '0px',
-        backgroundColor: '#111111', 
-        borderRight: sidebarOpen ? '1px solid #374151' : 'none',
-        overflowY: 'auto',
-        overflowX: 'hidden',
-        transition: isResizing ? 'none' : 'all 0.3s ease',
-        position: 'relative'
-      }}>
+      <div
+        style={{ 
+          width: sidebarOpen ? `${SIDEBAR_WIDTH}px` : '0px',
+          minWidth: sidebarOpen ? `${SIDEBAR_WIDTH}px` : '0px',
+          backgroundColor: '#111111', 
+          borderRight: sidebarOpen ? '1px solid #374151' : 'none',
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          transition: 'all 0.3s ease',
+          position: 'relative',
+          userSelect: 'none',
+          WebkitUserSelect: 'none'
+        }}
+      >
         <div style={{ 
-          width: `${sidebarWidth}px`,
+          width: `${SIDEBAR_WIDTH}px`,
           opacity: sidebarOpen ? 1 : 0,
           transition: 'opacity 0.3s ease',
           pointerEvents: sidebarOpen ? 'auto' : 'none'
         }}>
           {/* Logo with Close Button */}
-          <div style={{ padding: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <img src="/chaoseater_logo.png" style={{ width: 'auto', height: '52px'}} />
-            {/* <span style={{ fontSize: '20px', fontWeight: '600', fontVariant: 'small-caps' }}>ChaosEater</span> */}
+          <div style={{
+            padding: '16px 16px 16px 16px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}>
+            {/* <img src="/chaoseater_logo.png" style={{ width: 'auto', height: '52px'}} /> */}
+            <span style={{
+              fontSize: '20px',
+              fontWeight: '800',
+              fontVariant: 'small-caps'
+            }}>
+              ChaosEater
+            </span>
 
             <button
               aria-label="Close sidebar"
               onClick={() => setSidebarOpen(false)}
               title="Close sidebar"
               style={{
-                marginLeft: 'auto',
+                marginLeft: '89px', // 'auto'
                 width: '32px',
                 height: '32px',
                 borderRadius: '8px',
-                backgroundColor: '#1f1f1f',
-                border: '1px solid #374151',
+                backgroundColor: 'transparent', // '#1f1f1f',
+                border: 'none', // '1px solid #374151',
                 color: '#d1d5db',
                 cursor: 'pointer',
                 display: 'inline-flex',
@@ -1209,7 +1204,7 @@ export default function ChaosEaterApp() {
                 e.currentTarget.style.color = '#84cc16';
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = '#1f1f1f';
+                e.currentTarget.style.backgroundColor = 'transparent'; //'#1f1f1f';
                 e.currentTarget.style.color = '#d1d5db';
               }}
             >
@@ -1218,18 +1213,19 @@ export default function ChaosEaterApp() {
           </div>
           
           {/* New cycle row */}
-          <div>
+          <div style={{ padding: '0 8px' }}>
             <button
               onClick={handleNewCycle}
               title="Start a new cycle (fresh session)"
               style={{
                 width: '100%',
-                padding: '12px 16px',
+                padding: '10px 8px',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '10px',
                 backgroundColor: 'transparent',
                 border: 'none',
+                borderRadius: 8,
                 color: '#e5e7eb',
                 cursor: 'pointer',
                 transition: 'background-color 0.2s ease, color 0.2s ease'
@@ -1250,19 +1246,20 @@ export default function ChaosEaterApp() {
 
 
         {/* General Settings */}
-        <div>
+        <div style={{ padding: '0 8px' }}>
           <button
             onClick={() =>
               setSidebarCollapsed(prev => ({ ...prev, general: !prev.general }))
             }
             style={{
               width: '100%',
-              padding: '12px 16px',
+              padding: '10px 8px',
               display: 'flex',
               alignItems: 'center',
               gap: '10px',
               backgroundColor: 'transparent',
               border: 'none',
+              borderRadius: 8,
               color: '#e5e7eb',
               cursor: 'pointer',
               transition: 'background-color 0.2s ease, color 0.2s ease'
@@ -1275,16 +1272,34 @@ export default function ChaosEaterApp() {
               e.currentTarget.style.backgroundColor = 'transparent';
               e.currentTarget.style.color = '#e5e7eb';
             }}
+            aria-expanded={!sidebarCollapsed.general}
+            aria-controls="settings-collapse"
           >
             <Wrench size={16} />
             <span style={{ fontSize: '14px', fontWeight: '500' }}>
               Settings
             </span>
-            {sidebarCollapsed.general ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+            {/* Rotate chevron with transition */}
+            <span
+              style={{
+                marginLeft: 'auto',
+                display: 'inline-flex',
+                transition: 'transform 180ms ease',
+                transform: sidebarCollapsed.general ? 'rotate(0deg)' : 'rotate(180deg)'
+              }}
+            >
+              <ChevronDown size={16} />
+            </span>
           </button>
-          
-          {!sidebarCollapsed.general && (
-            <div style={{ padding: '0 16px 16px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+
+          {/* Smoothly animated content */}
+          <Collapse isOpen={!sidebarCollapsed.general}>
+            <div id="settings-collapse" style={{
+              padding: '0 16px 16px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px'
+            }}>
               {/* Model Selection */}
               <div>
                 <label style={{ fontSize: '12px', color: '#a9a9a9', fontWeight: '400', letterSpacing: '0.5px' }}>Model</label>
@@ -1318,7 +1333,7 @@ export default function ChaosEaterApp() {
                   ))}
                 </select>
               </div>
-              
+
               {selectModelValue === 'custom' && (
                 <div>
                   <label style={{ fontSize: '12px', color: '#a9a9a9', fontWeight: '400', letterSpacing: '0.5px' }}>Custom model</label>
@@ -1727,20 +1742,19 @@ export default function ChaosEaterApp() {
                 </label>
               </div>
             </div>
-          )}
+          </Collapse>
         </div>
 
         {/* History (Snapshots) */}
         <div>
           {/* title */}
           <div style={{
-            padding: '12px 16px',
+            padding: '22px 16px 4px 16px',
             display: 'flex',
             alignItems: 'center',
             gap: '10px',
             color: '#a9a9a9'
           }}>
-            <History size={16} />
             <span style={{ fontSize: '14px', fontWeight: '500', flex: 1 }}>
               History
             </span>
@@ -1755,7 +1769,7 @@ export default function ChaosEaterApp() {
                 height: 28,
                 borderRadius: 6,
                 backgroundColor: 'transparent',
-                border: '1px solid #374151',
+                border: 'none',
                 color: '#9ca3af',
                 cursor: 'pointer',
                 marginRight: '0px'
@@ -1772,14 +1786,19 @@ export default function ChaosEaterApp() {
             padding: '0 8px 12px',
             display: 'flex',
             flexDirection: 'column',
-            gap: '8px'
+            gap: '0px'
           }}>
             {snapshots.length === 0 && (
               <div style={{ color: '#6b7280', fontSize: 12, padding: '0 8px 8px' }}>No cycles yet</div>
             )}
             {snapshots.map((s) => (
-              <div key={s.id} style={{ position: 'relative' }}>
+              <div
+                key={s.id}
+                style={{ position: 'relative' }}
+              >
                 <button
+                  onMouseEnter={() => setHoveredSnapshotId(s.id)}
+                  onMouseLeave={() => setHoveredSnapshotId((prev) => (prev === s.id ? null : prev))}
                   onClick={async () => {
                     const loaded = await getSnapshot(s.id);
                     if (!loaded) return;
@@ -1794,20 +1813,34 @@ export default function ChaosEaterApp() {
                   style={{
                     width: '100%',
                     textAlign: 'left',
-                    padding: '10px 12px',
-                    backgroundColor: currentSnapshotId === s.id ? '#1f2937' : '#111827',
-                    border: '1px solid #374151',
-                    color: '#e5e7eb',
+                    padding: '3px 12px',
+                    backgroundColor:
+                      hoveredSnapshotId === s.id
+                        ? '#1a1a1a'
+                        : currentSnapshotId === s.id
+                          ? '#222222'
+                          : 'transparent',
+                    color: hoveredSnapshotId === s.id ? '#84cc16' : '#e5e7eb',
+                    border: 'none',
                     borderRadius: 8,
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
-                    gap: 8
+                    gap: 8,
+                    transition: 'background-color 0.2s ease, color 0.2s ease',
                   }}
                   title={new Date(s.createdAt || s.updatedAt || Date.now()).toLocaleString()}
                 >
-                  <div style={{ fontSize: 13, fontWeight: 600, marginRight: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <div style={{
+                    fontSize: 14,
+                    fontWeight: 600,
+                    marginLeft: -4,
+                    marginRight: 8,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap'
+                  }}>
                     {s.title}
                   </div>
                   <button
@@ -1825,7 +1858,10 @@ export default function ChaosEaterApp() {
                       border: 'none',
                       color: '#9ca3af',
                       cursor: 'pointer',
-                      marginRight: '-4px'
+                      marginRight: '-4px',
+                      opacity: openMenuId === s.id || hoveredSnapshotId === s.id ? 1 : 0,
+                      pointerEvents: openMenuId === s.id || hoveredSnapshotId === s.id ? 'auto' : 'none',
+                      transition: 'opacity 0.15s ease',
                     }}
                     onMouseEnter={e => { e.currentTarget.style.color = '#e5e7eb'; }}
                     onMouseLeave={e => { e.currentTarget.style.color = '#9ca3af'; }}
@@ -1866,25 +1902,6 @@ export default function ChaosEaterApp() {
         </div>
 
         </div>
-        
-        {/* Resize Handle */}
-        {sidebarOpen && (
-          <div
-            style={{
-              position: 'absolute',
-              right: 0,
-              top: 0,
-              bottom: 0,
-              width: '4px',
-              cursor: 'col-resize',
-              backgroundColor: isResizing ? '#84cc16' : 'transparent',
-              transition: 'background-color 0.2s ease'
-            }}
-            onMouseDown={startResizing}
-            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#374151'}
-            onMouseLeave={(e) => !isResizing && (e.currentTarget.style.backgroundColor = 'transparent')}
-          />
-        )}
       </div>
 
       {/* Compact Sidebar Toggle (open) */}
@@ -1977,7 +1994,9 @@ export default function ChaosEaterApp() {
                 height: '200px',
                 position: 'relative',
                 marginBottom: '0px',
-                marginTop: '150px'
+                marginTop: '150px',
+                userSelect: 'none',
+                WebkitUserSelect: 'none'
               }}
             >
               {/* ChaosEater icon */}
@@ -1990,7 +2009,9 @@ export default function ChaosEaterApp() {
                   top: '10%',
                   left: '10%',
                   objectFit: 'contain',
-                  animation: 'rotate 30s linear infinite'
+                  animation: 'rotate 30s linear infinite',
+                  userSelect: 'none',
+                  WebkitUserSelect: 'none'
                 }}
                 onError={(e) => {
                   e.target.style.display = 'none';
@@ -2008,7 +2029,10 @@ export default function ChaosEaterApp() {
                 height: '40px',
                 backgroundColor: '#ffffff',
                 borderRadius: '50%',
-                overflow: 'hidden'
+                overflow: 'hidden',
+                pointerEvents: 'none',
+                WebkitUserDrag: 'none',
+                userSelect: 'none'
               }}>
                 {/* Black pupil that follows mouse */}
                 <div style={{
@@ -2049,7 +2073,14 @@ export default function ChaosEaterApp() {
             </div>
             
             {/* Title */}
-            <h1 style={{ fontSize: '30px', fontWeight: 'bold', fontWeight: '300', margin: '0 0 48px' }}>
+            <h1 style={{
+              fontSize: '30px',
+              fontWeight: 'bold',
+              fontWeight: '600',
+              margin: '0 0 48px',
+              userSelect: 'none',
+              WebkitUserSelect: 'none'
+            }}>
               Let's dive into <span style={{ color: '#84cc16', fontWeight: '600' }}>Chaos</span> together :)
             </h1>
         

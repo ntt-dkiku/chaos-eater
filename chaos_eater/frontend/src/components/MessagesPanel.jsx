@@ -316,7 +316,7 @@ export default function MessagesPanel({
           flexWrap: 'wrap',
           marginTop: 12,
           marginBottom: 12,
-          paddingRight: 6
+          paddingRight: 0
         }}>
           {/* artifact download */}
           {(showResume || showNextRun) && (
