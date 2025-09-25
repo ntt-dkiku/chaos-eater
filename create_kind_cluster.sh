@@ -78,7 +78,8 @@ kind load docker-image chaos-eater/k8sapi:1.0 --name ${CLUSTER_NAME}
 curl https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 | bash
 helm repo add chaos-mesh https://charts.chaos-mesh.org
 helm repo update
-helm install chaos-mesh chaos-mesh/chaos-mesh --namespace chaos-mesh --create-namespace --set chaosDaemon.runtime=containerd --set chaosDaemon.socketPath=/run/containerd/containerd.sock --set dashboard.create=true --version 2.6.3
+# NOTE (authentication problem): https://chaos-mesh.org/docs/manage-user-permissions/#enable-or-disable-permission-authentication
+helm install chaos-mesh chaos-mesh/chaos-mesh --namespace chaos-mesh --create-namespace --set chaosDaemon.runtime=containerd --set chaosDaemon.socketPath=/run/containerd/containerd.sock --set dashboard.create=true --version 2.6.3 --set dashboard.securityMode=false
 # Function to check if chaos-dashboard is running
 check_chaos_dashboard() {
     kubectl get pods -n chaos-mesh -l app.kubernetes.io/component=chaos-dashboard -o jsonpath='{.items[0].status.phase}' 2>/dev/null
