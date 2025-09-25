@@ -105,7 +105,16 @@ export default function ChaosEaterApp() {
   const [draftFiles, setDraftFiles] = useState([]);
   // define a key for resetting the height of textarea
   const [composerKey, setComposerKey] = useState(0);
-
+  // ollama model pulling
+  const [ollamaPull, setOllamaPull] = useState({
+    inProgress: false,
+    pct: null,      // 0-100 or null when unknown
+    status: '',     // e.g. "downloading", "verifying"
+    model: '',      // short model name like "gpt-oss:20b"
+    abort: null     // AbortController
+  });
+  const seenModelsRef = useRef(new Set());
+  const [pullNonce, setPullNonce] = useState(0);
 
   const [notification, setNotification] = useState(null);
   const [hoveredExample, setHoveredExample] = useState(null);
@@ -122,7 +131,7 @@ export default function ChaosEaterApp() {
     'openai/gpt-4o-2024-08-06',
     'google/gemini-1.5-pro-latest',
     'anthropic/claude-3-5-sonnet-20241022',
-    'ollama/qwen3:32b',
+    'ollama/gpt-oss:20b',
     'custom'
   ];
   const defaultModel = 'openai/gpt-4o-2024-08-06';
@@ -257,7 +266,7 @@ export default function ChaosEaterApp() {
         setVisible(false);
         // wait for fade-out (0.5s) before removing
         setTimeout(() => setNotification(null), 500);
-      }, 3000);
+      }, 10000);
     }
     return () => {
       if (hideTimerRef.current) {
@@ -266,6 +275,59 @@ export default function ChaosEaterApp() {
       }
     };
   }, [notification]);
+
+  //----------------
+  // Ollama pulling
+  //----------------
+  const ghostButtonStyle = {
+    padding: '10px 16px',
+    backgroundColor: '#1f1f1f',
+    border: '1px solid #374151',
+    color: '#e5e7eb',
+    borderRadius: 6,
+    fontSize: 13,
+    cursor: 'pointer',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    transition: 'all 0.2s ease'
+  };
+  // Auto-hide pull progress after success or error
+  const retryOllamaPull = (force = false) => {
+    const model = formData.model?.trim();
+    if (!model) return;
+    if (force) {
+      seenModelsRef.current.delete(model);
+    }
+    setPullNonce(n => n + 1);
+  };
+
+  useEffect(() => {
+    if (ollamaPull.status === 'success') {
+      const t = setTimeout(() => {
+        setOllamaPull({
+          inProgress: false,
+          pct: null,
+          status: '',
+          model: '',
+          abort: null
+        });
+      }, 10000);
+
+      return () => clearTimeout(t);
+    }
+  }, [ollamaPull.status, pullNonce]);
+
+  // Clear pull banner when model changes away from the failed/finished one
+  useEffect(() => {
+    const currentShort = shortOllamaName(formData.model || '');
+    // If provider is not ollama or the selected model is different, hide the banner
+    if (providerFromModel(formData.model) !== 'ollama' ||
+        (ollamaPull.model && ollamaPull.model !== currentShort)) {
+      setOllamaPull({ inProgress: false, pct: null, status: null, model: null, abort: null });
+    }
+  }, [formData.model]);
 
   //--------
   // Styles
@@ -720,6 +782,27 @@ export default function ChaosEaterApp() {
       setNotification({ type: 'error', message: 'Please upload your project' });
       return;
     }
+    if (ollamaPull.inProgress) {
+      setNotification({ type: 'info', message: 'Model pull is in progress. Please wait.' });
+      return;
+    }
+    // model verification (ollama)
+    const model = formData.model?.trim();
+    if (providerFromModel(model) === 'ollama') {
+      try {
+        const { exists, short } = await verifyOllamaModelExists(API_BASE, model);
+        if (!exists) {
+          setNotification({
+            type: 'error',
+            message: `Ollama model "${short}" is not available locally. Please pull it first.`
+          });
+          return; // stop submission
+        }
+      } catch (err) {
+        setNotification({ type: 'error', message: `Failed to verify Ollama model: ${err.message || err}` });
+        return;
+      }
+    }
     setIsLoading(true);
     setRunState('running');
     
@@ -870,6 +953,78 @@ export default function ChaosEaterApp() {
     }
   }, [formData.model]);
 
+  // Auto-pull when model becomes an Ollama model and not present locally
+  const skipConfirmOnceRef = useRef(false);
+  const lastModelRef = useRef(null);
+  useEffect(() => {
+    const model = formData.model?.trim();
+    if (!model) return;
+    if (providerFromModel(model) !== 'ollama') return;
+    const changed = lastModelRef.current !== model;
+    if (changed) {
+      skipConfirmOnceRef.current = false;
+      setOllamaPull({ inProgress:false, pct:null, status:null, model:null, abort:null });
+    }
+    lastModelRef.current = model;
+
+    if (seenModelsRef.current.has(model)) return;
+
+    (async () => {
+      try {
+        const { exists, short } = await verifyOllamaModelExists(API_BASE, model);
+        if (exists) {
+          seenModelsRef.current.add(model);
+          return;
+        }
+
+        // show confirm only if it's not a retry
+        if (!skipConfirmOnceRef.current) {
+          const ok = window.confirm(`Ollama model "${short}" is not available locally. Pull now?`);
+          if (!ok) {
+            setNotification({ type: 'warning', message: `Model "${short}" is not available.` });
+            return;
+          }
+        }
+        skipConfirmOnceRef.current = false;
+
+        const ac = new AbortController();
+        setOllamaPull({
+          inProgress: true,
+          pct: null,
+          status: 'starting',
+          model: short,
+          abort: ac
+        });
+
+        await pullOllamaModel(
+          API_BASE,
+          model,
+          (ev) => {
+            let pct = null;
+            if (typeof ev?.completed === 'number' && typeof ev?.total === 'number' && ev.total > 0) {
+              pct = Math.floor((ev.completed / ev.total) * 100);
+            }
+            setOllamaPull(prev => ({
+              ...prev,
+              pct,
+              status: ev?.status || prev.status
+            }));
+          },
+          ac.signal
+        );
+
+        await waitOllamaTag(API_BASE, short);
+
+        setOllamaPull({ inProgress: false, pct: 100, status: 'success', model: short, abort: null });
+        setNotification({ type: 'success', message: `Pull completed: "${short}"` });
+        seenModelsRef.current.add(model);
+      } catch (e) {
+        setOllamaPull(prev => ({ ...prev, inProgress: false, abort: null }));
+        setNotification({ type: 'error', message: `Ollama pull failed: ${e.message || e}` });
+      }
+    })();
+  }, [formData.model, pullNonce]);
+
   async function saveApiKeyForCurrentModel(apiKey, model) {
     const provider = providerFromModel(model);
     if (!provider) throw new Error(`Unknown provider from model: ${model}`);
@@ -886,6 +1041,89 @@ export default function ChaosEaterApp() {
     }
     await checkProviderStatus(model);
     return res.json(); // { provider, configured }
+  }
+
+  //--------------
+  // Ollama model
+  //--------------
+  /** Convert "ollama/gpt-oss:20b" -> "gpt-oss:20b". If already short, return as-is. */
+  function shortOllamaName(modelFull) {
+    return String(modelFull).startsWith("ollama/")
+      ? modelFull.slice("ollama/".length)
+      : modelFull;
+  }
+
+  /** Check existence of an Ollama model via backend verify endpoint. */
+  async function verifyOllamaModelExists(API_BASE, modelFull) {
+    const short = shortOllamaName(modelFull);
+    const res = await fetch(`${API_BASE}/ollama/verify?model=${encodeURIComponent(short)}`);
+    if (!res.ok) throw new Error(await res.text());
+    const json = await res.json();
+    return { exists: !!json.exists, short };
+  }
+
+  /**
+   * Pull an Ollama model and wait until the server streams a final `{ "status": "success" }`.
+   * This function resolves only after pull is fully completed.
+   */
+  async function pullOllamaModel(API_BASE, modelFull, onProgress, signal) {
+    const short = shortOllamaName(modelFull);
+    const res = await fetch(`${API_BASE}/ollama/pull`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: short }),
+      signal
+    });
+    if (!res.ok) throw new Error(await res.text());
+
+    // Read NDJSON stream to the end
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder(); // Decode bytes -> string chunks
+    let buffer = '';
+    let success = false;
+
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      // Parse by newline (NDJSON)
+      for (;;) {
+        const nl = buffer.indexOf('\n');
+        if (nl < 0) break;
+        const line = buffer.slice(0, nl).trim();
+        buffer = buffer.slice(nl + 1);
+        if (!line) continue;
+
+        let ev;
+        try { ev = JSON.parse(line); }
+        catch { ev = { status: line }; }
+
+        // Optional UI hook
+        onProgress?.(ev);
+
+        // Ollama finishes with {"status": "success"}
+        if (ev.status === 'success') success = true;
+      }
+    }
+
+    if (!success) throw new Error('Pull did not complete (no "success" event).');
+    return { ok: true, model: short };
+  }
+
+  /** After pull, /api/tags may lag; poll verify a few times before proceeding. */
+  async function waitOllamaTag(API_BASE, short, { tries = 6, delay = 1000 } = {}) {
+    for (let i = 0; i < tries; i++) {
+      try {
+        const r = await fetch(`${API_BASE}/ollama/verify?model=${encodeURIComponent(short)}`);
+        if (r.ok) {
+          const j = await r.json();
+          if (j.exists) return true;
+        }
+      } catch {}
+      await new Promise(r => setTimeout(r, delay));
+    }
+    return false;
   }
 
   //----------------
@@ -1389,7 +1627,14 @@ export default function ChaosEaterApp() {
 
               {selectModelValue === 'custom' && (
                 <div>
-                  <label style={{ fontSize: '12px', color: '#a9a9a9', fontWeight: '400', letterSpacing: '0.5px' }}>Custom model</label>
+                  <label style={{
+                    fontSize: '12px',
+                    color: '#a9a9a9',
+                    fontWeight: '400',
+                    letterSpacing: '0.5px'
+                  }}>
+                    Custom model
+                  </label>
                   <input
                     type="text"
                     placeholder="ollama/gpt-oss:20b"
@@ -1428,6 +1673,86 @@ export default function ChaosEaterApp() {
                   />
                 </div>
               )}
+
+              {/* Ollama pull progress under Custom model field */}
+              {providerFromModel(formData.model) === 'ollama' && ollamaPull.model && (
+                <div style={{ marginTop: '-4px', padding: 0 }}>
+                  {/* Top row: text + action button horizontally aligned */}
+                  <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginBottom: 8
+                  }}>
+                    <div style={{ fontSize: 12, color: '#9ca3af' }}>
+                      Pulling {ollamaPull.model}
+                      {ollamaPull.inProgress
+                        ? `… ${ollamaPull.pct != null ? `${ollamaPull.pct}%` : (ollamaPull.status || 'in progress')}`
+                        : (ollamaPull.status === 'success'
+                            ? ' — done'
+                            : ollamaPull.status
+                              ? ` — ${ollamaPull.status}`
+                              : '')
+                      }
+                    </div>
+
+                    {/* Action button styled like "Clean cluster" */}
+                    {ollamaPull.inProgress && (
+                      <button
+                        onClick={() => {
+                          try { ollamaPull.abort?.abort(); } catch {}
+                          setOllamaPull({
+                            inProgress: false, pct: null, status: 'cancelled',
+                            model: ollamaPull.model, abort: null
+                          });
+                          setNotification({ type: 'warning', message: 'Pull cancelled' });
+                        }}
+                        style={{ ...ghostButtonStyle, height: 32 }}
+                        onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#2a2a2a'; e.currentTarget.style.color = '#84cc16'; }}
+                        onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#1f1f1f'; e.currentTarget.style.color = '#e5e7eb'; }}
+                        title="Cancel pull"
+                      >
+                        Cancel
+                      </button>
+                    )}
+
+                    {!ollamaPull.inProgress && ollamaPull.status === 'error' && (
+                      <button
+                        onClick={() => {
+                          skipConfirmOnceRef.current = true;
+                          const m = formData.model?.trim();
+                          if (m) seenModelsRef.current.delete(m);
+                          retryOllamaPull(true);
+                        }} // your retry function (force = true)
+                        style={{ ...ghostButtonStyle, height: 32 }}
+                        onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#2a2a2a'; e.currentTarget.style.color = '#84cc16'; }}
+                        onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#1f1f1f'; e.currentTarget.style.color = '#e5e7eb'; }}
+                        title="Retry pull"
+                      >
+                        Retry
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Progress bar full width */}
+                  <div style={{
+                    width: '100%',
+                    height: 6,
+                    background: '#2a2a2a',
+                    borderRadius: 4,
+                    overflow: 'hidden'
+                  }}>
+                    <div style={{
+                      width: `${ollamaPull.pct ?? (ollamaPull.inProgress ? 20 : 0)}%`,
+                      height: '100%',
+                      background: ollamaPull.status === 'error' ? '#ef4444' : '#84cc16',
+                      transition: 'width 0.2s ease'
+                    }} />
+                  </div>
+                </div>
+              )}
+
+
 
               {/* API Key */}
               {providerFromModel(formData.model) !== "ollama" && ( // Ollama does not require API key

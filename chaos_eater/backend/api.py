@@ -190,7 +190,6 @@ def build_input_from_project_path(project_path: str, override_instructions: Opti
     }
     return ce_input
 
-# 消してよいベースディレクトリ（必要に応じて調整）
 ALLOWED_DELETE_BASES = [
     Path("sandbox").resolve(),
     Path("/tmp").resolve(),
@@ -1041,6 +1040,169 @@ async def purge_job_storage(
         "message": f"Job {job_id} purged",
         "deleted_files": result.get("deleted_files"),
     }
+
+#-----------------------------
+# model verification (Ollama)
+#-----------------------------
+# -----------------------------
+# model verification (Ollama)
+# -----------------------------
+import json, time, requests
+from fastapi.responses import StreamingResponse
+
+def _norm_ollama_model(name: str) -> str:
+    # "ollama/qwen3:32b" -> "qwen3:32b"
+    return name.split("ollama/", 1)[1] if name.startswith("ollama/") else name
+
+def _sanitize_model(name: str) -> str:
+    # Basic sanitization to avoid accidental whitespace/quotes
+    return name.strip().strip('"').strip("'")
+
+@app.get("/ollama/verify")
+async def verify_ollama_model(model: str):
+    """
+    Check if an Ollama model is already pulled (present in /api/tags).
+    Query example: /ollama/verify?model=qwen3:32b
+    """
+    base = os.getenv("OLLAMA_BASE") or "http://localhost:11434"
+    short = _norm_ollama_model(model)
+    try:
+        r = requests.get(f"{base}/api/tags", timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        exists = any(m.get("name") == short for m in data.get("models", []))
+        return {"model": short, "exists": bool(exists)}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Ollama verify error: {e}")
+
+class OllamaPullBody(BaseModel):
+    model: str  # accepts "ollama/<name>" or "<name>"
+
+@app.post("/ollama/pull")
+async def ollama_pull(req: OllamaPullBody):
+    """
+    Proxy Ollama /api/pull NDJSON stream to the frontend as bytes and emit
+    throttled server-side logs (INFO) with progress percentage. If no explicit
+    success event is seen, perform a bounded post-verify against /api/tags and
+    emit a final {"status":"success"} when the model appears.
+    """
+    base = os.getenv("OLLAMA_BASE") or "http://localhost:11434"
+    model = _sanitize_model(_norm_ollama_model(req.model))
+
+    # Post-verify window and logging throttling knobs
+    verify_secs = int(os.getenv("OLLAMA_VERIFY_TIMEOUT_SECONDS", "120"))
+    pct_step = max(1, int(os.getenv("OLLAMA_PULL_LOG_EVERY_PERCENT", "5")))
+    min_interval = int(os.getenv("OLLAMA_PULL_LOG_INTERVAL_SECONDS", "15"))
+
+    def stream():
+        logger.info(f"[ollama/pull] start: model={model}, base={base}")
+        saw_success = False
+        saw_error: Optional[str] = None
+
+        # Progress throttling state
+        last_pct_logged = -pct_step  # force log at first computed pct
+        last_log_ts = 0.0
+
+        # Helper to maybe log progress
+        def maybe_log_progress(pct: Optional[float], status: Optional[str]):
+            nonlocal last_pct_logged, last_log_ts
+            now = time.time()
+            if pct is None:
+                # Log status at interval if no percentage available
+                if now - last_log_ts >= min_interval:
+                    logger.info(f"[ollama/pull] {model}: status={status}")
+                    last_log_ts = now
+                return
+            pct_int = int(pct)
+            # Log on step change or time interval
+            if pct_int >= last_pct_logged + pct_step or (now - last_log_ts) >= min_interval:
+                logger.info(f"[ollama/pull] {model}: progress={pct_int}% (status={status})")
+                last_pct_logged = pct_int
+                last_log_ts = now
+
+        try:
+            with requests.post(
+                f"{base}/api/pull",
+                json={"name": model},
+                stream=True,
+                timeout=None,  # pulling can take a long time
+            ) as r:
+                r.raise_for_status()
+
+                for raw in r.iter_lines(decode_unicode=False):
+                    if not raw:
+                        continue
+
+                    # Forward upstream NDJSON to client
+                    yield raw + b"\n"
+
+                    # Attempt to parse and extract progress/status for logging
+                    try:
+                        obj = json.loads(raw.decode("utf-8", "replace"))
+                        status = obj.get("status")
+                        done_flag = obj.get("done") is True
+                        if status == "success" or done_flag:
+                            saw_success = True
+                        if "error" in obj and obj["error"]:
+                            saw_error = str(obj["error"])
+
+                        # Compute rough % if possible
+                        pct = None
+                        total = obj.get("total")
+                        completed = obj.get("completed")
+                        if isinstance(total, int) and total > 0 and isinstance(completed, int):
+                            pct = (completed / total) * 100.0
+                        elif isinstance(obj.get("percentage"), (int, float)):
+                            pct = float(obj["percentage"]) * 100.0 if obj["percentage"] <= 1 else float(obj["percentage"])
+
+                        maybe_log_progress(pct, status)
+                    except Exception:
+                        # Ignore parse errors; keep streaming and avoid noisy logs
+                        pass
+        except Exception as e:
+            msg = f"pull request failed: {e}"
+            logger.error(f"[ollama/pull] {model}: {msg}")
+            err = {"status": "error", "error": msg}
+            yield (json.dumps(err).encode("utf-8") + b"\n")
+            return
+
+        # Post-verify if we didn't observe a terminal success
+        if not saw_success and not saw_error:
+            logger.info(f"[ollama/pull] {model}: no explicit success; start post-verify up to {verify_secs}s")
+            deadline = time.time() + verify_secs
+            attempt = 0
+            while time.time() < deadline:
+                attempt += 1
+                try:
+                    tags = requests.get(f"{base}/api/tags", timeout=10)
+                    tags.raise_for_status()
+                    data = tags.json()
+                    if any(m.get("name") == model for m in data.get("models", [])):
+                        saw_success = True
+                        logger.info(f"[ollama/pull] {model}: post-verify success on attempt {attempt}")
+                        break
+                except Exception as e:
+                    logger.warning(f"[ollama/pull] {model}: post-verify error (attempt {attempt}): {e}")
+                time.sleep(2)
+
+        # Emit a final terminal record the frontend can rely on
+        if saw_success:
+            final = {"status": "success", "model": model}
+            logger.info(f"[ollama/pull] done: model={model} (success)")
+            yield (json.dumps(final).encode("utf-8") + b"\n")
+        elif saw_error:
+            final = {"status": "error", "error": saw_error}
+            logger.error(f"[ollama/pull] done: model={model} (error) {saw_error}")
+            yield (json.dumps(final).encode("utf-8") + b"\n")
+        else:
+            # Still no success nor explicit error → report incomplete with hint
+            msg = 'Pull did not complete (no "success" event and model not found after post-verify)'
+            final = {"status": "error", "error": msg}
+            logger.error(f"[ollama/pull] done: model={model} (incomplete) {msg}")
+            yield (json.dumps(final).encode("utf-8") + b"\n")
+
+    return StreamingResponse(stream(), media_type="application/x-ndjson")
+
 
 # ---------------------------------------------------------------------
 # Main
