@@ -31,6 +31,8 @@ import './App.css';
 import MessagesPanel from './components/MessagesPanel';
 import NumberField from "./components/NumberField";
 import Collapse from "./components/Collapse";
+import LandingLogo from './components/LandingLogo';
+import LandingMessage from './components/LandingMessage';
 
 
 export default function ChaosEaterApp() {
@@ -73,7 +75,6 @@ export default function ChaosEaterApp() {
   // ---------------------------------------------------------
   const SIDEBAR_WIDTH = 280
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
   const [sidebarCollapsed, setSidebarCollapsed] = useState({
     general: false,
     usage: true,
@@ -119,7 +120,7 @@ export default function ChaosEaterApp() {
   const [notification, setNotification] = useState(null);
   const [hoveredExample, setHoveredExample] = useState(null);
   const fileInputRef = useRef(null);
-  const logoRef = useRef(null);
+
   // Streaming/chat states
   const [messages, setMessages] = useState([]); // [{role: 'assistant'|'user', content: string}]
   const [jobId, setJobId] = useState(null);
@@ -232,28 +233,6 @@ export default function ChaosEaterApp() {
     ); };
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
-  }, []);
-    
-  // Mouse tracking for eyes
-  useEffect(() => {
-    const handleMouseMove = (e) => {
-      if (logoRef.current) {
-        const rect = logoRef.current.getBoundingClientRect();
-        const centerX = rect.left + rect.width / 2;
-        const centerY = rect.top + rect.height / 2;
-        
-        const angle = Math.atan2(e.clientY - centerY, e.clientX - centerX);
-        const distance = Math.min(8, Math.hypot(e.clientX - centerX, e.clientY - centerY) / 20);
-        
-        setMousePosition({
-          x: Math.cos(angle) * distance,
-          y: Math.sin(angle) * distance
-        });
-      }
-    };
-
-    window.addEventListener('mousemove', handleMouseMove);
-    return () => window.removeEventListener('mousemove', handleMouseMove);
   }, []);
 
   // hide notification a few seconds later
@@ -2368,103 +2347,9 @@ export default function ChaosEaterApp() {
         {/* landing image */}
         {!panelVisible && (
           <>
-            {/* Animated Logo with Eye */}
-            <div 
-              ref={logoRef}
-              style={{
-                width: '200px',
-                height: '200px',
-                position: 'relative',
-                marginBottom: '0px',
-                marginTop: '150px',
-                userSelect: 'none',
-                WebkitUserSelect: 'none'
-              }}
-            >
-              {/* ChaosEater icon */}
-              <img
-                src="/chaoseater_icon.png"
-                style={{
-                  position: 'absolute',
-                  width: '80%',
-                  height: '80%',
-                  top: '10%',
-                  left: '10%',
-                  objectFit: 'contain',
-                  animation: 'rotate 30s linear infinite',
-                  userSelect: 'none',
-                  WebkitUserSelect: 'none'
-                }}
-                onError={(e) => {
-                  e.target.style.display = 'none';
-                  e.target.nextSibling.style.display = 'flex';
-                }}
-              />
-              
-              {/* Simple Eye overlay - centered */}
-              <div style={{
-                position: 'absolute',
-                top: '50%',
-                left: '50%',
-                transform: 'translate(-50%, -50%)',
-                width: '40px',
-                height: '40px',
-                backgroundColor: '#ffffff',
-                borderRadius: '50%',
-                overflow: 'hidden',
-                pointerEvents: 'none',
-                WebkitUserDrag: 'none',
-                userSelect: 'none'
-              }}>
-                {/* Black pupil that follows mouse */}
-                <div style={{
-                  position: 'absolute',
-                  width: '20px',
-                  height: '20px',
-                  backgroundColor: '#000000',
-                  borderRadius: '50%',
-                  top: '50%',
-                  left: '50%',
-                  transform: `translate(calc(-50% + ${mousePosition.x}px), calc(-50% + ${mousePosition.y}px))`,
-                  transition: 'transform 0.1s ease-out'
-                }}>
-                  {/* White highlight dot in upper right */}
-                  <div style={{
-                    position: 'absolute',
-                    width: '6px',
-                    height: '6px',
-                    backgroundColor: '#ffffff',
-                    borderRadius: '50%',
-                    top: '3px',
-                    right: '3px'
-                  }} />
-                </div>
-              </div>
-
-              {/* CSS animation for rotation */}
-              <style dangerouslySetInnerHTML={{__html: `
-                @keyframes rotate {
-                  from {
-                    transform: rotate(0deg);
-                  }
-                  to {
-                    transform: rotate(-360deg);
-                  }
-                }
-              `}} />
-            </div>
-            
-            {/* Title */}
-            <h1 style={{
-              fontSize: '30px',
-              fontWeight: 'bold',
-              fontWeight: '600',
-              margin: '0 0 48px',
-              userSelect: 'none',
-              WebkitUserSelect: 'none'
-            }}>
-              Let's dive into <span style={{ color: '#84cc16', fontWeight: '600' }}>Chaos</span> together :)
-            </h1>
+            {/* Landing Logo & Message */}
+            <LandingLogo />
+            <LandingMessage />
         
             {/* Spacer to push chatbox down */}
             <div style={{ flex: 1 }}></div>
