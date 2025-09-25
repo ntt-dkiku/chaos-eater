@@ -1,14 +1,9 @@
 #!/bin/bash
 
 #------------------
-# default settings
+# parameters
 #------------------
 CLUSTER_NAME="chaos-eater-cluster"
-PORT=8080
-OPENAI_API_KEY=""
-ANTHROPIC_API_KEY=""
-GOOGLE_API_KEY=""
-DEVELOP="False"
 OLLAMA="False"
 
 #-----------------
@@ -17,12 +12,7 @@ OLLAMA="False"
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         -n|--name) CLUSTER_NAME="$2"; shift 2;;
-        -p|--port) PORT="$2"; shift 2;;
-        -o|--openai-key) OPENAI_API_KEY="$2"; shift 2;;
-        -a|--anthropic-key) ANTHROPIC_API_KEY="$2"; shift 2;;
-        -g|--google-key) GOOGLE_API_KEY="$2"; shift 2;;
         -l|--ollama) OLLAMA="True"; shift 1;;
-        -d|--develop) DEVELOP="True"; shift 1;;
         *) echo "Unknown parameter passed: $1"; exit 1;;
     esac
 done
@@ -31,13 +21,6 @@ done
 # cluster settings
 #------------------
 echo "Constructing kind clusters..."
-# Export PWD environment variable to make sure envsubst works correctly
-if [ "${DEVELOP}" = "True" ]; then
-    echo "Running in development mode..."
-    export MOUNTED_HOST_PATH="/workspace"
-else
-    export MOUNTED_HOST_PATH=$(pwd)
-fi
 # Create the kind cluster with our configuration, replacing the environment variable "PWD" with the root dir
 envsubst < k8s/kind_config.yaml | kind create cluster --config=- --name "${CLUSTER_NAME}"
 # Check if kind cluster creation was successful
@@ -105,7 +88,6 @@ echo "To stop the port-forward process, use: kill ${PORT_FORWARD_PID}"
 #-----------------------------------
 docker compose -f docker/docker-compose.yaml up --build
 
-
 # if [ "${OLLAMA}" = "True" ]; then
 #     echo "Starting Ollama container..."
 #     docker run -d \
@@ -113,47 +95,6 @@ docker compose -f docker/docker-compose.yaml up --build
 #         -p 11434:11434 \
 #         -v ollama_data:/root/.ollama \
 #         ollama/ollama:latest
-# fi
-# #-------------------------------
-# # launch ChaosEater's container
-# #-------------------------------
-# if [ "${DEVELOP}" = "True" ]; then
-#     docker run --rm \
-#         -v .:/app/ \
-#         -v ~/.kube/config:/root/.kube/config \
-#         -v $(which kubectl):/usr/local/bin/kubectl \
-#         -v $(which skaffold):/usr/local/bin/skaffold \
-#         -v $(which kind):/usr/local/bin/kind \
-#         -v ~/.krew/bin/kubectl-graph:/root/.krew/bin/kubectl-graph \
-#         -v /workspace:/workspace \
-#         -v /var/run/docker.sock:/var/run/docker.sock \
-#         -e PATH="/root/.krew/bin:$PATH" \
-#         -e OPENAI_API_KEY="${OPENAI_API_KEY}" \
-#         -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
-#         -e GOOGLE_API_KEY="${GOOGLE_API_KEY}" \
-#         -d \
-#         --name chaos-eater \
-#         --network host \
-#         chaos-eater/chaos-eater:1.0 \
-#         bash -c "redis-server --daemonize yes && tail -f /dev/null"
-# else
-#     docker run --rm \
-#         -v .:/app/ \
-#         -v ~/.kube/config:/root/.kube/config \
-#         -v $(which kubectl):/usr/local/bin/kubectl \
-#         -v $(which skaffold):/usr/local/bin/skaffold \
-#         -v $(which kind):/usr/local/bin/kind \
-#         -v ~/.krew/bin/kubectl-graph:/root/.krew/bin/kubectl-graph \
-#         -v /var/run/docker.sock:/var/run/docker.sock \
-#         -e PATH="/root/.krew/bin:$PATH" \
-#         -e OPENAI_API_KEY="${OPENAI_API_KEY}" \
-#         -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
-#         -e GOOGLE_API_KEY="${GOOGLE_API_KEY}" \
-#         -d \
-#         --name chaos-eater \
-#         --network host \
-#         chaos-eater/chaos-eater:1.0 \
-#         bash -c "redis-server --daemonize yes; streamlit run ChaosEater_demo.py --server.port ${PORT} --server.fileWatcherType none"
 # fi
 
 #----------
