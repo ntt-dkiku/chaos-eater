@@ -2,6 +2,9 @@ version: '3.8'
 
 services:
   chaos-eater:
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile_sandbox
     image: chaos-eater/kind-in-dind-sandbox:0.1
     container_name: chaos-eater
     network_mode: bridge
