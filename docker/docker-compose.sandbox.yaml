@@ -6,7 +6,7 @@ services:
       context: ../
       dockerfile: docker/Dockerfile_sandbox
     image: chaos-eater/kind-in-dind-sandbox:0.1
-    container_name: chaos-eater
+    container_name: chaos-eater-sandbox
     network_mode: bridge
     privileged: true
     volumes:
@@ -19,5 +19,6 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - OLLAMA_BASE=http://172.17.0.1:11434
     stdin_open: true
     tty: true

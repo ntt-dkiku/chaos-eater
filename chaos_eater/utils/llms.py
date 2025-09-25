@@ -1,6 +1,6 @@
 import os
 import requests
-from typing import List, Tuple, Dict, Callable, Iterator
+from typing import List, Tuple, Dict, Callable, Iterator, Optional
 
 import tiktoken
 import openai
@@ -18,8 +18,11 @@ from .exceptions import ModelNotFoundError
 from .wrappers import LLM, LLMBaseModel, BaseModel
 
 
-def verify_model_name(model_name: str) -> bool:
-    resp = requests.get(f"http://localhost:11434/api/tags")
+def verify_model_name(model_name: str, base_url: Optional[str] = None) -> bool:
+    if base_url:
+        resp = requests.get(f"{base_url}/api/tags")
+    else:
+        resp = requests.get(f"http://localhost:11434/api/tags")
     resp.raise_for_status()
     data = resp.json()
     return any(model.get("name") == model_name for model in data.get("models", []))
@@ -53,13 +56,20 @@ def load_llm(
             # model_kwargs=model_kwargs
         )
     elif model_name.startswith("ollama/"):
-        model_exists = verify_model_name(model_name.split("ollama/", 1)[1])
+        base_url = os.getenv("OLLAMA_BASE")
+        model_exists = verify_model_name(
+            model_name=model_name.split("ollama/", 1)[1],
+            base_url=base_url
+        )
         if model_exists:
-            return ChatOllama(
-                model=model_name.split("ollama/", 1)[1],
-                temperature=temperature,
-                seed=seed
-            )
+            kwargs = {
+                "model": model_name.split("ollama/", 1)[1],
+                "temperature": temperature,
+                "seed": seed,
+            }
+            if base_url:
+                kwargs["base_url"] = base_url
+            return ChatOllama(**kwargs)
         else:
             raise ModelNotFoundError(f"{model_name} was not found in the available list.")
     else:

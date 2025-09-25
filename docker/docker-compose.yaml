@@ -15,6 +15,7 @@ services:
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - PATH=/root/.krew/bin:${PATH}
       - PYTHONUNBUFFERED=1
+      - OLLAMA_BASE=${OLLAMA_BASE}
     volumes:
       - ..:/app/
       - ~/.kube/config:/root/.kube/config:ro
@@ -56,28 +57,6 @@ services:
       - chaos-network
     volumes:
       - redis-data:/data
-
-  # ollama:
-  #   image: ollama/ollama:latest
-  #   container_name: chaos-eater-ollama
-  #   environment:
-  #     - OLLAMA_HOST=0.0.0.0
-  #     - NVIDIA_VISIBLE_DEVICES=all
-  #     - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-  #     - LOG_LEVEL=debug
-  #   volumes:
-  #     - ${HOME}/.ollama:/root/.ollama
-  #   ports:
-  #     - "11434:11434"
-  #   restart: unless-stopped
-  #   runtime: nvidia
-  #   deploy:
-  #     resources:
-  #       reservations:
-  #         devices:
-  #           - driver: nvidia
-  #             count: all
-  #             capabilities: [gpu]
 
 networks:
   chaos-network:

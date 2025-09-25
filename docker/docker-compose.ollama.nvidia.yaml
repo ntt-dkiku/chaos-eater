@@ -1,0 +1,11 @@
+version: "3.8"
+services:
+  ollama:
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

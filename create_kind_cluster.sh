@@ -84,18 +84,24 @@ echo "Chaos Mesh dashboard is being port-forwarded at http://localhost:2333 in t
 echo "To stop the port-forward process, use: kill ${PORT_FORWARD_PID}"
 
 #-----------------------------------
-# launch ollama server if requested
+# launch ChaosEater
 #-----------------------------------
-docker compose -f docker/docker-compose.yaml up --build
-
-# if [ "${OLLAMA}" = "True" ]; then
-#     echo "Starting Ollama container..."
-#     docker run -d \
-#         --name ollama \
-#         -p 11434:11434 \
-#         -v ollama_data:/root/.ollama \
-#         ollama/ollama:latest
-# fi
+# gpu detection
+set -euo pipefail
+has_nvidia() {
+  command -v nvidia-smi >/dev/null 2>&1 || return 1
+  docker info 2>/dev/null | grep -qi 'Runtimes:.*nvidia' || docker info 2>/dev/null | grep -qi 'nvidia' || return 1
+}
+# lanch ChaosEater
+if [ "${OLLAMA}" = "True" ]; then # standard mode
+    if has_nvidia; then
+        docker compose -f docker/docker-compose.yaml -f docker/docker-compose.ollama.yaml -f docker/docker-compose.ollama.nvidia.yaml up --build
+    else
+        docker compose -f docker/docker-compose.yaml -f docker/docker-compose.ollama.yaml up --build
+    fi
+else # sandbox mode
+    docker compose -f docker/docker-compose.yaml up --build
+fi
 
 #----------
 # epilogue
