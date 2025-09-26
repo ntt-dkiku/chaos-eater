@@ -751,7 +751,7 @@ async def websocket_endpoint(websocket: WebSocket, job_id: str, job_mgr: JobMana
             return
 
         last_progress = None
-        last_event_idx = 0   # ← これが重要（送信済みカーソル）
+        last_event_idx = 0   # Important: cursor of already-sent events
         while True:
             # 1. only NEW events
             new_events, last_event_idx = await job_mgr.get_events_since(job_id, last_event_idx)
@@ -1215,6 +1215,349 @@ async def ollama_pull(req: OllamaPullBody):
             yield (json.dumps(final).encode("utf-8") + b"\n")
 
     return StreamingResponse(stream(), media_type="application/x-ndjson")
+
+#--------
+# Router
+#--------
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from pathlib import Path
+import json
+import os
+import asyncio
+import time
+
+router = APIRouter()
+
+# ---------- REST: one-shot aggregation ----------
+@router.get("/jobs/{job_id}/stats")
+async def get_stats(job_id: str, job_mgr: JobManager = Depends(get_job_manager)):
+    job = await job_mgr.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    # Resolve work_dir from job.result or job.work_dir
+    work_dir = None
+    if job.result and "work_dir" in job.result:
+        work_dir = Path(job.result["work_dir"])
+    elif job.work_dir:
+        work_dir = Path(job.work_dir)
+
+    if not work_dir:
+        raise HTTPException(status_code=404, detail="work_dir not found for this job")
+
+    log_file = work_dir / "logs" / "agent_log.jsonl"
+    if not log_file.exists():
+        raise HTTPException(status_code=404, detail="log file not found")
+
+    return compute_stats_from_file(log_file)
+
+
+# ---------- WebSocket: push updates as the log grows ----------
+@router.websocket("/jobs/{job_id}/stats/stream")
+async def ws_stats_stream(websocket: WebSocket, job_id: str, job_mgr: JobManager = Depends(get_job_manager)):
+    await websocket.accept()
+
+    try:
+        job = await job_mgr.get_job(job_id)
+        if not job:
+            await websocket.send_json({"type": "error", "detail": f"Job {job_id} not found"})
+            return
+
+        # Resolve work_dir
+        work_dir = None
+        if job.result and "work_dir" in job.result:
+            work_dir = Path(job.result["work_dir"])
+        elif job.work_dir:
+            work_dir = Path(job.work_dir)
+        if not work_dir:
+            await websocket.send_json({"type": "error", "detail": "work_dir not found for this job"})
+            return
+
+        log_path = work_dir / "logs" / "agent_log.jsonl"
+        if not log_path.exists():
+            await websocket.send_json({"type": "error", "detail": "log file not found"})
+            return
+
+        # Send initial snapshot by scanning the whole file
+        state = compute_stats_from_file(log_path)  # dict (total/by_agent/phases/time/lines)
+        await websocket.send_json({"type": "stats", "snapshot": state})
+
+        # Tail the file and aggregate only appended lines
+        last_pos = os.path.getsize(log_path)
+        last_mtime = os.path.getmtime(log_path)
+        keepalive_at = time.time() + 30  # send periodic ping
+
+        while True:
+            try:
+                # Handle rotation/disappearance: if file disappears, wait and retry
+                exists_now = log_path.exists()
+                if not exists_now:
+                    await asyncio.sleep(0.5)
+                    if not log_path.exists():
+                        await websocket.send_json({"type": "warning", "detail": "log file disappeared; waiting..."})
+                        await asyncio.sleep(1.5)
+                        continue
+
+                size_now = os.path.getsize(log_path)
+                mtime_now = os.path.getmtime(log_path)
+
+                # (1) Rotation or truncation detected: rescan full file and resend snapshot
+                if size_now < last_pos or mtime_now < last_mtime:
+                    state = compute_stats_from_file(log_path)
+                    await websocket.send_json({"type": "stats", "snapshot": state})
+                    last_pos = os.path.getsize(log_path)
+                    last_mtime = os.path.getmtime(log_path)
+                    await asyncio.sleep(0.2)
+                    continue
+
+                # (2) New data appended: read increment and merge into state
+                if size_now > last_pos:
+                    inc_lines, inc_state = read_increment_and_aggregate(log_path, last_pos)
+                    last_pos = size_now
+                    last_mtime = mtime_now
+
+                    if inc_lines > 0:
+                        merge_increment(state, inc_state)
+                        await websocket.send_json({"type": "stats", "snapshot": state})
+
+                # Periodic keepalive
+                now = time.time()
+                if now >= keepalive_at:
+                    await websocket.send_json({"type": "ping", "ts": now})
+                    keepalive_at = now + 30
+
+                await asyncio.sleep(0.5)
+
+            except WebSocketDisconnect:
+                break
+            except Exception as e:
+                # Non-fatal errors (e.g., temporary file locks): report and retry later
+                await websocket.send_json({"type": "warning", "detail": str(e)})
+                await asyncio.sleep(1.0)
+
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
+# ---------- Aggregation utilities ----------
+def parse_add_log(line: str):
+    """
+    Parse a JSONL line. Only process entries of type {"type": "add_log", ...}.
+    Returns:
+      (ts, phase, agent_name, input_tokens, output_tokens, total_tokens) or None
+    """
+    try:
+        ev = json.loads(line)
+    except Exception:
+        return None
+    if ev.get("type") != "add_log":
+        return None
+
+    ts = ev.get("ts")
+    phase = ev.get("phase")
+
+    log = ev.get("log") or {}
+    agent = log.get("agent_name") or "(unknown)"
+    tu = log.get("token_usage") or {}
+
+    it = safe_int(tu.get("input_tokens", 0))
+    ot = safe_int(tu.get("output_tokens", 0))
+    # Fallback: if total is missing, compute as input + output
+    tt = safe_int(tu.get("total_tokens", it + ot))
+
+    return ts, phase, agent, it, ot, tt
+
+
+def safe_int(v):
+    try:
+        return int(v)
+    except Exception:
+        return 0
+
+
+def empty_state():
+    return {
+        "total": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+        "by_agent": {},  # name -> usage dict
+        "phases": {},    # phase -> {count, first_ts, last_ts}
+        "time": {"first_ts": None, "last_ts": None, "elapsed_sec": None},
+        "lines": 0,
+    }
+
+
+def compute_stats_from_file(path: Path) -> dict:
+    """
+    Scan the entire file and return a snapshot dict:
+      {
+        total: {input_tokens, output_tokens, total_tokens},
+        by_agent: [{agent_name, token_usage}, ...] (sorted by total desc),
+        phases: {phase: {count, first_ts, last_ts}, ...},
+        time: {first_ts, last_ts, elapsed_sec},
+        lines: <int>
+      }
+    """
+    st = empty_state()
+    first_ts = None
+    last_ts = None
+
+    with path.open("r", encoding="utf-8") as f:
+        for raw in f:
+            line = raw.strip()
+            if not line:
+                continue
+            parsed = parse_add_log(line)
+            if not parsed:
+                continue
+
+            ts, phase, agent, it, ot, tt = parsed
+            st["lines"] += 1
+
+            # totals
+            st["total"]["input_tokens"] += it
+            st["total"]["output_tokens"] += ot
+            st["total"]["total_tokens"] += tt
+
+            # by_agent
+            a = st["by_agent"].setdefault(agent, {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0})
+            a["input_tokens"] += it
+            a["output_tokens"] += ot
+            a["total_tokens"] += tt
+
+            # phases
+            if phase is not None:
+                p = st["phases"].setdefault(phase, {"count": 0, "first_ts": ts, "last_ts": ts})
+                p["count"] += 1
+                if ts is not None:
+                    p["first_ts"] = ts if p["first_ts"] is None else min(p["first_ts"], ts)
+                    p["last_ts"] = ts if p["last_ts"] is None else max(p["last_ts"], ts)
+
+            # time
+            if ts is not None:
+                first_ts = ts if first_ts is None else min(first_ts, ts)
+                last_ts = ts if last_ts is None else max(last_ts, ts)
+
+    st["time"]["first_ts"] = first_ts
+    st["time"]["last_ts"] = last_ts
+    st["time"]["elapsed_sec"] = (last_ts - first_ts) if (first_ts is not None and last_ts is not None) else None
+
+    # Convert by_agent to sorted array (desc by total_tokens)
+    st["by_agent"] = [
+        {"agent_name": name, "token_usage": usage}
+        for name, usage in sorted(st["by_agent"].items(), key=lambda kv: kv[1]["total_tokens"], reverse=True)
+    ]
+    return st
+
+
+def read_increment_and_aggregate(path: Path, start_pos: int) -> tuple[int, dict]:
+    """
+    Read only the appended part after start_pos and return an incremental state
+    with the same shape as compute_stats_from_file(). The caller is expected to
+    merge it into an existing snapshot using merge_increment().
+    """
+    inc = empty_state()
+    first_ts = None
+    last_ts = None
+
+    with path.open("r", encoding="utf-8") as f:
+        f.seek(start_pos)
+        for raw in f:
+            line = raw.strip()
+            if not line:
+                continue
+            parsed = parse_add_log(line)
+            if not parsed:
+                continue
+
+            ts, phase, agent, it, ot, tt = parsed
+            inc["lines"] += 1
+
+            inc["total"]["input_tokens"] += it
+            inc["total"]["output_tokens"] += ot
+            inc["total"]["total_tokens"] += tt
+
+            a = inc["by_agent"].setdefault(agent, {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0})
+            a["input_tokens"] += it
+            a["output_tokens"] += ot
+            a["total_tokens"] += tt
+
+            if phase is not None:
+                p = inc["phases"].setdefault(phase, {"count": 0, "first_ts": ts, "last_ts": ts})
+                p["count"] += 1
+                if ts is not None:
+                    p["first_ts"] = ts if p["first_ts"] is None else min(p["first_ts"], ts)
+                    p["last_ts"] = ts if p["last_ts"] is None else max(p["last_ts"], ts)
+
+            if ts is not None:
+                first_ts = ts if first_ts is None else min(first_ts, ts)
+                last_ts = ts if last_ts is None else max(last_ts, ts)
+
+    inc["time"]["first_ts"] = first_ts
+    inc["time"]["last_ts"] = last_ts
+    inc["time"]["elapsed_sec"] = (last_ts - first_ts) if (first_ts is not None and last_ts is not None) else None
+
+    # Convert by_agent to sorted array (desc by total_tokens)
+    inc["by_agent"] = [
+        {"agent_name": name, "token_usage": usage}
+        for name, usage in sorted(inc["by_agent"].items(), key=lambda kv: kv[1]["total_tokens"], reverse=True)
+    ]
+    # Return number of processed lines as a hint to the caller
+    return inc["lines"], inc
+
+
+def merge_increment(base: dict, inc: dict) -> None:
+    """
+    Destructively merge the incremental state `inc` into the snapshot `base`.
+    Shapes must be compatible with compute_stats_from_file()/read_increment_and_aggregate().
+    """
+    # totals
+    for k in ("input_tokens", "output_tokens", "total_tokens"):
+        base["total"][k] += inc["total"][k]
+
+    # by_agent: convert base array back to a dict for merging
+    base_map = {e["agent_name"]: e["token_usage"] for e in base.get("by_agent", [])}
+    for e in inc.get("by_agent", []):
+        name = e["agent_name"]
+        u = e["token_usage"]
+        slot = base_map.setdefault(name, {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0})
+        slot["input_tokens"] += u["input_tokens"]
+        slot["output_tokens"] += u["output_tokens"]
+        slot["total_tokens"] += u["total_tokens"]
+    # Re-sort back to array
+    base["by_agent"] = [
+        {"agent_name": name, "token_usage": usage}
+        for name, usage in sorted(base_map.items(), key=lambda kv: kv[1]["total_tokens"], reverse=True)
+    ]
+
+    # phases
+    for phase, pdata in inc.get("phases", {}).items():
+        slot = base["phases"].setdefault(phase, {"count": 0, "first_ts": pdata["first_ts"], "last_ts": pdata["last_ts"]})
+        slot["count"] += pdata["count"]
+        fts = pdata.get("first_ts")
+        lts = pdata.get("last_ts")
+        if fts is not None:
+            slot["first_ts"] = fts if slot["first_ts"] is None else min(slot["first_ts"], fts)
+        if lts is not None:
+            slot["last_ts"] = lts if slot["last_ts"] is None else max(slot["last_ts"], lts)
+
+    # time
+    bft = base["time"]["first_ts"]
+    blt = base["time"]["last_ts"]
+    if inc["time"]["first_ts"] is not None:
+        bft = inc["time"]["first_ts"] if bft is None else min(bft, inc["time"]["first_ts"])
+    if inc["time"]["last_ts"] is not None:
+        blt = inc["time"]["last_ts"] if blt is None else max(blt, inc["time"]["last_ts"])
+    base["time"]["first_ts"] = bft
+    base["time"]["last_ts"] = blt
+    base["time"]["elapsed_sec"] = (blt - bft) if (bft is not None and blt is not None) else None
+
+    # lines
+    base["lines"] += inc["lines"]
+
+# set router
+app.include_router(router)
 
 
 # ---------------------------------------------------------------------

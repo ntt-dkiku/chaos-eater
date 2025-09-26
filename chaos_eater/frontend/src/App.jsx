@@ -7,6 +7,7 @@ import {
   PlusCircle,
   Wrench,
   MoreHorizontal,
+  BarChart3,
   Trash2,
   Edit3,
   Eye,
@@ -34,6 +35,7 @@ import Collapse from "./components/Collapse";
 import LandingLogo from './components/LandingLogo';
 import LandingMessage from './components/LandingMessage';
 import CleanClusterButton from './components/CleanClusterButton';
+import StatsPanel from './components/StatsPanel';
 
 
 export default function ChaosEaterApp() {
@@ -1295,6 +1297,9 @@ export default function ChaosEaterApp() {
   const [hoveredSnapshotId, setHoveredSnapshotId] = useState(null);
   const creatingSnapshotRef = useRef(false);   // prevent duplicate create on rapid clicks
   const persistDebounceRef = useRef(null);     // debounce timer id
+  const snapshotKey = currentSnapshotId
+    ? `snap:${currentSnapshotId}`
+    : (jobId ? `job:${jobId}` : 'none');
 
   useEffect(() => {
     // Ensure IndexedDB session and load snapshot list
@@ -1456,7 +1461,7 @@ export default function ChaosEaterApp() {
               onClick={() => setSidebarOpen(false)}
               title="Close sidebar"
               style={{
-                marginLeft: '88px', // 'auto'
+                marginLeft: 'auto',
                 width: '32px',
                 height: '32px',
                 borderRadius: '8px',
@@ -2088,6 +2093,65 @@ export default function ChaosEaterApp() {
           </Collapse>
         </div>
 
+        {/* Statics (tokens & time) */}
+        <div style={{ padding: '0 8px' }}> 
+          <button
+            onClick={() =>
+              setSidebarCollapsed(prev => ({ ...prev, usage: !prev.usage }))
+            }
+            style={{
+              width: '100%',
+              padding: '10px 8px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              backgroundColor: 'transparent',
+              border: 'none',
+              borderRadius: 8,
+              color: '#e5e7eb',
+              cursor: 'pointer',
+              transition: 'background-color 0.2s ease, color 0.2s ease'
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.backgroundColor = '#1a1a1a';
+              e.currentTarget.style.color = '#84cc16';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+              e.currentTarget.style.color = '#e5e7eb';
+            }}
+            aria-expanded={!sidebarCollapsed.usage}
+            aria-controls="stats-collapse"
+          >
+            <BarChart3 size={16} />
+            <span style={{ fontSize: '14px', fontWeight: '500' }}>
+              Statics
+            </span>
+            <span
+              style={{
+                gap: '8px',
+                display: 'inline-flex',
+                transition: 'transform 180ms ease',
+                transform: sidebarCollapsed.usage ? 'rotate(0deg)' : 'rotate(180deg)',
+                marginLeft: '9px'
+              }}
+            >
+              <ChevronDown size={16} />
+            </span>
+          </button>
+
+          <Collapse isOpen={!sidebarCollapsed.usage}>
+            <div id="stats-collapse" style={{ padding: '0 16px 16px' }}>
+              <StatsPanel
+                apiBase={API_BASE}
+                jobId={jobId}
+                snapshotKey={snapshotKey}
+                collapsed={false}
+              />
+            </div>
+          </Collapse>
+        </div>
+
         {/* History (Snapshots) */}
         <div>
           {/* title */}
@@ -2151,6 +2215,7 @@ export default function ChaosEaterApp() {
                     setUploadedFiles((loaded.uploadedFilesMeta || []).map(m => ({ name: m.name, size: m.size, content: '' })));
                     setFormData(prev => ({ ...prev, ...(loaded.formData || {}), apiKey: '' }));
                     setCurrentSnapshotId(loaded.id);
+                    setJobId(loaded.jobId || null);
                     setNotification({ type: 'success', message: `Restored: ${loaded.title}` });
                   }}
                   style={{
