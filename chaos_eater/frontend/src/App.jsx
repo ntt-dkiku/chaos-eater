@@ -33,6 +33,7 @@ import NumberField from "./components/NumberField";
 import Collapse from "./components/Collapse";
 import LandingLogo from './components/LandingLogo';
 import LandingMessage from './components/LandingMessage';
+import CleanClusterButton from './components/CleanClusterButton';
 
 
 export default function ChaosEaterApp() {
@@ -1675,7 +1676,7 @@ export default function ChaosEaterApp() {
                       }
                     </div>
 
-                    {/* Action button styled like "Clean cluster" */}
+                    {/* Action button */}
                     {ollamaPull.inProgress && (
                       <button
                         onClick={() => {
@@ -1949,33 +1950,14 @@ export default function ChaosEaterApp() {
                 </select>
               </div>
               
-              <button
-                title="Clean resources within the selected cluster"
-                style={{
-                  padding: '10px 16px',
-                  backgroundColor: '#1f1f1f',
-                  border: '1px solid #374151',
-                  color: '#e5e7eb',
-                  borderRadius: 6,
-                  fontSize: 13,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  justifyContent: 'center', 
-                  alignItems: 'center',
-                  gap: 8,
-                  transition: 'all 0.2s ease'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#2a2a2a';
-                  e.currentTarget.style.color = '#84cc16';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = '#1f1f1f';
-                  e.currentTarget.style.color = '#e5e7eb';
-                }}
-              >
-                Clean cluster
-              </button>
+              <CleanClusterButton
+                API_BASE={API_BASE}
+                kubeContext={formData.cluster}
+                namespace={'chaos-eater'}
+                projectName={formData.projectName || 'chaos-eater'}
+                disabled={clustersLoading}
+                onNotify={(type, message) => setNotification({ type, message })}
+              />
               
               {/* Checkboxes */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>

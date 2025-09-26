@@ -937,6 +937,22 @@ async def release_cluster(body: ReleaseBody):
     removed = await redis.hdel(USAGE_HASH, body.session_id)
     return {"released": bool(removed)}
 
+from ..utils.k8s import remove_all_resources_by_labels, remove_all_resources_by_namespace 
+
+class CleanClusterBody(BaseModel):
+    kube_context: str
+    namespace: str
+    project_name: str
+
+@app.post("/clusters/clean")
+async def clean_cluster(body: CleanClusterBody):
+    try:
+        remove_all_resources_by_namespace(body.kube_context, body.namespace)
+        remove_all_resources_by_labels(body.kube_context, f"project={body.project_name}")
+        return {"cleaned": True}
+    except Exception as e:
+        return {"cleaned": False, "error": str(e)}
+
 # ---------------------------------------------------------------------
 # API key settings
 # ---------------------------------------------------------------------
@@ -1044,9 +1060,6 @@ async def purge_job_storage(
 #-----------------------------
 # model verification (Ollama)
 #-----------------------------
-# -----------------------------
-# model verification (Ollama)
-# -----------------------------
 import json, time, requests
 from fastapi.responses import StreamingResponse
 
