@@ -1,7 +1,6 @@
 import yaml
 from typing import List, Union, Tuple
 
-import streamlit as st
 import networkx as nx
 import pydot
 
@@ -9,8 +8,11 @@ from ...utils.wrappers import LLM, LLMBaseModel, LLMField, BaseModel
 from ...utils.llms import build_json_agent, LoggingCallback, LLMLog
 from ...utils.functions import list_to_bullet_points, add_code_fences, run_command
 from ...utils.schemas import File
-from ...utils.streamlit import StreamlitDisplayHandler
 
+
+#------------------------------------------
+# WARNING: This file is not currently used
+#------------------------------------------
 
 SYS_DESCRIBE_INTER_DEPENDENCY = """\
 You are a professional kubernetes (k8s) engineer.
@@ -134,7 +136,7 @@ class K8sAnalysisAgent:
         graph_path = f"{work_dir}/inputs/dependency.dot"
         run_command(
             cmd=f"kubectl graph all --all-namespaces --context {kube_context} --selector=project={project_name} -t 1000 > {graph_path}",
-            display_handler=StreamlitDisplayHandler()
+            # display_handler=StreamlitDisplayHandler()
         )
         (graph,) = pydot.graph_from_dot_file(graph_path)
         G = nx.nx_pydot.from_pydot(graph)
@@ -203,8 +205,8 @@ class K8sAnalysisAgent:
         k8s_summary: str,
         intra_dependency: List[str]
     ) -> str:
-        st.write(f"Intra dependencies in ```{k8s_yaml.fname}```")
-        container = st.empty()
+        # st.write(f"Intra dependencies in ```{k8s_yaml.fname}```")
+        # container = st.empty()
         for summary in self.intra_agent.stream({
             "k8s_yaml": add_code_fences(k8s_yaml.content, k8s_yaml.fname),
             "k8s_summary": k8s_summary,
@@ -212,7 +214,8 @@ class K8sAnalysisAgent:
             {"callbacks": [self.logger]}
         ):
             if (summary_str := summary.get("k8s_dependency")) is not None:
-                container.write(summary_str)
+                # container.write(summary_str)
+                pass
         return IntraDependency(file=k8s_yaml.fname, dependency=summary_str)
 
     def describe_inter_dependency(
@@ -223,8 +226,8 @@ class K8sAnalysisAgent:
         dst_k8s_summary: str,
         inter_dependency: List[str]
     ):
-        st.write(f"Inter dependencies: ```{src_k8s_yaml.fname}``` ➡ ```{dst_k8s_yaml.fname}```")
-        container = st.empty()
+        # st.write(f"Inter dependencies: ```{src_k8s_yaml.fname}``` ➡ ```{dst_k8s_yaml.fname}```")
+        # container = st.empty()
         for summary in self.inter_agent.stream({
             "src_k8s_yaml": add_code_fences(src_k8s_yaml.content, src_k8s_yaml.fname),
             "src_k8s_summary": src_k8s_summary,
@@ -234,7 +237,8 @@ class K8sAnalysisAgent:
             {"callbacks": [self.logger]}
         ):
             if (summary_str := summary.get("k8s_dependency")) is not None:
-                container.write(summary_str)
+                # container.write(summary_str)
+                pass
         return InterDependency(
             src_file=src_k8s_yaml.fname,
             dst_file=dst_k8s_yaml.fname,

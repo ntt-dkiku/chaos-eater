@@ -11,7 +11,6 @@ from ..utils.wrappers import LLM, BaseModel
 from ..utils.schemas import File
 from ..utils.k8s import wait_for_resources_ready
 from ..utils.llms import LLMLog, AgentLogger
-from ..utils.streamlit import Spinner
 from ..backend.streaming import FrontEndDisplayHandler
 from ..utils.functions import (
     write_file,
@@ -98,7 +97,6 @@ class PreProcessor:
         agent_logger: AgentLogger = None
     ) -> Tuple[List[LLMLog], ProcessedData]:
         preprocess_dir = f"{work_dir}/inputs"
-        log = []
         #------------------------------------------------------
         # save the input manifests, then deploy them if needed
         #------------------------------------------------------
@@ -135,7 +133,7 @@ class PreProcessor:
         for k8s_yaml in k8s_yamls:
             self.message_logger.code(k8s_yaml.content, language="yaml", filename=k8s_yaml.fname)
         if is_new_deployment:
-            spinner = Spinner(f"#### Deploying resources...")
+            self.message_logger.write("#### Deploying resources")
             try:
                 run_command(
                     cmd=f"skaffold run --kube-context {kube_context} -l project={project_name}",
@@ -144,7 +142,6 @@ class PreProcessor:
                 )
             except subprocess.CalledProcessError as e:
                 raise RuntimeError("K8s resource deployment failed.")
-            spinner.end(f"#### Deploying resources... Done")
 
         # wait for all the resources to be deployed
         wait_for_resources_ready(label_selector=f"project={project_name}", context=kube_context)

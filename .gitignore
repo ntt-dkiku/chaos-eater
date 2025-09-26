@@ -4,3 +4,5 @@ old/
 .ipynb_checkpoints
 .env
 .chaoseater-mode
+.python-version
+nohup.out
