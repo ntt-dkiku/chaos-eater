@@ -1996,15 +1996,15 @@ export default function ChaosEaterApp() {
                         size={14} 
                         style={{ 
                           position: 'absolute', 
-                          top: '2px', 
-                          left: '2px', 
+                          top: '5px', 
+                          left: '4px', 
                           color: '#84cc16',
                           pointerEvents: 'none'
                         }} 
                       />
                     )}
                   </div>
-                  <span style={{ fontWeight: '300' }}>Clean the cluster before run</span>
+                  <span style={{ fontWeight: '300' }}>Clean cluster before run</span>
                 </label>
                 
                 <label style={{ 
@@ -2037,15 +2037,15 @@ export default function ChaosEaterApp() {
                         size={14} 
                         style={{ 
                           position: 'absolute', 
-                          top: '2px', 
-                          left: '2px', 
+                          top: '5px', 
+                          left: '4px', 
                           color: '#84cc16',
                           pointerEvents: 'none'
                         }} 
                       />
                     )}
                   </div>
-                  <span style={{ fontWeight: '300' }}>Clean the cluster after run</span>
+                  <span style={{ fontWeight: '300' }}>Clean cluster after run</span>
                 </label>
                 
                 <label style={{ 
@@ -2078,8 +2078,8 @@ export default function ChaosEaterApp() {
                         size={14} 
                         style={{ 
                           position: 'absolute', 
-                          top: '2px', 
-                          left: '2px', 
+                          top: '5px', 
+                          left: '4px', 
                           color: '#84cc16',
                           pointerEvents: 'none'
                         }} 
