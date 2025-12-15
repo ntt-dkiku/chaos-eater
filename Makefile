@@ -24,6 +24,18 @@ HAS_NVIDIA := $(shell \
 GPU ?= $(HAS_NVIDIA)
 
 #--------------
+# os detection
+#--------------
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Linux)
+    OLLAMA_HOST := 172.17.0.1
+else
+    # Mac/Windows use host.docker.internal
+    OLLAMA_HOST := host.docker.internal
+endif
+export OLLAMA_BASE ?= http://$(OLLAMA_HOST):11434
+
+#--------------
 # sandbox mode
 #--------------
 BASE_SANDBOX   := -f docker/docker-compose.sandbox.yaml

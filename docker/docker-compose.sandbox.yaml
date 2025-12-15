@@ -19,6 +19,6 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
-      - OLLAMA_BASE=http://172.17.0.1:11434
+      - OLLAMA_BASE=${OLLAMA_BASE}
     stdin_open: true
     tty: true

@@ -9,7 +9,7 @@ services:
       - ${HOME}/.ollama:/root/.ollama
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "bash", "-lc", "curl -sf http://localhost:11434/api/tags >/dev/null || exit 1"]
+      test: ["CMD", "ollama", "list"]
       interval: 10s
-      timeout: 3s
+      timeout: 5s
       retries: 15

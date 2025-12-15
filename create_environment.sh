@@ -12,12 +12,24 @@ else
 fi
 
 #----------------------
+# OS/ARCH detection
+#----------------------
+OS="$(uname | tr '[:upper:]' '[:lower:]')"
+ARCH="$(uname -m)"
+case "${ARCH}" in
+    x86_64)  ARCH="amd64" ;;
+    aarch64) ARCH="arm64" ;;
+    arm64)   ARCH="arm64" ;;
+esac
+echo "Detected OS: ${OS}, ARCH: ${ARCH}"
+
+#----------------------
 # Environment settings
 #----------------------
 # Install kubectl
 if ! command -v kubectl &> /dev/null; then
     echo "Installing kubectl..."
-    curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+    curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/${OS}/${ARCH}/kubectl"
     chmod +x ./kubectl
     $USE_SUDO mv ./kubectl /usr/local/bin/kubectl
 else
@@ -27,7 +39,7 @@ fi
 # Install kind
 if ! command -v kind &> /dev/null; then
     echo "Installing kind..."
-    curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-amd64
+    curl -Lo ./kind "https://kind.sigs.k8s.io/dl/v0.23.0/kind-${OS}-${ARCH}"
     chmod +x ./kind
     $USE_SUDO mv ./kind /usr/local/bin/kind
 else
@@ -62,7 +74,7 @@ fi
 # Install skaffold
 if ! command -v skaffold &> /dev/null; then
     echo "Installing skaffold..."
-    curl -Lo skaffold https://storage.googleapis.com/skaffold/releases/latest/skaffold-linux-amd64
+    curl -Lo skaffold "https://storage.googleapis.com/skaffold/releases/latest/skaffold-${OS}-${ARCH}"
     chmod +x ./skaffold
     $USE_SUDO mv ./skaffold /usr/local/bin/skaffold
 else
