@@ -6,7 +6,7 @@ langchain-google-genai==2.0.4
 langchain-anthropic==0.2.4
 langchain-ollama
 langchain-community
-tiktoken==0.7.0
+tiktoken
 # vllm # is currently on hold because some errors occur when constructing ChaosEater's container on Mac OS 
 
 # GUI

@@ -85,7 +85,7 @@ export default function ChaosEaterApp() {
   });
   
   const [formData, setFormData] = useState({
-    model: 'openai/gpt-4o-2024-08-06',
+    model: 'openai/gpt-4.1',
     apiKey: '',
     apiKeyVisible: false,
     cluster: '',
@@ -132,13 +132,21 @@ export default function ChaosEaterApp() {
   const [visible, setVisible] = useState(false);
   // model list
   const models = [
+    'openai/gpt-4.1',
     'openai/gpt-4o-2024-08-06',
-    'google/gemini-1.5-pro-latest',
+    'openai/gpt-5.1-2025-11-13',
+    // 'openai/gpt-5.2',
+    'gemini-2.5-pro',
+    'gemini-3-pro-preview',
+    // 'google/gemini-1.5-pro-latest', this model was removed from API
     'anthropic/claude-3-5-sonnet-20241022',
+    'anthropic/claude-sonnet-4-5-20250929',
+    'anthropic/claude-opus-4-5-20251101',
     'ollama/gpt-oss:20b',
+    'ollama/gpt-oss:120b',
     'custom'
   ];
-  const defaultModel = 'openai/gpt-4o-2024-08-06';
+  const defaultModel = 'openai/gpt-4.1';
   const selectModelValue =
     !formData.model || formData.model.trim() === ''
       ? defaultModel
@@ -429,7 +437,7 @@ export default function ChaosEaterApp() {
           project_path: 'examples/nginx',
           content: ''
         }],
-        instructions: '- The Chaos-Engineering experiment must be completed within 1 minute.\n- List ONLY one steady state about Pod Count.\n- Conduct pod-kill'
+        instructions: '- The Chaos-Engineering experiment must be completed within 1 minute.\n- List ONLY one steady state about Pod Count.\n- Conduct pod-kill in the experiment phase'
       },
       nginxLimited: {
         files: [{
@@ -2485,23 +2493,23 @@ export default function ChaosEaterApp() {
               maxWidth: '768px'
             }}>
               <div
-                onClick={() => loadExample('nginx')}
-                onMouseEnter={() => setHoveredExample('nginx')}
-                onMouseLeave={() => setHoveredExample(null)}
-                style={styles.exampleCard(hoveredExample === 'nginx')}
-              >
-                <div style={styles.exampleTitle(hoveredExample === 'nginx')}>example#1:</div>
-                <div style={styles.exampleDesc(hoveredExample === 'nginx')}>Nginx w/ detailed CE instructions</div>
-              </div>
-              
-              <div
                 onClick={() => loadExample('nginxLimited')}
                 onMouseEnter={() => setHoveredExample('nginxLimited')}
                 onMouseLeave={() => setHoveredExample(null)}
                 style={styles.exampleCard(hoveredExample === 'nginxLimited')}
               >
-                <div style={styles.exampleTitle(hoveredExample === 'nginxLimited')}>example#2:</div>
+                <div style={styles.exampleTitle(hoveredExample === 'nginxLimited')}>example#1:</div>
                 <div style={styles.exampleDesc(hoveredExample === 'nginxLimited')}>Nginx w/ limited experiment duration</div>
+              </div>
+
+              <div
+                onClick={() => loadExample('nginx')}
+                onMouseEnter={() => setHoveredExample('nginx')}
+                onMouseLeave={() => setHoveredExample(null)}
+                style={styles.exampleCard(hoveredExample === 'nginx')}
+              >
+                <div style={styles.exampleTitle(hoveredExample === 'nginx')}>example#2:</div>
+                <div style={styles.exampleDesc(hoveredExample === 'nginx')}>Nginx w/ detailed CE instructions</div>
               </div>
               
               <div

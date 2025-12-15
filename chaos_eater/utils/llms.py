@@ -90,7 +90,7 @@ def build_json_agent(
     chat_messages: List[Tuple[str, str]],
     pydantic_object: LLMBaseModel,
     is_async: bool = False,
-    enables_prefill: bool = True,
+    enables_prefill: bool = False,
     streaming_func: Callable = None
 ) -> Runnable:
     if enables_prefill:
@@ -206,7 +206,11 @@ class LoggingCallback(BaseCallbackHandler):
             raise TypeError(f"Invalid llm: {llm}")
         self.streaming = streaming
         if self.model_provider == "openai" and self.streaming:
-            self.enc = tiktoken.encoding_for_model(self.model_name)
+            try:
+                self.enc = tiktoken.encoding_for_model(self.model_name)
+            except KeyError:
+                # Fallback for newer models not yet in tiktoken
+                self.enc = tiktoken.get_encoding("o200k_base")
         self.token_usage = TokenUsage(
             input_tokens=0,
             output_tokens=0,
