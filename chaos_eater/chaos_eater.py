@@ -1,5 +1,6 @@
 import os
 import time
+import json
 import subprocess
 from typing import List, Dict
 
@@ -78,6 +79,7 @@ class ChaosEater:
         max_retries: int = 3,
         callbacks: List[ChaosEaterCallback] = [],
         resume_from: str = None,
+        resume_from_agent: str = None,  # Agent-level resume
         checkpoint: 'ChaosEaterOutput' = None
     ) -> ChaosEaterOutput:
         # Define phase order for resume logic
@@ -93,6 +95,20 @@ class ChaosEater:
                 return phase_idx < resume_idx
             except ValueError:
                 return False
+
+        def get_agent_callbacks():
+            """Get agent start/end callbacks from ChaosEaterCallbacks"""
+            def on_agent_start(agent_name: str):
+                for cb in callbacks:
+                    if hasattr(cb, 'on_agent_start'):
+                        cb.on_agent_start(agent_name)
+
+            def on_agent_end(agent_name: str, result=None):
+                for cb in callbacks:
+                    if hasattr(cb, 'on_agent_end'):
+                        cb.on_agent_end(agent_name, result)
+
+            return on_agent_start, on_agent_end
 
         #----------------
         # initialization
@@ -122,29 +138,43 @@ class ChaosEater:
         hypothesis = ce_output.ce_cycle.hypothesis if checkpoint else None
         experiment = ce_output.ce_cycle.experiment if checkpoint else None
 
+        # Get agent callbacks for all phases
+        on_agent_start, on_agent_end = get_agent_callbacks()
+
         #-----------------------------------------------------------------
         # 0. preprocessing (input deployment & validation and reflection)
         #-----------------------------------------------------------------
         if not should_skip_phase("preprocess"):
-            self.message_logger.subheader("Phase 0: Preprocessing", divider="gray")
+            # Determine if we're resuming within this phase
+            preprocess_resume_agent = resume_from_agent if resume_from == "preprocess" else None
+
+            if preprocess_resume_agent:
+                # Resuming mid-phase - show resume message instead of phase header
+                self.message_logger.write(f"--- Resumed at preprocess/{preprocess_resume_agent} ---")
+            else:
+                # Normal start - show phase header
+                self.message_logger.subheader("Phase 0: Preprocessing", divider="gray")
+
             # Trigger callback
             for cb in callbacks:
                 if hasattr(cb, 'on_preprocess_start'):
                     cb.on_preprocess_start()
 
-            # clean the cluster
-            self.message_logger.write(f"##### Cleaning the cluster: `{kube_context}`")
-            remove_all_resources_by_namespace(
-                kube_context,
-                self.namespace,
-                display_handler=FrontEndDisplayHandler(self.message_logger)
-            )
-            if clean_cluster_before_run:
-                remove_all_resources_by_labels(
+            # Only clean cluster if not resuming within this phase
+            if not preprocess_resume_agent:
+                # clean the cluster
+                self.message_logger.write(f"##### Cleaning the cluster: `{kube_context}`")
+                remove_all_resources_by_namespace(
                     kube_context,
-                    f"project={project_name}",
+                    self.namespace,
                     display_handler=FrontEndDisplayHandler(self.message_logger)
                 )
+                if clean_cluster_before_run:
+                    remove_all_resources_by_labels(
+                        kube_context,
+                        f"project={project_name}",
+                        display_handler=FrontEndDisplayHandler(self.message_logger)
+                    )
 
             start_time = time.time()
             data = self.preprocessor.process(
@@ -152,8 +182,11 @@ class ChaosEater:
                 kube_context=kube_context,
                 work_dir=work_dir,
                 project_name=project_name,
-                is_new_deployment=is_new_deployment,
-                agent_logger=agent_logger
+                is_new_deployment=is_new_deployment if not preprocess_resume_agent else False,
+                agent_logger=agent_logger,
+                resume_from_agent=preprocess_resume_agent,
+                on_agent_start=on_agent_start,
+                on_agent_end=on_agent_end,
             )
             ce_output.run_time["preprocess"] = time.time() - start_time
             ce_output.ce_cycle.processed_data = data
@@ -169,7 +202,14 @@ class ChaosEater:
         # 1. hypothesis
         #---------------
         if not should_skip_phase("hypothesis"):
-            self.message_logger.subheader("Phase 1: Hypothesis", divider="gray")
+            # Determine if we're resuming within this phase
+            hypothesis_resume_agent = resume_from_agent if resume_from == "hypothesis" else None
+
+            if hypothesis_resume_agent:
+                self.message_logger.write(f"--- Resumed at hypothesis/{hypothesis_resume_agent} ---")
+            else:
+                self.message_logger.subheader("Phase 1: Hypothesis", divider="gray")
+
             for cb in callbacks:
                 if hasattr(cb, 'on_hypothesis_start'):
                     cb.on_hypothesis_start()
@@ -181,7 +221,10 @@ class ChaosEater:
                 work_dir=work_dir,
                 max_num_steady_states=max_num_steadystates,
                 max_retries=max_retries,
-                agent_logger=agent_logger
+                agent_logger=agent_logger,
+                resume_from_agent=hypothesis_resume_agent,
+                on_agent_start=on_agent_start,
+                on_agent_end=on_agent_end,
             )
             ce_output.run_time["hypothesis"] = time.time() - start_time
             ce_output.ce_cycle.hypothesis = hypothesis
@@ -197,7 +240,14 @@ class ChaosEater:
         # 2. Chaos Experiment
         #---------------------
         if not should_skip_phase("experiment_plan"):
-            self.message_logger.subheader("Phase 2: Chaos Experiment", divider="gray")
+            # Determine if we're resuming within this phase
+            experiment_resume_agent = resume_from_agent if resume_from == "experiment_plan" else None
+
+            if experiment_resume_agent:
+                self.message_logger.write(f"--- Resumed at experiment_plan/{experiment_resume_agent} ---")
+            else:
+                self.message_logger.subheader("Phase 2: Chaos Experiment", divider="gray")
+
             for cb in callbacks:
                 if hasattr(cb, 'on_experiment_plan_start'):
                     cb.on_experiment_plan_start()
@@ -207,7 +257,10 @@ class ChaosEater:
                 data=data,
                 hypothesis=hypothesis,
                 work_dir=work_dir,
-                agent_logger=agent_logger
+                agent_logger=agent_logger,
+                resume_from_agent=experiment_resume_agent,
+                on_agent_start=on_agent_start,
+                on_agent_end=on_agent_end,
             )
             ce_output.run_time["experiment_plan"] = time.time() - start_time
             ce_output.ce_cycle.experiment = experiment
@@ -230,6 +283,9 @@ class ChaosEater:
         if not ce_output.run_time.get("experiment_execution"):
             ce_output.run_time["experiment_execution"] = []
 
+        # Determine if we're resuming within the experiment phase
+        experiment_resume_agent = resume_from_agent if resume_from == "experiment" else None
+
         mod_k8s_count = len(ce_output.ce_cycle.reconfig_history) if checkpoint else 0
         mod_dir = data.work_dir
         k8s_yamls = data.k8s_yamls
@@ -237,27 +293,51 @@ class ChaosEater:
         mod_dir_history = [mod_dir]
         while (1):
             # 2.2. conduct the chaos experiment
+            # Trigger experiment start callback
+            for cb in callbacks:
+                if hasattr(cb, 'on_experiment_start'):
+                    cb.on_experiment_start()
+
             start_time = time.time()
-            experiment_result = self.experimenter.run(experiment, kube_context=kube_context)
+            experiment_result = self.experimenter.run(
+                experiment=experiment,
+                kube_context=kube_context,
+                work_dir=work_dir,
+                on_agent_start=on_agent_start,
+                on_agent_end=on_agent_end,
+                resume_from_agent=experiment_resume_agent,
+            )
+            # Clear resume_from_agent after first iteration to prevent repeated resume attempts
+            experiment_resume_agent = None
             ce_output.run_time["experiment_execution"].append(time.time() - start_time)
             ce_output.ce_cycle.result_history.append(experiment_result)
             save_json(f"{output_dir}/output.json", ce_output.dict())
+
+            # Trigger experiment end callback
+            for cb in callbacks:
+                if hasattr(cb, 'on_experiment_end'):
+                    cb.on_experiment_end()
 
             # check if the hypothesis is satisfied
             if experiment_result.all_tests_passed:
                 self.message_logger.write("### Your k8s yaml already has good resilience!!!")
                 break
-            
+
             # set flag
             ce_output.ce_cycle.conducts_reconfig = True
             save_json(f"{output_dir}/output.json", ce_output.dict())
 
-            # mod count checking 
+            # mod count checking
             assert mod_k8s_count < max_retries, f"MAX_MOD_COUNT_EXCEEDED: improvement exceeds the max_retries {max_retries}"
 
             #-------------
             # 3. analysis
             #-------------
+            # Trigger analysis start callback
+            for cb in callbacks:
+                if hasattr(cb, 'on_analysis_start'):
+                    cb.on_analysis_start()
+
             self.message_logger.subheader("Phase 3: Analysis", divider="gray")
             start_time = time.time()
             analysis = self.analyzer.analyze(
@@ -268,15 +348,27 @@ class ChaosEater:
                 reconfig_history=ce_output.ce_cycle.reconfig_history,
                 experiment_result=experiment_result,
                 work_dir=work_dir,
-                agent_logger=agent_logger
+                agent_logger=agent_logger,
+                on_agent_start=on_agent_start,
+                on_agent_end=on_agent_end,
             )
             ce_output.run_time["analysis"].append(time.time() - start_time)
             ce_output.ce_cycle.analysis_history.append(analysis)
             save_json(f"{output_dir}/output.json", ce_output.dict())
 
+            # Trigger analysis end callback
+            for cb in callbacks:
+                if hasattr(cb, 'on_analysis_end'):
+                    cb.on_analysis_end(analysis)
+
             #----------------
             # 4. improvement
             #----------------
+            # Trigger improvement start callback
+            for cb in callbacks:
+                if hasattr(cb, 'on_improvement_start'):
+                    cb.on_improvement_start()
+
             self.message_logger.subheader("Phase 4: Improvement", divider="gray")
             start_time = time.time()
             reconfig = self.improver.reconfigure(
@@ -296,6 +388,11 @@ class ChaosEater:
             ce_output.run_time["improvement"].append(time.time() - start_time)
             ce_output.ce_cycle.reconfig_history.append(reconfig)
             save_json(f"{output_dir}/output.json", ce_output.dict())
+
+            # Trigger improvement end callback
+            for cb in callbacks:
+                if hasattr(cb, 'on_improvement_end'):
+                    cb.on_improvement_end(reconfig)
 
             #-------------------------------
             # preparation for the next loop
@@ -422,7 +519,9 @@ class ChaosEater:
         summary = self.postprocessor.process(
             ce_cycle=ce_output.ce_cycle,
             work_dir=output_dir,
-            agent_logger=agent_logger
+            agent_logger=agent_logger,
+            on_agent_start=on_agent_start,
+            on_agent_end=on_agent_end,
         )
         ce_output.run_time["summary"] = time.time() - start_time
         ce_output.ce_cycle.summary = summary

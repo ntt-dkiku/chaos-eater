@@ -2,7 +2,7 @@ import os
 import yaml
 import json
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Callable, Any
 
 from .llm_agents.experiment_plan_agent import ExperimentPlanAgent
 from .llm_agents.experiment_replan_agent import ExperimentRePlanAgent
@@ -13,6 +13,7 @@ from ..ce_tools.ce_tool_base import CEToolBase
 from ..utils.schemas import File
 from ..utils.wrappers import LLM, BaseModel
 from ..utils.llms import AgentLogger
+from ..utils.agent_runner import AgentRunner, AgentStep
 from ..utils.functions import (
     type_cmd,
     save_json,
@@ -137,37 +138,80 @@ class Experimenter:
         data: ProcessedData,
         hypothesis: Hypothesis,
         work_dir: str,
-        agent_logger: Optional[AgentLogger] = None
+        agent_logger: Optional[AgentLogger] = None,
+        resume_from_agent: Optional[str] = None,
+        on_agent_start: Optional[Callable[[str], None]] = None,
+        on_agent_end: Optional[Callable[[str, Any], None]] = None,
     ) -> ChaosExperiment:
         # prepare a working directory
         experiment_dir = f"{work_dir}/experiment"
+        checkpoint_dir = f"{work_dir}/checkpoints"
         os.makedirs(experiment_dir, exist_ok=True)
 
-        #----------------------------------------------------------
-        # 1. plan a CE experiment with the steady state and faults
-        #----------------------------------------------------------
+        #-----------------------------------------
+        # Run agents using AgentRunner
+        #-----------------------------------------
+        runner = AgentRunner(
+            phase="experiment_plan",
+            checkpoint_dir=checkpoint_dir,
+            on_agent_start=on_agent_start,
+            on_agent_end=on_agent_end,
+        )
+
+        # Step 1: Plan the experiment
+        runner.add_step(AgentStep(
+            name="experiment_plan_agent",
+            run_fn=lambda: self._run_experiment_plan(data, hypothesis, experiment_dir, agent_logger),
+            output_key="experiment_plan",
+        ))
+
+        # Step 2: Convert to workflow
+        runner.add_step(AgentStep(
+            name="plan2workflow_converter",
+            run_fn=lambda experiment_plan: self._run_plan2workflow(experiment_plan, experiment_dir),
+            output_key="workflow_result",
+            depends_on=["experiment_plan"],
+        ))
+
+        # Run all agents (with resume support)
+        results = runner.run(resume_from_agent=resume_from_agent)
+
+        # Build chaos experiment from results
+        chaos_experiment = ChaosExperiment(
+            plan=results["experiment_plan"],
+            workflow_name=results["workflow_result"]["workflow_name"],
+            workflow=results["workflow_result"]["workflow"]
+        )
+        save_json(f"{experiment_dir}/experiment.json", chaos_experiment.dict())
+        return chaos_experiment
+
+    def _run_experiment_plan(
+        self,
+        data: ProcessedData,
+        hypothesis: Hypothesis,
+        experiment_dir: str,
+        agent_logger: Optional[AgentLogger]
+    ) -> dict:
+        """Run experiment plan agent."""
         experiment_plan = self.experiment_plan_agent.plan(
             data=data,
             hypothesis=hypothesis,
             agent_logger=agent_logger
         )
         save_json(f"{experiment_dir}/experiment_plan.json", experiment_plan.dict())
+        return experiment_plan.dict()
 
-        #-----------------------------------------------------------
-        # 2. convert the plan into the format of a specific CE tool 
-        #-----------------------------------------------------------
+    def _run_plan2workflow(
+        self,
+        experiment_plan: dict,
+        experiment_dir: str
+    ) -> dict:
+        """Convert plan to workflow."""
         workflow_name, workflow = self.plan2workflow_converter.convert(
-            experiment_plan.dict(),
+            experiment_plan,
             experiment_dir
         )
-
-        chaos_experiment = ChaosExperiment(
-            plan=experiment_plan.dict(),
-            workflow_name=workflow_name,
-            workflow=workflow
-        )
-        save_json(f"{experiment_dir}/experiment.json", chaos_experiment.dict())
-        return chaos_experiment
+        return {"workflow_name": workflow_name, "workflow": workflow}
 
     def replan_experiment(
         self,
@@ -215,11 +259,50 @@ class Experimenter:
         self,
         experiment: ChaosExperiment,
         kube_context: str,
+        work_dir: str,
         namespace: str = None,
-        check_interval: int = 5 # sec
+        check_interval: int = 5,  # sec
+        on_agent_start: Optional[Callable[[str], None]] = None,
+        on_agent_end: Optional[Callable[[str, Any], None]] = None,
+        resume_from_agent: Optional[str] = None,
     ) -> ChaosExperimentResult:
         if namespace is None:
             namespace = self.namespace
+
+        checkpoint_dir = f"{work_dir}/checkpoints"
+
+        #-----------------------------------------
+        # Run agents using AgentRunner
+        #-----------------------------------------
+        runner = AgentRunner(
+            phase="experiment",
+            checkpoint_dir=checkpoint_dir,
+            on_agent_start=on_agent_start,
+            on_agent_end=on_agent_end,
+        )
+
+        # Step 1: Run the experiment
+        runner.add_step(AgentStep(
+            name="experiment_runner",
+            run_fn=lambda: self._run_experiment_execution(
+                experiment, kube_context, namespace, check_interval
+            ),
+            output_key="experiment_result",
+        ))
+
+        # Run all agents (with resume support)
+        results = runner.run(resume_from_agent=resume_from_agent)
+
+        return results["experiment_result"]
+
+    def _run_experiment_execution(
+        self,
+        experiment: ChaosExperiment,
+        kube_context: str,
+        namespace: str,
+        check_interval: int
+    ) -> ChaosExperimentResult:
+        """Execute the chaos experiment workflow and collect results."""
         #-----------------------------------
         # run the valid chaos workflow
         #-----------------------------------

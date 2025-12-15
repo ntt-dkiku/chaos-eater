@@ -88,7 +88,8 @@ class JobInfo(BaseModel):
     error: Optional[str] = None
     result: Optional[Dict[str, Any]] = None
     work_dir: Optional[str] = None
-    current_phase: Optional[str] = None  # Track which phase the job is in for resume
+    current_phase: Optional[str] = None   # Track which phase the job is in for resume
+    current_agent: Optional[str] = None   # Track which agent within the phase for resume
 
 
 class JobResponse(BaseModel):
@@ -294,14 +295,52 @@ class JobManager:
         # Restore request
         request = ChaosEaterJobRequest(**request_data)
 
-        # Determine status and current_phase from checkpoint
-        checkpoint_path = f"{work_dir}/outputs/output.json"
+        # Determine status, current_phase, and current_agent from checkpoints
+        output_checkpoint_path = f"{work_dir}/outputs/output.json"
+        agent_checkpoint_path = f"{work_dir}/checkpoints/agent_checkpoint.json"
         current_phase = None
-        if os.path.exists(checkpoint_path):
-            status = JobStatus.PAUSED  # Has checkpoint, can resume
-            # Determine which phase to resume from based on run_time
+        current_agent = None
+
+        # First check agent-level checkpoint (more granular)
+        if os.path.exists(agent_checkpoint_path):
             try:
-                with open(checkpoint_path, 'r') as f:
+                with open(agent_checkpoint_path, 'r') as f:
+                    agent_cp = json.load(f)
+                # New checkpoint structure: global.current_phase and phases.<phase>.next_agent
+                global_state = agent_cp.get("global", {})
+                current_phase = global_state.get("current_phase")
+                # Get next_agent from the current phase's data
+                phase_data = agent_cp.get("phases", {}).get(current_phase, {})
+                current_agent = phase_data.get("next_agent")  # Next agent to run
+
+                # If next_agent is None and completed_agents exist, phase is complete
+                # Move to the next phase in the workflow
+                if current_agent is None and phase_data.get("completed_agents"):
+                    # Phase order for determining next phase
+                    phase_order = ["preprocess", "hypothesis", "experiment_plan", "experiment", "analysis", "improvement", "postprocess"]
+                    try:
+                        phase_idx = phase_order.index(current_phase)
+                        if phase_idx + 1 < len(phase_order):
+                            current_phase = phase_order[phase_idx + 1]
+                            current_agent = None  # Start from beginning of next phase
+                            logger.info(f"Job {job_id}: phase {phase_order[phase_idx]} complete, advancing to {current_phase}")
+                    except ValueError:
+                        pass  # Unknown phase, keep current
+
+                status = JobStatus.PAUSED
+                if current_agent:
+                    progress = f"Restored from disk (resume from {current_phase}/{current_agent})"
+                else:
+                    progress = f"Restored from disk (resume from {current_phase})"
+                logger.info(f"Job {job_id}: agent checkpoint found, resume from {current_phase}/{current_agent}")
+            except Exception as e:
+                logger.warning(f"Failed to parse agent checkpoint: {e}")
+
+        # Fall back to output.json if no agent checkpoint or parsing failed
+        if current_phase is None and os.path.exists(output_checkpoint_path):
+            status = JobStatus.PAUSED
+            try:
+                with open(output_checkpoint_path, 'r') as f:
                     checkpoint = json.load(f)
                 run_time = checkpoint.get("run_time", {})
                 # Determine the next phase to run based on what's completed
@@ -321,12 +360,12 @@ class JobManager:
                 else:
                     current_phase = "preprocess"
                 progress = f"Restored from disk (resume from {current_phase})"
-                logger.info(f"Job {job_id}: checkpoint found, resume from {current_phase}")
+                logger.info(f"Job {job_id}: output checkpoint found, resume from {current_phase}")
             except Exception as e:
                 logger.warning(f"Failed to parse checkpoint: {e}")
                 current_phase = "preprocess"
                 progress = "Restored from disk (checkpoint parse error, restart)"
-        else:
+        elif current_phase is None:
             status = JobStatus.PAUSED
             current_phase = "preprocess"
             progress = "Restored from disk (no checkpoint, restart)"
@@ -339,11 +378,12 @@ class JobManager:
                 updated_at=datetime.now(),
                 progress=progress,
                 work_dir=work_dir,
-                current_phase=current_phase
+                current_phase=current_phase,
+                current_agent=current_agent
             )
             self.requests[job_id] = request
 
-        logger.info(f"Restored job {job_id} from {work_dir}, current_phase={current_phase}")
+        logger.info(f"Restored job {job_id} from {work_dir}, current_phase={current_phase}, current_agent={current_agent}")
         return job_id
 
     async def restore_job_by_id(self, job_id: str) -> str:
@@ -434,6 +474,13 @@ class JobManager:
         async with self.lock:
             if job_id in self.jobs:
                 self.jobs[job_id].current_phase = phase
+                self.jobs[job_id].current_agent = None  # Reset agent when phase changes
+                self.jobs[job_id].updated_at = datetime.now()
+
+    async def update_job_agent(self, job_id: str, agent: str):
+        async with self.lock:
+            if job_id in self.jobs:
+                self.jobs[job_id].current_agent = agent
                 self.jobs[job_id].updated_at = datetime.now()
 
     async def pause_job(self, job_id: str) -> bool:
@@ -444,7 +491,12 @@ class JobManager:
             if job_id in self.jobs:
                 self.jobs[job_id].status = JobStatus.PAUSED
                 self.jobs[job_id].updated_at = datetime.now()
-                self.jobs[job_id].progress = f"Paused at {self.jobs[job_id].current_phase}"
+                phase = self.jobs[job_id].current_phase or "unknown"
+                agent = self.jobs[job_id].current_agent
+                if agent:
+                    self.jobs[job_id].progress = f"Paused at {phase}/{agent}"
+                else:
+                    self.jobs[job_id].progress = f"Paused at {phase}"
 
         # Then cancel the task
         callback = self.callbacks.get(job_id)
@@ -594,6 +646,25 @@ class CancellableAPICallback(APICallback):
         except Exception as e:
             logger.warning(f"Phase update failed: {e}")
 
+    def _update_agent(self, agent: str):
+        """Update current agent in job info for resume support"""
+        fut = asyncio.run_coroutine_threadsafe(
+            self.job_manager.update_job_agent(self.job_id, agent), self.loop
+        )
+        try:
+            fut.result(timeout=5)
+        except Exception as e:
+            logger.warning(f"Agent update failed: {e}")
+
+    def on_agent_start(self, agent_name: str):
+        """Called when an agent starts execution"""
+        self._update_agent(agent_name)
+        self._push(f"Agent started: {agent_name}")
+
+    def on_agent_end(self, agent_name: str, result: any = None):
+        """Called when an agent completes execution"""
+        self._push(f"Agent completed: {agent_name}")
+
     def on_stream(self, channel: str, event: dict) -> None:
         """Check cancellation on every stream event"""
         if self.cancelled:
@@ -641,6 +712,7 @@ async def run_chaos_eater_cycle(
     llm,
     ce_tool,
     resume_from: Optional[str] = None,
+    resume_from_agent: Optional[str] = None,
     checkpoint_path: Optional[str] = None
 ):
     try:
@@ -708,6 +780,7 @@ async def run_chaos_eater_cycle(
             max_retries=request.max_retries,
             callbacks=[callback],
             resume_from=resume_from,
+            resume_from_agent=resume_from_agent,
             checkpoint=checkpoint
         )
         result: ChaosEaterOutput = await runner_loop.run_in_executor(None, run_fn)
@@ -1012,19 +1085,47 @@ async def resume_job(
             detail=f"Original request not found for job {job_id}, cannot resume"
         )
 
-    # Check for checkpoint - if not found, restart from beginning
-    checkpoint_path = f"{job.work_dir}/outputs/output.json"
+    # Check for checkpoints - agent-level or phase-level
+    output_checkpoint_path = f"{job.work_dir}/outputs/output.json"
+    agent_checkpoint_path = f"{job.work_dir}/checkpoints/agent_checkpoint.json"
     resume_from = job.current_phase
-    if not os.path.exists(checkpoint_path):
-        logger.warning(f"Checkpoint not found at {checkpoint_path}, restarting from beginning")
+    resume_from_agent = job.current_agent  # Agent-level resume
+
+    # Determine which checkpoint to use
+    has_agent_checkpoint = os.path.exists(agent_checkpoint_path)
+    has_output_checkpoint = os.path.exists(output_checkpoint_path)
+
+    if has_agent_checkpoint and resume_from_agent:
+        # Agent-level checkpoint exists - use it for fine-grained resume
+        # output.json may or may not exist (e.g., paused mid-preprocess)
+        checkpoint_path = output_checkpoint_path if has_output_checkpoint else None
+        logger.info(f"Agent checkpoint found, resuming from {resume_from}/{resume_from_agent}")
+    elif has_agent_checkpoint and resume_from:
+        # Agent checkpoint exists but no specific agent (phase completed, next phase starting)
+        checkpoint_path = output_checkpoint_path if has_output_checkpoint else None
+        logger.info(f"Agent checkpoint found (phase level), resuming from {resume_from}")
+    elif has_output_checkpoint:
+        # Phase-level checkpoint only
+        checkpoint_path = output_checkpoint_path
+        logger.info(f"Output checkpoint found, resuming from {resume_from}")
+    elif resume_from:
+        # No checkpoint files but we know where to resume (from JobInfo)
+        checkpoint_path = None
+        logger.info(f"No checkpoint files, but resuming from {resume_from} based on job state")
+    else:
+        # No checkpoint found at all
+        logger.warning(f"No checkpoint found, restarting from beginning")
         checkpoint_path = None
         resume_from = None
+        resume_from_agent = None
 
     # Update job status
     async with job_mgr.lock:
         job_mgr.jobs[job_id].status = JobStatus.RUNNING
         job_mgr.jobs[job_id].updated_at = datetime.now()
-        if resume_from:
+        if resume_from_agent:
+            job_mgr.jobs[job_id].progress = f"Resuming from {resume_from}/{resume_from_agent}"
+        elif resume_from:
             job_mgr.jobs[job_id].progress = f"Resuming from {resume_from}"
         else:
             job_mgr.jobs[job_id].progress = "Restarting from beginning (no checkpoint)"
@@ -1046,15 +1147,17 @@ async def resume_job(
             llm=llm_inst,
             ce_tool=ce_tool_inst,
             resume_from=resume_from,
+            resume_from_agent=resume_from_agent,
             checkpoint_path=checkpoint_path
         )
     )
     job_mgr.tasks[job_id] = task
 
     return {
-        "message": f"Job {job_id} resuming from {resume_from or 'beginning'}",
+        "message": f"Job {job_id} resuming from {resume_from or 'beginning'}" + (f"/{resume_from_agent}" if resume_from_agent else ""),
         "status": JobStatus.RUNNING,
-        "resume_from": resume_from
+        "resume_from": resume_from,
+        "resume_from_agent": resume_from_agent
     }
 
 

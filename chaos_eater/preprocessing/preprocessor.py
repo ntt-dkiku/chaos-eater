@@ -1,7 +1,7 @@
 import os
 import subprocess
 import yaml
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Callable, Any
 
 from .llm_agents.k8s_summary_agent import K8sSummaryAgent
 from .llm_agents.k8s_weakness_summary_agent import K8sWeaknessSummaryAgent
@@ -11,6 +11,7 @@ from ..utils.wrappers import LLM, BaseModel
 from ..utils.schemas import File
 from ..utils.k8s import wait_for_resources_ready
 from ..utils.llms import LLMLog, AgentLogger
+from ..utils.agent_runner import AgentRunner, AgentStep
 from ..backend.streaming import FrontEndDisplayHandler
 from ..utils.functions import (
     write_file,
@@ -94,12 +95,130 @@ class PreProcessor:
         work_dir: str,
         project_name: str = "chaos-eater",
         is_new_deployment: bool = True,
-        agent_logger: AgentLogger = None
-    ) -> Tuple[List[LLMLog], ProcessedData]:
+        agent_logger: AgentLogger = None,
+        resume_from_agent: str = None,
+        on_agent_start: Callable[[str], None] = None,
+        on_agent_end: Callable[[str, Any], None] = None,
+    ) -> ProcessedData:
         preprocess_dir = f"{work_dir}/inputs"
-        #------------------------------------------------------
-        # save the input manifests, then deploy them if needed
-        #------------------------------------------------------
+        checkpoint_dir = f"{work_dir}/checkpoints"
+
+        # If resuming, try to load k8s_yamls and duplicated_input from checkpoint
+        if resume_from_agent:
+            checkpoint_path = f"{checkpoint_dir}/agent_checkpoint.json"
+            if os.path.exists(checkpoint_path):
+                import json
+                with open(checkpoint_path, 'r') as f:
+                    cp = json.load(f)
+                # New checkpoint structure: phases.<phase>.data
+                phase_data = cp.get("phases", {}).get("preprocess", {})
+                cp_data = phase_data.get("data", {})
+                # Restore k8s_yamls from checkpoint
+                if "k8s_yamls" in cp_data:
+                    k8s_yamls = [File(**f) for f in cp_data["k8s_yamls"]]
+                else:
+                    k8s_yamls = self._prepare_files_and_deploy(
+                        input, kube_context, work_dir, project_name,
+                        is_new_deployment=False, preprocess_dir=preprocess_dir
+                    )
+                # Restore duplicated_input
+                if "duplicated_input" in cp_data and cp_data["duplicated_input"] is not None:
+                    duplicated_input = ChaosEaterInput(**cp_data["duplicated_input"])
+                else:
+                    # Fallback to original input if not in checkpoint
+                    duplicated_input = input
+            else:
+                k8s_yamls = self._prepare_files_and_deploy(
+                    input, kube_context, work_dir, project_name,
+                    is_new_deployment=False, preprocess_dir=preprocess_dir
+                )
+                # Fallback to original input if checkpoint doesn't exist
+                duplicated_input = input
+        else:
+            # Normal flow: prepare files and deploy
+            k8s_yamls, duplicated_input = self._prepare_files_and_deploy(
+                input, kube_context, work_dir, project_name,
+                is_new_deployment=is_new_deployment, preprocess_dir=preprocess_dir,
+                return_input=True
+            )
+
+        #-----------------------------------------
+        # Run agents using AgentRunner
+        #-----------------------------------------
+        runner = AgentRunner(
+            phase="preprocess",
+            checkpoint_dir=checkpoint_dir,
+            on_agent_start=on_agent_start,
+            on_agent_end=on_agent_end,
+        )
+
+        # Step 1: Summarize each k8s manifest
+        runner.add_step(AgentStep(
+            name="k8s_summary_agent",
+            run_fn=lambda: self._run_k8s_summary(k8s_yamls, agent_logger),
+            output_key="k8s_summaries",
+        ))
+
+        # Step 2: Summarize weakness points
+        runner.add_step(AgentStep(
+            name="k8s_weakness_summary_agent",
+            run_fn=lambda: self._run_weakness_summary(k8s_yamls, agent_logger),
+            output_key="k8s_weakness_summary",
+        ))
+
+        # Step 3: Assume application type
+        runner.add_step(AgentStep(
+            name="k8s_app_assumption_agent",
+            run_fn=lambda k8s_summaries: self._run_app_assumption(
+                k8s_yamls, k8s_summaries, agent_logger
+            ),
+            output_key="k8s_application",
+            depends_on=["k8s_summaries"],
+        ))
+
+        # Step 4: Summarize CE instructions
+        runner.add_step(AgentStep(
+            name="ce_instruct_agent",
+            run_fn=lambda: self._run_ce_instruct(input.ce_instructions, agent_logger),
+            output_key="ce_instructions",
+        ))
+
+        # Run all agents (with resume support)
+        initial_data = {
+            "k8s_yamls": [y.dict() for y in k8s_yamls],
+            "duplicated_input": duplicated_input.dict() if duplicated_input else None,
+        }
+        results = runner.run(
+            resume_from_agent=resume_from_agent,
+            initial_data=initial_data,
+        )
+
+        #----------
+        # epilogue
+        #----------
+        processed_data = ProcessedData(
+            work_dir=preprocess_dir,
+            input=duplicated_input,
+            k8s_yamls=k8s_yamls,
+            k8s_summaries=results["k8s_summaries"],
+            k8s_weakness_summary=results["k8s_weakness_summary"],
+            k8s_app=results["k8s_application"],
+            ce_instructions=results["ce_instructions"]
+        )
+        save_json(f"{preprocess_dir}/processed_data.json", processed_data.dict())
+        return processed_data
+
+    def _prepare_files_and_deploy(
+        self,
+        input: ChaosEaterInput,
+        kube_context: str,
+        work_dir: str,
+        project_name: str,
+        is_new_deployment: bool,
+        preprocess_dir: str,
+        return_input: bool = False
+    ):
+        """Prepare files and deploy to cluster (non-agent work)"""
         # save the skaffold configuration file
         skaffold_path = f"{preprocess_dir}/{input.skaffold_yaml.fname}"
         os.makedirs(os.path.dirname(skaffold_path), exist_ok=True)
@@ -122,6 +241,7 @@ class PreProcessor:
             files, k8s_yamls = self.process_raw_yaml_paths(input, raw_yaml_paths, preprocess_dir)
         else:
             assert False, "No Kustomize or Raw YAML paths found in skaffold.yaml"
+
         duplicated_input = ChaosEaterInput(
             skaffold_yaml=new_skaffold_yaml,
             files=files,
@@ -140,7 +260,7 @@ class PreProcessor:
                     cwd=os.path.dirname(new_skaffold_yaml.path),
                     display_handler=FrontEndDisplayHandler(self.message_logger)
                 )
-            except subprocess.CalledProcessError as e:
+            except subprocess.CalledProcessError:
                 raise RuntimeError("K8s resource deployment failed.")
 
         # wait for all the resources to be deployed
@@ -152,74 +272,46 @@ class PreProcessor:
             display_handler=FrontEndDisplayHandler(self.message_logger)
         )
 
-        #-----------------------------
-        # summarize each k8s manifest
-        #-----------------------------
+        if return_input:
+            return k8s_yamls, duplicated_input
+        return k8s_yamls
+
+    def _run_k8s_summary(self, k8s_yamls: List[File], agent_logger: AgentLogger):
+        """Run k8s summary agent"""
         self.message_logger.write("#### Summary of each manifest:")
-        k8s_summaries = self.k8s_summary_agent.summarize_manifests(
+        return self.k8s_summary_agent.summarize_manifests(
             k8s_yamls=k8s_yamls,
             agent_logger=agent_logger
         )
 
-        #-----------------------------------------
-        # summarize weakness points in the system
-        #-----------------------------------------
-        self.message_logger.write("#### Resiliency issuses/weaknesses in the manifests:")
-        k8s_weakness_summary = self.k8s_weakness_summary_agent.summarize_weaknesses(
+    def _run_weakness_summary(self, k8s_yamls: List[File], agent_logger: AgentLogger):
+        """Run weakness summary agent"""
+        self.message_logger.write("#### Resiliency issues/weaknesses in the manifests:")
+        return self.k8s_weakness_summary_agent.summarize_weaknesses(
             k8s_yamls=k8s_yamls,
             agent_logger=agent_logger
         )
 
-        #---------------------------
-        # analyze file dependencies
-        #---------------------------
-        # pseudo_streaming_text("##### Dependencies between the manifests:")
-        # depdency_token_usage, k8s_dependencies = self.k8s_analysis_agent.analyze_manifest_dependencies(
-        #     k8s_yamls=k8s_yamls,
-        #     k8s_summaries=k8s_summaries,
-        #     kube_context=kube_context,
-        #     project_name=project_name,
-        #     work_dir=work_dir
-        # )
-        # log.append(depdency_token_usage)
-
-        #---------------------------------------------
-        # assume the application of the k8s manifests
-        #---------------------------------------------
+    def _run_app_assumption(self, k8s_yamls: List[File], k8s_summaries: List[str], agent_logger: AgentLogger):
+        """Run app assumption agent"""
         self.message_logger.write("#### Application of the manifests:")
-        k8s_application = self.k8s_app_assumption_agent.assume_app(
+        return self.k8s_app_assumption_agent.assume_app(
             k8s_yamls=k8s_yamls,
             k8s_summaries=k8s_summaries,
             agent_logger=agent_logger
         )
 
-        #----------------------------------------------
-        # summarize instructions for Chaos Engineering
-        #----------------------------------------------
+    def _run_ce_instruct(self, ce_instructions_input: Optional[str], agent_logger: AgentLogger):
+        """Run CE instruction agent"""
         self.message_logger.write("#### Summary of your instructions for Chaos Engineering:")
-        if input.ce_instructions is not None and input.ce_instructions != "":
-            ce_instructions = self.ce_instruct_agent.summarize_ce_instructions(
-                input.ce_instructions,
+        if ce_instructions_input is not None and ce_instructions_input != "":
+            return self.ce_instruct_agent.summarize_ce_instructions(
+                ce_instructions_input,
                 agent_logger=agent_logger
             )
         else:
-            ce_instructions = ""
             self.message_logger.write("No Chaos-Engineering instructions are provided.")
-
-        #----------
-        # epilogue
-        #----------
-        processed_data = ProcessedData(
-            work_dir=preprocess_dir,
-            input=duplicated_input,
-            k8s_yamls=k8s_yamls,
-            k8s_summaries=k8s_summaries,
-            k8s_weakness_summary=k8s_weakness_summary,
-            k8s_app=k8s_application,
-            ce_instructions=ce_instructions
-        )
-        save_json(f"{preprocess_dir}/processed_data.json", processed_data.dict())
-        return processed_data
+            return ""
     
     def get_kustomize_paths(self, skaffold_config: dict) -> List[str]:
         manifests = skaffold_config.get("manifests", {})

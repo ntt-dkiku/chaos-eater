@@ -1,5 +1,5 @@
 import os
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Callable, Any
 
 from .llm_agents.fault_scenario_agent import FaultScenarioAgent
 from .llm_agents.fault_refinement_agent import FaultRefiner, FaultScenario
@@ -7,7 +7,8 @@ from ..steady_states.steady_state_definer import SteadyStates
 from ...ce_tools.ce_tool_base import CEToolBase
 from ...preprocessing.preprocessor import ProcessedData
 from ...utils.llms import LLM, AgentLogger
-from ...utils.functions import MessageLogger
+from ...utils.agent_runner import AgentRunner, AgentStep
+from ...utils.functions import MessageLogger, save_json
 
 
 class FaultDefiner:
@@ -39,8 +40,12 @@ class FaultDefiner:
         data: ProcessedData,
         steady_states: SteadyStates,
         work_dir: str,
+        checkpoint_dir: str,
         max_retries: int = 3,
-        agent_logger: Optional[AgentLogger] = None
+        agent_logger: Optional[AgentLogger] = None,
+        resume_from_agent: Optional[str] = None,
+        on_agent_start: Optional[Callable[[str], None]] = None,
+        on_agent_end: Optional[Callable[[str, Any], None]] = None,
     ) -> FaultScenario:
         #-------------------
         # 0. initialization
@@ -49,19 +54,65 @@ class FaultDefiner:
         fault_dir = f"{work_dir}/faults"
         os.makedirs(fault_dir, exist_ok=True)
 
-        #----------------------------
-        # 1. assume a fault scenario
-        #----------------------------
+        #-----------------------------------------
+        # Run agents using AgentRunner
+        #-----------------------------------------
+        runner = AgentRunner(
+            phase="fault_definer",
+            checkpoint_dir=checkpoint_dir,
+            on_agent_start=on_agent_start,
+            on_agent_end=on_agent_end,
+        )
+
+        # Step 1: Assume fault scenario
+        runner.add_step(AgentStep(
+            name="fault_scenario_agent",
+            run_fn=lambda: self._run_fault_scenario(
+                data, steady_states, agent_logger
+            ),
+            output_key="fault_scenario",
+        ))
+
+        # Step 2: Refine faults
+        runner.add_step(AgentStep(
+            name="fault_refiner",
+            run_fn=lambda fault_scenario: self._run_fault_refiner(
+                data, steady_states, fault_scenario, fault_dir, max_retries, agent_logger
+            ),
+            output_key="faults",
+            depends_on=["fault_scenario"],
+        ))
+
+        # Run all agents (with resume support)
+        results = runner.run(resume_from_agent=resume_from_agent)
+
+        return results["faults"]
+
+    def _run_fault_scenario(
+        self,
+        data: ProcessedData,
+        steady_states: SteadyStates,
+        agent_logger: Optional[AgentLogger]
+    ) -> dict:
+        """Run fault scenario agent."""
         fault_scenario = self.fault_scenario_agent.assume_scenario(
             user_input=data.to_k8s_overview_str(),
             ce_instructions=data.ce_instructions,
             steady_states=steady_states,
             agent_logger=agent_logger
         )
+        return fault_scenario
 
-        #---------------------------------------------
-        # refine the faults: determine the parameters
-        #---------------------------------------------
+    def _run_fault_refiner(
+        self,
+        data: ProcessedData,
+        steady_states: SteadyStates,
+        fault_scenario,
+        fault_dir: str,
+        max_retries: int,
+        agent_logger: Optional[AgentLogger]
+    ) -> FaultScenario:
+        """Run fault refiner agent."""
         faults = self.refiner.refine_faults(
             user_input=data.to_k8s_overview_str(),
             ce_instructions=data.ce_instructions,

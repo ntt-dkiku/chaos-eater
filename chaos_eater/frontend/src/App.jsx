@@ -570,9 +570,12 @@ export default function ChaosEaterApp() {
       }
 
       const data = await response.json();
+      const resumePoint = data.resume_from_agent
+        ? `${data.resume_from}/${data.resume_from_agent}`
+        : (data.resume_from || 'beginning');
       setNotification({
         type: 'success',
-        message: `Resuming from phase: ${data.resume_from || 'unknown'}`
+        message: `Resuming from: ${resumePoint}`
       });
 
       // Reconnect WebSocket for streaming
@@ -2245,7 +2248,13 @@ export default function ChaosEaterApp() {
                             const restored = await restoreResp.json();
                             restoredJobId = restored.job_id;
                             setRunState('paused');  // Job is paused and can be resumed
-                            setNotification({ type: 'success', message: `Restored: ${loaded.title} (job recovered)` });
+                            const resumePoint = restored.current_agent
+                              ? `${restored.current_phase}/${restored.current_agent}`
+                              : restored.current_phase;
+                            setNotification({
+                              type: 'success',
+                              message: `Restored: ${loaded.title} (resume from ${resumePoint || 'beginning'})`
+                            });
                           } else {
                             console.warn('Failed to restore job from disk');
                             restoredJobId = null;
@@ -2256,12 +2265,22 @@ export default function ChaosEaterApp() {
                           const job = await jobResp.json();
                           if (job.status === 'paused') {
                             setRunState('paused');
+                            const resumePoint = job.current_agent
+                              ? `${job.current_phase}/${job.current_agent}`
+                              : job.current_phase;
+                            setNotification({
+                              type: 'success',
+                              message: `Restored: ${loaded.title} (paused at ${resumePoint || 'unknown'})`
+                            });
                           } else if (job.status === 'completed') {
                             setRunState('completed');
+                            setNotification({ type: 'success', message: `Restored: ${loaded.title} (completed)` });
                           } else if (job.status === 'running') {
                             setRunState('running');
+                            setNotification({ type: 'success', message: `Restored: ${loaded.title} (running)` });
+                          } else {
+                            setNotification({ type: 'success', message: `Restored: ${loaded.title}` });
                           }
-                          setNotification({ type: 'success', message: `Restored: ${loaded.title}` });
                         }
                       } catch (err) {
                         console.error('Job restore check failed:', err);
