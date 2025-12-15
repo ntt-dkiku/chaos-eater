@@ -1,5 +1,5 @@
 from typing import Optional, Literal, List, Dict
-from langchain_core.pydantic_v1 import BaseModel, Field
+from pydantic.v1 import BaseModel, Field
 
 
 # ref: https://chaos-mesh.org/docs/simulate-http-chaos-on-kubernetes/ 

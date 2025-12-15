@@ -1,6 +1,6 @@
 from typing import List
 
-from langchain_core.pydantic_v1 import BaseModel
+from pydantic.v1 import BaseModel
 
 from ..ce_tool_base import CEToolBase
 from .faults.pod_chaos import PodChaos

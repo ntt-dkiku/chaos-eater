@@ -1,5 +1,5 @@
 from typing import List, Optional, Literal
-from langchain_core.pydantic_v1 import BaseModel, Field
+from pydantic.v1 import BaseModel, Field
 from .selectors import Selectors
 
 # TODO: clockIds (https://man7.org/linux/man-pages/man2/clock_gettime.2.html)
