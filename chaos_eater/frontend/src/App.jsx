@@ -488,7 +488,7 @@ export default function ChaosEaterApp() {
   const handleStop = async () => {
     setRunState('paused');
     setIsLoading(false);
-    
+
     // Close WebSocket
     if (wsRef.current) {
       try {
@@ -498,111 +498,111 @@ export default function ChaosEaterApp() {
         console.error('Failed to close WebSocket:', e);
       }
     }
-    
+
     if (!jobId) {
       setNotification({ type: 'info', message: 'No active job' });
       return;
     }
-    
-    // Send cancellation request
+
+    // Send pause request (instead of cancel/delete)
     try {
-      const response = await fetch(`${API_BASE}/jobs/${jobId}`, {
-        method: 'DELETE',
+      const response = await fetch(`${API_BASE}/jobs/${jobId}/pause`, {
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         }
       });
-      
+
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        
+
         if (response.status === 404) {
           setNotification({ type: 'warning', message: 'Job not found' });
           return;
         } else if (response.status === 400) {
-          setNotification({ 
-            type: 'warning', 
-            message: errorData.detail || 'Job may not be running or already finished' 
+          setNotification({
+            type: 'warning',
+            message: errorData.detail || 'Job may not be running or already finished'
           });
           return;
         } else {
-          throw new Error(`Cancel failed: ${response.statusText}`);
+          throw new Error(`Pause failed: ${response.statusText}`);
         }
       }
-      
-      // Poll for status confirmation (max 10 seconds)
-      let attempts = 0;
-      const maxAttempts = 10;
-      
-      const checkInterval = setInterval(async () => {
-        attempts++;
-        
-        try {
-          const statusResponse = await fetch(`${API_BASE}/jobs/${jobId}`);
-          if (statusResponse.ok) {
-            const job = await statusResponse.json();
-            
-            if (job.status === 'cancelled') {
-              clearInterval(checkInterval);
-              setNotification({ 
-                type: 'success', 
-                message: 'Job stopped successfully' 
-              });
-              return;
-            }
-            
-            if (job.status === 'failed') {
-              clearInterval(checkInterval);
-              setNotification({ 
-                type: 'info', 
-                message: 'Job stopped with error' 
-              });
-              return;
-            }
-            
-            if (job.status === 'completed') {
-              clearInterval(checkInterval);
-              setNotification({ 
-                type: 'info', 
-                message: 'Job already completed' 
-              });
-              return;
-            }
-          }
-        } catch (e) {
-          console.error('Status check failed:', e);
-        }
-        
-        if (attempts >= maxAttempts) {
-          clearInterval(checkInterval);
-          setNotification({ 
-            type: 'warning', 
-            message: 'Stop request sent, but job status unclear. Please refresh to check status.' 
-          });
-        }
-      }, 1000);
-      
+
+      const data = await response.json();
+      setNotification({
+        type: 'success',
+        message: `Job paused at phase: ${data.current_phase || 'unknown'}`
+      });
+
     } catch (error) {
-      console.error('Stop failed:', error);
-      
-      // Fallback: try fire-and-forget request
-      try {
-        fetch(`${API_BASE}/jobs/${jobId}`, {
-          method: 'DELETE',
-          keepalive: true
-        }).catch(() => {});
-      } catch {}
-      
-      setNotification({ 
-        type: 'error', 
-        message: 'Failed to stop job. Backend may still be processing.' 
+      console.error('Pause failed:', error);
+      setNotification({
+        type: 'error',
+        message: 'Failed to pause job. Backend may still be processing.'
       });
     }
   };
 
-  // resume 
+  // resume from paused state
   const handleResume = async () => {
-    await handleSubmit();
+    if (!jobId) {
+      setNotification({ type: 'info', message: 'No job to resume' });
+      return;
+    }
+
+    setIsLoading(true);
+    setRunState('running');
+
+    try {
+      const response = await fetch(`${API_BASE}/jobs/${jobId}/resume`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(formData.apiKey ? { 'x-api-key': formData.apiKey } : {}),
+        }
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || 'Failed to resume job');
+      }
+
+      const data = await response.json();
+      setNotification({
+        type: 'success',
+        message: `Resuming from phase: ${data.resume_from || 'unknown'}`
+      });
+
+      // Reconnect WebSocket for streaming
+      const socket = new WebSocket(wsUrl(`/jobs/${jobId}/stream`));
+      wsRef.current = socket;
+
+      socket.onopen = () => {
+        setMessages((m) => [...m, { type: 'status', role: 'assistant', content: 'Resumed. Streaming restarted…' }]);
+      };
+      socket.onmessage = (event) => {
+        handleWsPayload(event.data);
+      };
+      socket.onerror = () => {
+        setMessages((m) => [...m, { type: 'status', role: 'assistant', content: 'WebSocket error' }]);
+      };
+      socket.onclose = () => {
+        setMessages((m) => [...m, { type: 'status', role: 'assistant', content: 'Stream closed' }]);
+        setIsLoading(false);
+        setRunState((prev) => (prev === 'paused' ? 'paused' : 'completed'));
+      };
+
+    } catch (error) {
+      console.error('Resume failed:', error);
+      setRunState('paused');
+      setIsLoading(false);
+      setNotification({
+        type: 'error',
+        message: error.message || 'Failed to resume job'
+      });
+    }
   };
 
   // Refresh session: start a new cycle
@@ -859,6 +859,7 @@ export default function ChaosEaterApp() {
             `Project ${new Date().toLocaleString()}`, // title is up to you
             {
               jobId: data.job_id,
+              jobWorkDir: data.work_dir,  // Save work_dir for job restoration
               messages,
               panelVisible: true,
               backendProjectPath,
@@ -2215,8 +2216,62 @@ export default function ChaosEaterApp() {
                     setUploadedFiles((loaded.uploadedFilesMeta || []).map(m => ({ name: m.name, size: m.size, content: '' })));
                     setFormData(prev => ({ ...prev, ...(loaded.formData || {}), apiKey: '' }));
                     setCurrentSnapshotId(loaded.id);
-                    setJobId(loaded.jobId || null);
-                    setNotification({ type: 'success', message: `Restored: ${loaded.title}` });
+
+                    // Try to restore job if it exists in snapshot but not in backend
+                    let restoredJobId = loaded.jobId || null;
+                    if (loaded.jobId) {
+                      try {
+                        // Check if job exists in backend
+                        const jobResp = await fetch(`${API_BASE}/jobs/${loaded.jobId}`);
+                        if (!jobResp.ok) {
+                          // Job not found, try to restore from disk
+                          console.log(`Job ${loaded.jobId} not found, attempting restore`);
+                          let restoreResp;
+                          if (loaded.jobWorkDir) {
+                            // Use work_dir if available
+                            restoreResp = await fetch(`${API_BASE}/jobs/restore`, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ work_dir: loaded.jobWorkDir })
+                            });
+                          } else {
+                            // Scan sandbox by job_id
+                            restoreResp = await fetch(`${API_BASE}/jobs/${loaded.jobId}/restore`, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' }
+                            });
+                          }
+                          if (restoreResp.ok) {
+                            const restored = await restoreResp.json();
+                            restoredJobId = restored.job_id;
+                            setRunState('paused');  // Job is paused and can be resumed
+                            setNotification({ type: 'success', message: `Restored: ${loaded.title} (job recovered)` });
+                          } else {
+                            console.warn('Failed to restore job from disk');
+                            restoredJobId = null;
+                            setNotification({ type: 'warning', message: `Restored: ${loaded.title} (job not recoverable)` });
+                          }
+                        } else {
+                          // Job exists, check its status
+                          const job = await jobResp.json();
+                          if (job.status === 'paused') {
+                            setRunState('paused');
+                          } else if (job.status === 'completed') {
+                            setRunState('completed');
+                          } else if (job.status === 'running') {
+                            setRunState('running');
+                          }
+                          setNotification({ type: 'success', message: `Restored: ${loaded.title}` });
+                        }
+                      } catch (err) {
+                        console.error('Job restore check failed:', err);
+                        restoredJobId = null;
+                        setNotification({ type: 'warning', message: `Restored: ${loaded.title} (job check failed)` });
+                      }
+                    } else {
+                      setNotification({ type: 'success', message: `Restored: ${loaded.title}` });
+                    }
+                    setJobId(restoredJobId);
                   }}
                   style={{
                     width: '100%',

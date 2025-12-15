@@ -76,95 +76,161 @@ class ChaosEater:
         is_new_deployment: bool = True,
         max_num_steadystates: int = 2,
         max_retries: int = 3,
-        callbacks: List[ChaosEaterCallback] = []
+        callbacks: List[ChaosEaterCallback] = [],
+        resume_from: str = None,
+        checkpoint: 'ChaosEaterOutput' = None
     ) -> ChaosEaterOutput:
+        # Define phase order for resume logic
+        PHASE_ORDER = ["preprocess", "hypothesis", "experiment_plan", "experiment", "analysis", "improvement", "postprocess"]
+
+        def should_skip_phase(phase: str) -> bool:
+            """Check if a phase should be skipped based on resume_from"""
+            if not resume_from:
+                return False
+            try:
+                resume_idx = PHASE_ORDER.index(resume_from)
+                phase_idx = PHASE_ORDER.index(phase)
+                return phase_idx < resume_idx
+            except ValueError:
+                return False
+
         #----------------
         # initialization
         #----------------
-        self.message_logger.subheader("Phase 0: Preprocessing", divider="gray")
-        # clean the cluster
-        self.message_logger.write(f"##### Cleaning the cluster: `{kube_context}`")
-        remove_all_resources_by_namespace(
-            kube_context,
-            self.namespace,
-            display_handler=FrontEndDisplayHandler(self.message_logger)
-        )
-        if clean_cluster_before_run:
-            remove_all_resources_by_labels(
-                kube_context,
-                f"project={project_name}",
-                display_handler=FrontEndDisplayHandler(self.message_logger)
-            )
         # prepare a working directory
         if work_dir is None:
             work_dir = f"{self.root_dir}/cycle_{get_timestamp()}"
         os.makedirs(work_dir, exist_ok=True)
-        # initialization
         output_dir = f"{work_dir}/outputs"
         os.makedirs(output_dir, exist_ok=True)
-        ce_output = ChaosEaterOutput(work_dir=work_dir)
+
+        # Initialize or restore from checkpoint
+        if checkpoint:
+            ce_output = checkpoint
+            self.message_logger.write(f"##### Resuming from checkpoint at phase: {resume_from}")
+        else:
+            ce_output = ChaosEaterOutput(work_dir=work_dir)
+
         agent_logger = AgentLogger(
             llm=self.llm,
             log_path=f"{work_dir}/logs/agent_log.jsonl",
         )
         entire_start_time = time.time()
 
+        # Restore intermediate data from checkpoint if available
+        data = ce_output.ce_cycle.processed_data if checkpoint else None
+        hypothesis = ce_output.ce_cycle.hypothesis if checkpoint else None
+        experiment = ce_output.ce_cycle.experiment if checkpoint else None
+
         #-----------------------------------------------------------------
         # 0. preprocessing (input deployment & validation and reflection)
         #-----------------------------------------------------------------
-        start_time = time.time()
-        data = self.preprocessor.process(
-            input=input,
-            kube_context=kube_context,
-            work_dir=work_dir,
-            project_name=project_name,
-            is_new_deployment=is_new_deployment,
-            agent_logger=agent_logger
-        )
-        ce_output.run_time["preprocess"] = time.time() - start_time
-        ce_output.ce_cycle.processed_data = data
-        save_json(f"{output_dir}/output.json", ce_output.dict()) # save intermediate results
+        if not should_skip_phase("preprocess"):
+            self.message_logger.subheader("Phase 0: Preprocessing", divider="gray")
+            # Trigger callback
+            for cb in callbacks:
+                if hasattr(cb, 'on_preprocess_start'):
+                    cb.on_preprocess_start()
+
+            # clean the cluster
+            self.message_logger.write(f"##### Cleaning the cluster: `{kube_context}`")
+            remove_all_resources_by_namespace(
+                kube_context,
+                self.namespace,
+                display_handler=FrontEndDisplayHandler(self.message_logger)
+            )
+            if clean_cluster_before_run:
+                remove_all_resources_by_labels(
+                    kube_context,
+                    f"project={project_name}",
+                    display_handler=FrontEndDisplayHandler(self.message_logger)
+                )
+
+            start_time = time.time()
+            data = self.preprocessor.process(
+                input=input,
+                kube_context=kube_context,
+                work_dir=work_dir,
+                project_name=project_name,
+                is_new_deployment=is_new_deployment,
+                agent_logger=agent_logger
+            )
+            ce_output.run_time["preprocess"] = time.time() - start_time
+            ce_output.ce_cycle.processed_data = data
+            save_json(f"{output_dir}/output.json", ce_output.dict())
+
+            for cb in callbacks:
+                if hasattr(cb, 'on_preprocess_end'):
+                    cb.on_preprocess_end(data)
+        else:
+            self.message_logger.write(f"##### Skipping Phase 0: Preprocessing (resuming)")
 
         #---------------
         # 1. hypothesis
         #---------------
-        self.message_logger.subheader("Phase 1: Hypothesis", divider="gray")
-        start_time = time.time()
-        hypothesis = self.hypothesizer.hypothesize(
-            data=data,
-            kube_context=kube_context,
-            work_dir=work_dir,
-            max_num_steady_states=max_num_steadystates,
-            max_retries=max_retries,
-            agent_logger=agent_logger
-        )
-        ce_output.run_time["hypothesis"] = time.time() - start_time
-        ce_output.ce_cycle.hypothesis = hypothesis
-        save_json(f"{output_dir}/output.json", ce_output.dict()) # save intermediate results
+        if not should_skip_phase("hypothesis"):
+            self.message_logger.subheader("Phase 1: Hypothesis", divider="gray")
+            for cb in callbacks:
+                if hasattr(cb, 'on_hypothesis_start'):
+                    cb.on_hypothesis_start()
+
+            start_time = time.time()
+            hypothesis = self.hypothesizer.hypothesize(
+                data=data,
+                kube_context=kube_context,
+                work_dir=work_dir,
+                max_num_steady_states=max_num_steadystates,
+                max_retries=max_retries,
+                agent_logger=agent_logger
+            )
+            ce_output.run_time["hypothesis"] = time.time() - start_time
+            ce_output.ce_cycle.hypothesis = hypothesis
+            save_json(f"{output_dir}/output.json", ce_output.dict())
+
+            for cb in callbacks:
+                if hasattr(cb, 'on_hypothesis_end'):
+                    cb.on_hypothesis_end(hypothesis)
+        else:
+            self.message_logger.write(f"##### Skipping Phase 1: Hypothesis (resuming)")
 
         #---------------------
         # 2. Chaos Experiment
         #---------------------
-        self.message_logger.subheader("Phase 2: Chaos Experiment", divider="gray")
-        # 2.1. plan a chaos experiment
-        start_time = time.time()
-        experiment = self.experimenter.plan_experiment(
-            data=data,
-            hypothesis=hypothesis,
-            work_dir=work_dir,
-            agent_logger=agent_logger
-        )
-        ce_output.run_time["experiment_plan"] = time.time() - start_time
-        ce_output.ce_cycle.experiment=experiment
-        save_json(f"{output_dir}/output.json", ce_output.dict())
+        if not should_skip_phase("experiment_plan"):
+            self.message_logger.subheader("Phase 2: Chaos Experiment", divider="gray")
+            for cb in callbacks:
+                if hasattr(cb, 'on_experiment_plan_start'):
+                    cb.on_experiment_plan_start()
+
+            start_time = time.time()
+            experiment = self.experimenter.plan_experiment(
+                data=data,
+                hypothesis=hypothesis,
+                work_dir=work_dir,
+                agent_logger=agent_logger
+            )
+            ce_output.run_time["experiment_plan"] = time.time() - start_time
+            ce_output.ce_cycle.experiment = experiment
+            save_json(f"{output_dir}/output.json", ce_output.dict())
+
+            for cb in callbacks:
+                if hasattr(cb, 'on_experiment_plan_end'):
+                    cb.on_experiment_plan_end(experiment)
+        else:
+            self.message_logger.write(f"##### Skipping Phase 2: Experiment Planning (resuming)")
 
         #------------------
         # improvement loop
         #------------------
-        ce_output.run_time["analysis"] = []
-        ce_output.run_time["improvement"] = []
-        ce_output.run_time["experiment_execution"] = []
-        mod_k8s_count = 0
+        # Initialize or restore loop state
+        if not ce_output.run_time.get("analysis"):
+            ce_output.run_time["analysis"] = []
+        if not ce_output.run_time.get("improvement"):
+            ce_output.run_time["improvement"] = []
+        if not ce_output.run_time.get("experiment_execution"):
+            ce_output.run_time["experiment_execution"] = []
+
+        mod_k8s_count = len(ce_output.ce_cycle.reconfig_history) if checkpoint else 0
         mod_dir = data.work_dir
         k8s_yamls = data.k8s_yamls
         k8s_yamls_history = [k8s_yamls]

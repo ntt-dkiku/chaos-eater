@@ -34,6 +34,7 @@ logger = logging.getLogger("chaos_eater_api")
 class JobStatus(str, Enum):
     PENDING   = "pending"
     RUNNING   = "running"
+    PAUSED    = "paused"
     COMPLETED = "completed"
     FAILED    = "failed"
     CANCELLED = "cancelled"
@@ -87,12 +88,14 @@ class JobInfo(BaseModel):
     error: Optional[str] = None
     result: Optional[Dict[str, Any]] = None
     work_dir: Optional[str] = None
+    current_phase: Optional[str] = None  # Track which phase the job is in for resume
 
 
 class JobResponse(BaseModel):
     job_id: str
     status: JobStatus
     message: str
+    work_dir: Optional[str] = None
 
 
 # ---------------------------------------------------------------------
@@ -235,10 +238,12 @@ class JobManager:
         self.chaos_eaters: Dict[str, ChaosEater] = {}
         self.events: Dict[str, List[dict]] = {}
         self.callbacks: Dict[str, CancellableAPICallback] = {}  # Keep reference to callbacks
+        self.requests: Dict[str, ChaosEaterJobRequest] = {}  # Store requests for resume
         self.lock = asyncio.Lock()
 
-    async def create_job(self, _: ChaosEaterJobRequest) -> str:
+    async def create_job(self, request: ChaosEaterJobRequest) -> str:
         job_id = str(uuid.uuid4())
+        work_dir = f"sandbox/cycle_{get_timestamp()}"
         async with self.lock:
             self.jobs[job_id] = JobInfo(
                 job_id=job_id,
@@ -246,9 +251,129 @@ class JobManager:
                 created_at=datetime.now(),
                 updated_at=datetime.now(),
                 progress="Job created",
-                work_dir=f"sandbox/cycle_{get_timestamp()}"
+                work_dir=work_dir
             )
+            self.requests[job_id] = request  # Store for resume
+        # Persist job info to disk for recovery after restart
+        self._save_job_to_disk(job_id, work_dir, request)
         return job_id
+
+    def _save_job_to_disk(self, job_id: str, work_dir: str, request: ChaosEaterJobRequest):
+        """Save job info to work_dir for persistence across server restarts"""
+        import json
+        os.makedirs(work_dir, exist_ok=True)
+        job_info_path = f"{work_dir}/job_info.json"
+        job_data = {
+            "job_id": job_id,
+            "request": request.model_dump(),
+            "created_at": datetime.now().isoformat()
+        }
+        with open(job_info_path, 'w') as f:
+            json.dump(job_data, f, indent=2)
+        logger.info(f"Saved job info to {job_info_path}")
+
+    async def restore_job_from_disk(self, work_dir: str) -> str:
+        """Restore job from work_dir after server restart"""
+        import json
+        job_info_path = f"{work_dir}/job_info.json"
+        if not os.path.exists(job_info_path):
+            raise FileNotFoundError(f"Job info not found at {job_info_path}")
+
+        with open(job_info_path, 'r') as f:
+            job_data = json.load(f)
+
+        job_id = job_data["job_id"]
+        request_data = job_data["request"]
+        created_at = datetime.fromisoformat(job_data["created_at"])
+
+        # Check if already restored
+        if job_id in self.jobs:
+            logger.info(f"Job {job_id} already in memory")
+            return job_id
+
+        # Restore request
+        request = ChaosEaterJobRequest(**request_data)
+
+        # Determine status and current_phase from checkpoint
+        checkpoint_path = f"{work_dir}/outputs/output.json"
+        current_phase = None
+        if os.path.exists(checkpoint_path):
+            status = JobStatus.PAUSED  # Has checkpoint, can resume
+            # Determine which phase to resume from based on run_time
+            try:
+                with open(checkpoint_path, 'r') as f:
+                    checkpoint = json.load(f)
+                run_time = checkpoint.get("run_time", {})
+                # Determine the next phase to run based on what's completed
+                # Phase order: preprocess -> hypothesis -> experiment_plan -> experiment -> analysis -> improvement
+                if "improvement" in run_time and run_time["improvement"]:
+                    current_phase = "experiment"  # Loop back to experiment
+                elif "analysis" in run_time and run_time["analysis"]:
+                    current_phase = "improvement"
+                elif "experiment_execution" in run_time and run_time["experiment_execution"]:
+                    current_phase = "analysis"
+                elif "experiment_plan" in run_time:
+                    current_phase = "experiment"
+                elif "hypothesis" in run_time:
+                    current_phase = "experiment_plan"
+                elif "preprocess" in run_time:
+                    current_phase = "hypothesis"
+                else:
+                    current_phase = "preprocess"
+                progress = f"Restored from disk (resume from {current_phase})"
+                logger.info(f"Job {job_id}: checkpoint found, resume from {current_phase}")
+            except Exception as e:
+                logger.warning(f"Failed to parse checkpoint: {e}")
+                current_phase = "preprocess"
+                progress = "Restored from disk (checkpoint parse error, restart)"
+        else:
+            status = JobStatus.PAUSED
+            current_phase = "preprocess"
+            progress = "Restored from disk (no checkpoint, restart)"
+
+        async with self.lock:
+            self.jobs[job_id] = JobInfo(
+                job_id=job_id,
+                status=status,
+                created_at=created_at,
+                updated_at=datetime.now(),
+                progress=progress,
+                work_dir=work_dir,
+                current_phase=current_phase
+            )
+            self.requests[job_id] = request
+
+        logger.info(f"Restored job {job_id} from {work_dir}, current_phase={current_phase}")
+        return job_id
+
+    async def restore_job_by_id(self, job_id: str) -> str:
+        """Find and restore a job by its ID by scanning sandbox directories"""
+        import json
+        import glob
+
+        # Check if already in memory
+        if job_id in self.jobs:
+            logger.info(f"Job {job_id} already in memory")
+            return job_id
+
+        # Scan sandbox directories for job_info.json with matching job_id
+        sandbox_path = "sandbox"
+        if not os.path.exists(sandbox_path):
+            raise FileNotFoundError(f"Sandbox directory not found")
+
+        for job_info_path in glob.glob(f"{sandbox_path}/*/job_info.json"):
+            try:
+                with open(job_info_path, 'r') as f:
+                    job_data = json.load(f)
+                if job_data.get("job_id") == job_id:
+                    work_dir = os.path.dirname(job_info_path)
+                    logger.info(f"Found job {job_id} at {work_dir}")
+                    return await self.restore_job_from_disk(work_dir)
+            except Exception as e:
+                logger.warning(f"Failed to read {job_info_path}: {e}")
+                continue
+
+        raise FileNotFoundError(f"Job {job_id} not found in sandbox directories")
 
     async def add_event(self, job_id: str, event: dict) -> int:
         async with self.lock:
@@ -304,6 +429,36 @@ class JobManager:
             if job_id in self.jobs:
                 self.jobs[job_id].progress = progress
                 self.jobs[job_id].updated_at = datetime.now()
+
+    async def update_job_phase(self, job_id: str, phase: str):
+        async with self.lock:
+            if job_id in self.jobs:
+                self.jobs[job_id].current_phase = phase
+                self.jobs[job_id].updated_at = datetime.now()
+
+    async def pause_job(self, job_id: str) -> bool:
+        """Pause a running job for later resume"""
+        # Set PAUSED status FIRST before cancelling task
+        # This ensures CancelledError handler sees PAUSED status
+        async with self.lock:
+            if job_id in self.jobs:
+                self.jobs[job_id].status = JobStatus.PAUSED
+                self.jobs[job_id].updated_at = datetime.now()
+                self.jobs[job_id].progress = f"Paused at {self.jobs[job_id].current_phase}"
+
+        # Then cancel the task
+        callback = self.callbacks.get(job_id)
+        if callback:
+            callback.cancelled = True
+
+        task = self.tasks.get(job_id)
+        if task and not task.done():
+            task.cancel()
+
+        if job_id in self.callbacks:
+            del self.callbacks[job_id]
+
+        return True
 
     async def cleanup_old_jobs(self, hours: int = 24):
         cutoff = datetime.now() - timedelta(hours=hours)
@@ -421,7 +576,7 @@ class APICallback:
 
 class CancellableAPICallback(APICallback):
     def __init__(
-        self, 
+        self,
         job_manager: JobManager,
         job_id: str,
         loop: asyncio.AbstractEventLoop
@@ -429,11 +584,50 @@ class CancellableAPICallback(APICallback):
         super().__init__(job_manager, job_id, loop)
         self.cancelled = False
 
+    def _update_phase(self, phase: str):
+        """Update current phase in job info for resume support"""
+        fut = asyncio.run_coroutine_threadsafe(
+            self.job_manager.update_job_phase(self.job_id, phase), self.loop
+        )
+        try:
+            fut.result(timeout=5)
+        except Exception as e:
+            logger.warning(f"Phase update failed: {e}")
+
     def on_stream(self, channel: str, event: dict) -> None:
         """Check cancellation on every stream event"""
         if self.cancelled:
             raise asyncio.CancelledError(f"Job {self.job_id} cancelled")
         super().on_stream(channel, event)
+
+    # Override phase start callbacks to track current phase
+    def on_preprocess_start(self):
+        self._update_phase("preprocess")
+        super().on_preprocess_start()
+
+    def on_hypothesis_start(self):
+        self._update_phase("hypothesis")
+        super().on_hypothesis_start()
+
+    def on_experiment_plan_start(self):
+        self._update_phase("experiment_plan")
+        super().on_experiment_plan_start()
+
+    def on_experiment_start(self):
+        self._update_phase("experiment")
+        super().on_experiment_start()
+
+    def on_analysis_start(self):
+        self._update_phase("analysis")
+        super().on_analysis_start()
+
+    def on_improvement_start(self):
+        self._update_phase("improvement")
+        super().on_improvement_start()
+
+    def on_postprocess_start(self):
+        self._update_phase("postprocess")
+        super().on_postprocess_start()
 
 # ---------------------------------------------------------------------
 # Background runner
@@ -445,7 +639,9 @@ async def run_chaos_eater_cycle(
     job_manager: JobManager,
     request: ChaosEaterJobRequest,
     llm,
-    ce_tool
+    ce_tool,
+    resume_from: Optional[str] = None,
+    checkpoint_path: Optional[str] = None
 ):
     try:
         async with job_manager.lock:
@@ -482,27 +678,39 @@ async def run_chaos_eater_cycle(
         else:
             # project_path flow already validated by request model
             built = build_input_from_project_path(
-                request.project_path, 
+                request.project_path,
                 override_instructions=request.ce_instructions
             )
             ce_input = ChaosEaterInput(**built)
 
+        # Load checkpoint if resuming
+        checkpoint = None
+        if resume_from and checkpoint_path and os.path.exists(checkpoint_path):
+            import json
+            with open(checkpoint_path, 'r') as f:
+                checkpoint_data = json.load(f)
+            checkpoint = ChaosEaterOutput(**checkpoint_data)
+            logger.info(f"Resuming job {job_id} from phase: {resume_from}")
+
         # Run CE in thread pool (avoid blocking the event loop)
+        from functools import partial
         runner_loop = asyncio.get_event_loop()
-        result: ChaosEaterOutput = await runner_loop.run_in_executor(
-            None,
+        run_fn = partial(
             chaos_eater.run_ce_cycle,
-            ce_input,
-            request.kube_context,
-            job_work_dir, 
-            request.project_name,
-            request.clean_cluster_before_run,
-            request.clean_cluster_after_run,
-            request.is_new_deployment,
-            request.max_num_steadystates,
-            request.max_retries,
-            [callback],
+            input=ce_input,
+            kube_context=request.kube_context,
+            work_dir=job_work_dir,
+            project_name=request.project_name,
+            clean_cluster_before_run=request.clean_cluster_before_run if not resume_from else False,
+            clean_cluster_after_run=request.clean_cluster_after_run,
+            is_new_deployment=request.is_new_deployment if not resume_from else False,
+            max_num_steadystates=request.max_num_steadystates,
+            max_retries=request.max_retries,
+            callbacks=[callback],
+            resume_from=resume_from,
+            checkpoint=checkpoint
         )
+        result: ChaosEaterOutput = await runner_loop.run_in_executor(None, run_fn)
 
         async with job_manager.lock:
             job_manager.jobs[job_id].status = JobStatus.COMPLETED
@@ -512,10 +720,16 @@ async def run_chaos_eater_cycle(
 
     except asyncio.CancelledError:
         async with job_manager.lock:
-            job_manager.jobs[job_id].status = JobStatus.CANCELLED
-            job_manager.jobs[job_id].updated_at = datetime.now()
-            job_manager.jobs[job_id].progress = "Job cancelled"
-        logger.info(f"Job {job_id} was cancelled")
+            # Check if job was paused (not cancelled)
+            current_status = job_manager.jobs[job_id].status
+            if current_status == JobStatus.PAUSED:
+                # Keep PAUSED status - don't overwrite
+                logger.info(f"Job {job_id} was paused at phase: {job_manager.jobs[job_id].current_phase}")
+            else:
+                job_manager.jobs[job_id].status = JobStatus.CANCELLED
+                job_manager.jobs[job_id].updated_at = datetime.now()
+                job_manager.jobs[job_id].progress = "Job cancelled"
+                logger.info(f"Job {job_id} was cancelled")
 
     except Exception as e:
         logger.exception(f"Job {job_id} failed")
@@ -634,11 +848,61 @@ async def create_job(
     )
 
     job_id = await job_mgr.create_job(request)
+    job_info = await job_mgr.get_job(job_id)
     task = asyncio.create_task(
         run_chaos_eater_cycle(job_id, job_mgr, request, llm_inst, ce_tool_inst)
     )
     job_mgr.tasks[job_id] = task
-    return JobResponse(job_id=job_id, status=JobStatus.PENDING, message=f"Job {job_id} created successfully")
+    return JobResponse(
+        job_id=job_id,
+        status=JobStatus.PENDING,
+        message=f"Job {job_id} created successfully",
+        work_dir=job_info.work_dir
+    )
+
+
+class RestoreJobRequest(BaseModel):
+    work_dir: str = Field(..., description="Path to the job's work directory")
+
+
+@app.post("/jobs/restore", response_model=JobInfo)
+async def restore_job(
+    request: RestoreJobRequest,
+    job_mgr: JobManager = Depends(get_job_manager),
+):
+    """
+    Restore a job from disk after server restart.
+    Use this when loading a snapshot that references a job that's no longer in memory.
+    """
+    try:
+        job_id = await job_mgr.restore_job_from_disk(request.work_dir)
+        job = await job_mgr.get_job(job_id)
+        return job
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.exception(f"Failed to restore job from {request.work_dir}")
+        raise HTTPException(status_code=500, detail=f"Failed to restore job: {e}")
+
+
+@app.post("/jobs/{job_id}/restore", response_model=JobInfo)
+async def restore_job_by_id(
+    job_id: str,
+    job_mgr: JobManager = Depends(get_job_manager),
+):
+    """
+    Restore a job by its ID by scanning sandbox directories.
+    Use this when loading a snapshot without work_dir info.
+    """
+    try:
+        await job_mgr.restore_job_by_id(job_id)
+        job = await job_mgr.get_job(job_id)
+        return job
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.exception(f"Failed to restore job {job_id}")
+        raise HTTPException(status_code=500, detail=f"Failed to restore job: {e}")
 
 
 @app.get("/jobs/{job_id}", response_model=JobInfo)
@@ -685,6 +949,114 @@ async def cancel_job(job_id: str, job_mgr: JobManager = Depends(get_job_manager)
         }
     
     raise HTTPException(status_code=500, detail=f"Failed to cancel job {job_id}")
+
+
+@app.post("/jobs/{job_id}/pause")
+async def pause_job(job_id: str, job_mgr: JobManager = Depends(get_job_manager)):
+    """
+    Pause a running job for later resume.
+    The job will stop at the current phase and can be resumed from there.
+    """
+    job = await job_mgr.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    if job.status != JobStatus.RUNNING:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot pause job {job_id} with status: {job.status}. Only RUNNING jobs can be paused."
+        )
+
+    paused = await job_mgr.pause_job(job_id)
+    if paused:
+        return {
+            "message": f"Job {job_id} paused",
+            "status": JobStatus.PAUSED,
+            "current_phase": job.current_phase,
+            "work_dir": job.work_dir
+        }
+
+    raise HTTPException(status_code=500, detail=f"Failed to pause job {job_id}")
+
+
+@app.post("/jobs/{job_id}/resume")
+async def resume_job(
+    job_id: str,
+    job_mgr: JobManager = Depends(get_job_manager),
+    ce_tool_inst=Depends(get_ce_tool),
+):
+    """
+    Resume a paused job from its last checkpoint.
+    """
+    job = await job_mgr.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    if job.status != JobStatus.PAUSED:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot resume job {job_id} with status: {job.status}. Only PAUSED jobs can be resumed."
+        )
+
+    if not job.work_dir:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Job {job_id} has no work_dir, cannot resume"
+        )
+
+    # Get the original request
+    request = job_mgr.requests.get(job_id)
+    if not request:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Original request not found for job {job_id}, cannot resume"
+        )
+
+    # Check for checkpoint - if not found, restart from beginning
+    checkpoint_path = f"{job.work_dir}/outputs/output.json"
+    resume_from = job.current_phase
+    if not os.path.exists(checkpoint_path):
+        logger.warning(f"Checkpoint not found at {checkpoint_path}, restarting from beginning")
+        checkpoint_path = None
+        resume_from = None
+
+    # Update job status
+    async with job_mgr.lock:
+        job_mgr.jobs[job_id].status = JobStatus.RUNNING
+        job_mgr.jobs[job_id].updated_at = datetime.now()
+        if resume_from:
+            job_mgr.jobs[job_id].progress = f"Resuming from {resume_from}"
+        else:
+            job_mgr.jobs[job_id].progress = "Restarting from beginning (no checkpoint)"
+
+    # Rebuild LLM with original settings
+    llm_inst = load_llm(
+        model_name=request.model_name,
+        temperature=request.temperature,
+        seed=request.seed,
+        port=int(os.getenv("CE_PORT", "8000"))
+    )
+
+    # Start the resume task
+    task = asyncio.create_task(
+        run_chaos_eater_cycle(
+            job_id=job_id,
+            job_manager=job_mgr,
+            request=request,
+            llm=llm_inst,
+            ce_tool=ce_tool_inst,
+            resume_from=resume_from,
+            checkpoint_path=checkpoint_path
+        )
+    )
+    job_mgr.tasks[job_id] = task
+
+    return {
+        "message": f"Job {job_id} resuming from {resume_from or 'beginning'}",
+        "status": JobStatus.RUNNING,
+        "resume_from": resume_from
+    }
+
 
 @app.get("/jobs/{job_id}/logs")
 async def get_job_logs(job_id: str, job_mgr: JobManager = Depends(get_job_manager)):
