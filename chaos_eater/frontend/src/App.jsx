@@ -136,12 +136,12 @@ export default function ChaosEaterApp() {
     'openai/gpt-4o-2024-08-06',
     'openai/gpt-5.1-2025-11-13',
     // 'openai/gpt-5.2',
-    'gemini-2.5-pro',
-    'gemini-3-pro-preview',
-    // 'google/gemini-1.5-pro-latest', this model was removed from API
     'anthropic/claude-3-5-sonnet-20241022',
     'anthropic/claude-sonnet-4-5-20250929',
     'anthropic/claude-opus-4-5-20251101',
+    'google/gemini-2.5-pro',
+    'google/gemini-3-pro-preview',
+    // 'google/gemini-1.5-pro-latest', this model was removed from API
     'ollama/gpt-oss:20b',
     'ollama/gpt-oss:120b',
     'custom'
