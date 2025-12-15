@@ -1257,7 +1257,7 @@ async def websocket_endpoint(websocket: WebSocket, job_id: str, job_mgr: JobMana
                 })
                 break
 
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.05)  # 50ms for smooth streaming
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected for job {job_id}")
     except Exception:
