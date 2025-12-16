@@ -26,7 +26,9 @@ services:
       - ~/.krew/bin/kubectl-graph:/root/.krew/bin/kubectl-graph:ro
       # for dood
       - /var/run/docker.sock:/var/run/docker.sock
-    command: uvicorn chaos_eater.backend.api:app --host 0.0.0.0 --port 8000 --reload --reload-dir chaos_eater 
+    command: >
+      sh -c "uv sync --frozen --no-dev &&
+             uvicorn chaos_eater.backend.api:app --host 0.0.0.0 --port 8000 --reload --reload-dir chaos_eater"
   
   chaos-eater-frontend:
     build:
