@@ -135,7 +135,7 @@ export default function ChaosEaterApp() {
     'openai/gpt-4.1',
     'openai/gpt-4o-2024-08-06',
     'openai/gpt-5.1-2025-11-13',
-    // 'openai/gpt-5.2',
+    'openai/gpt-5.2',
     // 'anthropic/claude-3-5-sonnet-20241022', this model was removed from API
     'anthropic/claude-sonnet-4-5-20250929',
     'anthropic/claude-opus-4-5-20251101',
