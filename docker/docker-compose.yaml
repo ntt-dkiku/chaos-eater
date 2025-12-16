@@ -13,11 +13,12 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
-      - PATH=/root/.krew/bin:${PATH}
+      - PATH=/app/.venv/bin:/root/.krew/bin:/usr/local/bin:/usr/bin:/bin
       - PYTHONUNBUFFERED=1
       - OLLAMA_BASE=${OLLAMA_BASE}
     volumes:
       - ..:/app/
+      - /app/.venv  # preserve venv from image (not overwritten by host mount)
       - ~/.kube/config:/root/.kube/config:ro
       - /usr/local/bin/kubectl:/usr/local/bin/kubectl:ro
       - /usr/local/bin/skaffold:/usr/local/bin/skaffold:ro
@@ -25,7 +26,9 @@ services:
       - ~/.krew/bin/kubectl-graph:/root/.krew/bin/kubectl-graph:ro
       # for dood
       - /var/run/docker.sock:/var/run/docker.sock
-    command: uvicorn chaos_eater.backend.api:app --host 0.0.0.0 --port 8000 --reload --reload-dir chaos_eater 
+    command: >
+      sh -c "uv sync --frozen --no-dev &&
+             uvicorn chaos_eater.backend.api:app --host 0.0.0.0 --port 8000 --reload --reload-dir chaos_eater"
   
   chaos-eater-frontend:
     build:
