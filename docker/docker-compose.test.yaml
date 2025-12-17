@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  test:
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile_llm
+    container_name: chaos-eater-test
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - PATH=/app/.venv/bin:/usr/local/bin:/usr/bin:/bin
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+    volumes:
+      - ..:/app/
+      - /app/.venv  # preserve venv from image
+    working_dir: /app
+    command: >
+      sh -c "uv sync --extra dev &&
+             pytest ${PYTEST_ARGS:---cov=chaos_eater --cov-report=term-missing}"
+
+  test-watch:
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile_llm
+    container_name: chaos-eater-test-watch
+    environment:
+      - PATH=/app/.venv/bin:/usr/local/bin:/usr/bin:/bin
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+    volumes:
+      - ..:/app/
+      - /app/.venv
+    working_dir: /app
+    command: >
+      sh -c "uv sync --extra dev &&
+             pytest-watch -- --tb=short"
+    stdin_open: true
+    tty: true

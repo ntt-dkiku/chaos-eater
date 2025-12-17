@@ -8,15 +8,13 @@
 <p align="center">
   <a href="https://ntt-dkiku.github.io/chaos-eater/" target="_blank"><img src="https://img.shields.io/badge/project-page-green"></a>
   <a href="https://arxiv.org/abs/2501.11107" target="_blank"><img src="https://img.shields.io/badge/arXiv-pdf-red"></a>
-  <a href="https://alphaxiv.org/abs/2501.11107" target="_blank"><img src="https://img.shields.io/badge/alphaXiv-pdf-orange"></a>
-  <a href="https://huggingface.co/spaces/oookiku/chaos-eater" target="_blank"><img src="https://img.shields.io/badge/🤗-demo-yellow"></a>
   <a href="https://conf.researchr.org/home/ase-2025" target="_blank"><img src="https://img.shields.io/badge/ASE-2025-blue"></a>
 </p>
 
 <p>
   This repo is the official implementation of 
   
-  - LLM-Powered Fully Automated Chaos Engineering: Towards Enabling Anyone to Build Resilient Software Systems at Low Cost (to appear in ASE 2025, NIER track)
+  - <a href="https://arxiv.org/abs/2511.07865" target="_blank">LLM-Powered Fully Automated Chaos Engineering: Towards Enabling Anyone to Build Resilient Software Systems at Low Cost</a> (to appear in ASE 2025, NIER track)
   - <a href="https://arxiv.org/abs/2501.11107" target="_blank">ChaosEater: Fully Automating 
   Chaos Engineering with Large Language Models</a> (extended technical report)
   
@@ -84,11 +82,27 @@ Access `localhost:3000` in your browser, and you can try the ChaosEater GUI in y
 > [!TIP]  
 > If you are working on a remote server, don't forget to set up port forwarding, e.g., `ssh <remote-server-name> -L 3000:localhost:3000 -L 8000:localhost:8000 -L 2333:localhost:2333`.
 
-### Ex. Stop ChaosEater
+### EX1. Stop ChaosEater
 Run the following command to stop ChaosEater:
 ```
 make stop
 ```
+
+### EX2. Test ChaosEater (Experimental)
+Run unit tests with the following commands:
+```bash
+make test          # Run all unit tests
+make test-cov      # Run tests with coverage report
+```
+
+To run specific tests:
+```bash
+make test-file FILE=tests/test_api.py           # Run a specific test file
+make test-match PATTERN=test_parse              # Run tests matching a pattern
+```
+
+> [!TIP]
+> To run integration tests that require API keys, create `docker/.env` with your API keys and set `RUN_INTEGRATION_TESTS=1`.
 
 ## 🕹️ GUI usage
 <img src="./docs/static/images/gui_preview.png">
@@ -259,7 +273,6 @@ ChaosEater is built upon numerous excellent projects. Big thank you to the follo
 - LLM:
   - [Anthropic API](https://www.anthropic.com/api)
   - [Gemini API](https://ai.google.dev/)
-  - [Hugging Face](https://huggingface.co/)
   - [LangChain](https://github.com/langchain-ai/langchain)
   - [Ollama](https://github.com/ollama/ollama)
   - [OpenAI API](https://openai.com/index/openai-api/)

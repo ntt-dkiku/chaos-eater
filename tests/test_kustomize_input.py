@@ -1,10 +1,15 @@
 import os
+import pytest
 from chaos_eater.preprocessing.preprocessor import PreProcessor, ChaosEaterInput
 from chaos_eater.utils.functions import is_binary
 from chaos_eater.utils.schemas import File
 from chaos_eater.utils.llms import load_llm
 
 
+@pytest.mark.skipif(
+    not os.getenv("OPENAI_API_KEY") or not os.getenv("RUN_INTEGRATION_TESTS"),
+    reason="OPENAI_API_KEY or RUN_INTEGRATION_TESTS not set"
+)
 def test_kustomize_input() -> None:
     #---------------------------
     # prepare a kustomize input 

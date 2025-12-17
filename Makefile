@@ -1,6 +1,7 @@
 .PHONY: setup-sandbox set-mode-sandbox start-sandbox cluster-sandbox
 .PHONY: setup-standard set-mode-standard start-standard cluster-standard
 .PHONY: reload stop
+.PHONY: test test-cov test-watch test-file test-match build-test clean-test
 
 
 #----------------
@@ -97,3 +98,43 @@ else ifeq ($(MODE),standard)
 	docker compose -f docker/docker-compose.yaml down
 	kind delete cluster --name chaos-eater-cluster
 endif
+
+
+#--------
+# testing
+#--------
+TEST_COMPOSE := docker compose -f docker/docker-compose.test.yaml
+
+# Run all tests (no coverage for speed)
+test:
+	@$(TEST_COMPOSE) run --rm test sh -c "uv sync --extra dev && pytest"
+
+# Run all tests with coverage
+test-cov:
+	@$(TEST_COMPOSE) run --rm test
+
+# Run tests in watch mode
+test-watch:
+	@$(TEST_COMPOSE) run --rm test-watch
+
+# Run specific test file: make test-file FILE=tests/test_xxx.py
+test-file:
+ifndef FILE
+	$(error FILE is required. Usage: make test-file FILE=tests/test_xxx.py)
+endif
+	@$(TEST_COMPOSE) run --rm test sh -c "uv sync --extra dev && pytest $(FILE)"
+
+# Run tests matching pattern: make test-match PATTERN=test_parse
+test-match:
+ifndef PATTERN
+	$(error PATTERN is required. Usage: make test-match PATTERN=test_parse)
+endif
+	@$(TEST_COMPOSE) run --rm test sh -c "uv sync --extra dev && pytest -k '$(PATTERN)'"
+
+# Build test container
+build-test:
+	@$(TEST_COMPOSE) build
+
+# Clean up test containers
+clean-test:
+	@$(TEST_COMPOSE) down --rmi local -v
