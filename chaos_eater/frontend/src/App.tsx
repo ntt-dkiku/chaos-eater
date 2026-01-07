@@ -515,44 +515,29 @@ export default function ChaosEaterApp() {
       return;
     }
 
-    // Send pause request (instead of cancel/delete)
+    // Send pause request using imported API
     try {
-      const response = await fetch(`${API_BASE}/jobs/${jobId}/pause`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        }
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-
-        if (response.status === 404) {
-          setNotification({ type: 'warning', message: 'Job not found' });
-          return;
-        } else if (response.status === 400) {
-          setNotification({
-            type: 'warning',
-            message: errorData.detail || 'Job may not be running or already finished'
-          });
-          return;
-        } else {
-          throw new Error(`Pause failed: ${response.statusText}`);
-        }
-      }
-
-      const data = await response.json();
+      const data = await pauseJob(API_BASE, jobId);
       setNotification({
         type: 'success',
         message: `Job paused at phase: ${data.current_phase || 'unknown'}`
       });
-
     } catch (error) {
       console.error('Pause failed:', error);
-      setNotification({
-        type: 'error',
-        message: 'Failed to pause job. Backend may still be processing.'
-      });
+      const msg = error.message || '';
+      if (msg.includes('404') || msg.includes('not found')) {
+        setNotification({ type: 'warning', message: 'Job not found' });
+      } else if (msg.includes('400') || msg.includes('not running')) {
+        setNotification({
+          type: 'warning',
+          message: msg || 'Job may not be running or already finished'
+        });
+      } else {
+        setNotification({
+          type: 'error',
+          message: 'Failed to pause job. Backend may still be processing.'
+        });
+      }
     }
   };
 
@@ -567,20 +552,7 @@ export default function ChaosEaterApp() {
     setRunState('running');
 
     try {
-      const response = await fetch(`${API_BASE}/jobs/${jobId}/resume`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(formData.apiKey ? { 'x-api-key': formData.apiKey } : {}),
-        }
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || 'Failed to resume job');
-      }
-
-      const data = await response.json();
+      const data = await resumeJob(API_BASE, jobId, formData.apiKey || undefined);
       const resumePoint = data.resume_from_agent
         ? `${data.resume_from}/${data.resume_from_agent}`
         : (data.resume_from || 'beginning');
@@ -624,10 +596,7 @@ export default function ChaosEaterApp() {
     // Stop running job if exists
     if (jobId && runState === 'running') {
       try {
-        await fetch(`${API_BASE}/jobs/${jobId}`, {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' }
-        });
+        await deleteJob(API_BASE, jobId);
         console.log(`Stopped job ${jobId} before new cycle`);
       } catch (err) {
         console.warn("Job stop failed:", err);
@@ -693,20 +662,13 @@ export default function ChaosEaterApp() {
     const jid = snap?.jobId;
     if (!jid) return;
     try {
-      const res = await fetch(`${API_BASE}/jobs/${encodeURIComponent(jid)}/purge?delete_files=true`, {
-        method: 'DELETE'
-      });
-      const body = await res.json().catch(()=> ({}));
-      if (!res.ok) {
-        throw new Error(body?.detail || `HTTP ${res.status}`);
-      }
-
+      const body = await purgeJob(API_BASE, jid);
       const deleted = Array.isArray(body?.deleted_files) ? body.deleted_files : [];
       console.debug('[purge result]', jid, deleted);
       const failed = deleted.filter(d => d && d.deleted === false);
       if (failed.length) {
-        setNotification({ 
-          type: 'error', 
+        setNotification({
+          type: 'error',
           message: `Some paths not deleted: ${failed.map(f=>`${f.path || ''} (${f.reason || 'unknown'})`).join(', ')}`
         });
       }
@@ -824,20 +786,11 @@ export default function ChaosEaterApp() {
     };
 
     try {
-      // 2. create job
-      const resp = await fetch(`${API_BASE}/jobs`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(formData.apiKey ? { 'x-api-key': formData.apiKey } : {}),
-          ...(formData.model ? { 'x-model': formData.model } : {}),
-        },
-        body: JSON.stringify(payload),
+      // 2. create job using imported API
+      const data = await createJob(API_BASE, payload, {
+        apiKey: formData.apiKey || undefined,
+        model: formData.model || undefined,
       });
-      const data = await resp.json();
-      if (!resp.ok) {
-        throw new Error(data.detail || data.message || 'Failed to create job');
-      }
       setJobId(data.job_id);
 
       // display dialog
@@ -1286,54 +1239,6 @@ export default function ChaosEaterApp() {
     document.addEventListener('click', onDocClick);
     return () => document.removeEventListener('click', onDocClick);
   }, []);
-
-  //-------------------
-  // artifact download
-  //-------------------
-  function resolveApiUrl(API_BASE, pathOrUrl) {
-    try {
-      const u = new URL(pathOrUrl);
-      return u.toString(); // already absolute
-    } catch {
-      return `${API_BASE}${pathOrUrl.startsWith('/') ? '' : '/'}${pathOrUrl}`;
-    }
-  }
-
-  /**
-   * Download a file and trigger a save dialog.
-   * Respects Content-Disposition if present; falls back to suggestedFilename.
-   */
-  async function downloadFromApi({ API_BASE, pathOrUrl, suggestedFilename, headers = {} }) {
-    const url = resolveApiUrl(API_BASE, pathOrUrl);
-    const res = await fetch(url, { method: 'GET', headers });
-
-    if (!res.ok) {
-      let detail = '';
-      try { detail = (await res.json())?.detail || ''; } catch {}
-      throw new Error(detail || `Download failed (HTTP ${res.status})`);
-    }
-
-    // Try parse filename from Content-Disposition
-    let filename = suggestedFilename || 'download';
-    const cd = res.headers.get('Content-Disposition') || res.headers.get('content-disposition');
-    if (cd && /filename\*=UTF-8''([^;]+)/i.test(cd)) {
-      filename = decodeURIComponent(cd.match(/filename\*=UTF-8''([^;]+)/i)[1]);
-    } else if (cd && /filename="?([^"]+)"?/i.test(cd)) {
-      filename = cd.match(/filename="?([^"]+)"?/i)[1];
-    }
-
-    const blob = await res.blob();
-    const blobUrl = URL.createObjectURL(blob);
-
-    const a = document.createElement('a');
-    a.href = blobUrl;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(blobUrl);
-  }
-
 
   //
   //
