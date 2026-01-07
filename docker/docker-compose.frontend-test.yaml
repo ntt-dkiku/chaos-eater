@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile.test
     volumes:
       - ../chaos_eater/frontend/src:/app/src:ro
-      - ../chaos_eater/frontend/vitest.config.ts:/app/vitest.config.ts:ro
+      - ../chaos_eater/frontend/vite.config.ts:/app/vite.config.ts:ro
       - ../chaos_eater/frontend/tsconfig.json:/app/tsconfig.json:ro
     command: npm run test:coverage
     environment:
@@ -18,7 +18,7 @@ services:
       dockerfile: Dockerfile.test
     volumes:
       - ../chaos_eater/frontend/src:/app/src
-      - ../chaos_eater/frontend/vitest.config.ts:/app/vitest.config.ts:ro
+      - ../chaos_eater/frontend/vite.config.ts:/app/vite.config.ts:ro
       - ../chaos_eater/frontend/tsconfig.json:/app/tsconfig.json:ro
     command: npm run test:watch
     stdin_open: true
