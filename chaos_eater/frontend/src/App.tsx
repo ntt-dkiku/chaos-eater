@@ -46,7 +46,7 @@ export default function ChaosEaterApp() {
   // Pick API base from window or env; fall back to localhost.
   const API_BASE =
     (typeof window !== 'undefined' && window.NEXT_PUBLIC_CE_API) ||
-    process.env.NEXT_PUBLIC_CE_API ||
+    import.meta.env.VITE_CE_API ||
     'http://localhost:8000';
   
   // Build WS URL that matches API_BASE protocol/host.

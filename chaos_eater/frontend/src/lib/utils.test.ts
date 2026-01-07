@@ -13,20 +13,24 @@ import {
 describe('utils', () => {
   describe('getApiBase', () => {
     const originalWindow = global.window;
-    const originalEnv = process.env.NEXT_PUBLIC_CE_API;
+    const originalEnv = import.meta.env.VITE_CE_API;
 
     afterEach(() => {
       global.window = originalWindow;
-      process.env.NEXT_PUBLIC_CE_API = originalEnv;
+      if (originalEnv === undefined) {
+        delete (import.meta.env as Record<string, unknown>).VITE_CE_API;
+      } else {
+        import.meta.env.VITE_CE_API = originalEnv;
+      }
     });
 
     it('should return default localhost when no config', () => {
-      delete process.env.NEXT_PUBLIC_CE_API;
+      delete (import.meta.env as Record<string, unknown>).VITE_CE_API;
       expect(getApiBase()).toBe('http://localhost:8000');
     });
 
     it('should use env variable when set', () => {
-      process.env.NEXT_PUBLIC_CE_API = 'http://api.example.com';
+      import.meta.env.VITE_CE_API = 'http://api.example.com';
       expect(getApiBase()).toBe('http://api.example.com');
     });
   });

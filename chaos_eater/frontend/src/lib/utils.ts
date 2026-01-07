@@ -12,7 +12,7 @@ declare global {
 export function getApiBase(): string {
   return (
     (typeof window !== 'undefined' && window.NEXT_PUBLIC_CE_API) ||
-    process.env.NEXT_PUBLIC_CE_API ||
+    import.meta.env.VITE_CE_API ||
     'http://localhost:8000'
   );
 }
