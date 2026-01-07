@@ -1,12 +1,16 @@
 import React, { useRef, useEffect, useState } from 'react';
 
-export default function LandingLogo() {
-  const logoRef = useRef(null);
-  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
+interface MousePosition {
+  x: number;
+  y: number;
+}
 
-  // Track mouse movement to move pupil
+export default function LandingLogo(): React.ReactElement {
+  const logoRef = useRef<HTMLDivElement>(null);
+  const [mousePosition, setMousePosition] = useState<MousePosition>({ x: 0, y: 0 });
+
   useEffect(() => {
-    const handleMouseMove = (e) => {
+    const handleMouseMove = (e: MouseEvent): void => {
       if (logoRef.current) {
         const rect = logoRef.current.getBoundingClientRect();
         const centerX = rect.left + rect.width / 2;
@@ -24,6 +28,15 @@ export default function LandingLogo() {
     return () => window.removeEventListener('mousemove', handleMouseMove);
   }, []);
 
+  const handleImageError = (e: React.SyntheticEvent<HTMLImageElement>): void => {
+    const target = e.currentTarget;
+    target.style.display = 'none';
+    const nextSibling = target.nextSibling as HTMLElement | null;
+    if (nextSibling) {
+      nextSibling.style.display = 'flex';
+    }
+  };
+
   return (
     <div
       ref={logoRef}
@@ -36,9 +49,9 @@ export default function LandingLogo() {
         userSelect: 'none',
       }}
     >
-      {/* Rotating ChaosEater base icon */}
       <img
         src="/chaoseater_icon.png"
+        alt="ChaosEater Logo"
         style={{
           position: 'absolute',
           width: '80%',
@@ -50,13 +63,9 @@ export default function LandingLogo() {
           userSelect: 'none',
           WebkitUserSelect: 'none',
         }}
-        onError={(e) => {
-          e.target.style.display = 'none';
-          e.target.nextSibling.style.display = 'flex';
-        }}
+        onError={handleImageError}
       />
 
-      {/* White eyeball background */}
       <div
         className="ce-eye"
         style={{
@@ -70,12 +79,10 @@ export default function LandingLogo() {
           borderRadius: '50%',
           overflow: 'hidden',
           pointerEvents: 'none',
-          WebkitUserDrag: 'none',
           userSelect: 'none',
           zIndex: 2,
         }}
       >
-        {/* Black pupil that follows the mouse */}
         <div
           style={{
             position: 'absolute',
@@ -90,7 +97,6 @@ export default function LandingLogo() {
             zIndex: 2,
           }}
         >
-          {/* White highlight dot */}
           <div
             style={{
               position: 'absolute',
@@ -105,7 +111,6 @@ export default function LandingLogo() {
         </div>
       </div>
 
-      {/* Eyelid mask to contain blinking animation */}
       <div
         className="ce-eye-mask"
         style={{
@@ -122,20 +127,16 @@ export default function LandingLogo() {
         }}
         aria-hidden
       >
-        {/* Animated eyelid */}
         <div className="ce-eyelid" />
       </div>
 
-      {/* CSS animations */}
       <style>
         {`
-          /* Icon rotation */
           @keyframes rotate {
             from { transform: rotate(0deg); }
             to   { transform: rotate(-360deg); }
           }
 
-          /* Eyelid blinking: stays open, quickly closes, then reopens */
           @keyframes ceBlink {
             0%   { transform: translateY(-100%); }
             96%  { transform: translateY(-100%); }
@@ -153,8 +154,6 @@ export default function LandingLogo() {
             border-radius: 50% 50% 0 0;
             transform: translateY(-100%);
             z-index: 5;
-
-            /* Blink once after 5s, then repeat every 10s */
             animation-name: ceBlink, ceBlink;
             animation-duration: 5s, 10s;
             animation-timing-function: linear, linear;
@@ -163,7 +162,6 @@ export default function LandingLogo() {
             animation-delay: 0s, 5s;
           }
 
-          /* Accessibility: disable animation if user prefers reduced motion */
           @media (prefers-reduced-motion: reduce) {
             .ce-eyelid {
               animation: none;

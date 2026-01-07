@@ -1,27 +1,28 @@
 import React, { useEffect, useState } from 'react';
 
-export default function LandingMessage() {
-  const fullText = "Let's dive into Chaos together :)";
-  const highlight = 'Chaos';
+const FULL_TEXT = "Let's dive into Chaos together :)";
+const HIGHLIGHT = 'Chaos';
+const TYPING_SPEED_MS = 70;
+
+export default function LandingMessage(): React.ReactElement {
   const [text, setText] = useState('');
-  const [i, setI] = useState(0);
+  const [charIndex, setCharIndex] = useState(0);
 
   useEffect(() => {
-    if (i >= fullText.length) return;
+    if (charIndex >= FULL_TEXT.length) return;
     const id = setTimeout(() => {
-      setText(prev => prev + fullText[i]);
-      setI(i + 1);
-    }, 70); // typing speed (ms per char)
+      setText((prev) => prev + FULL_TEXT[charIndex]);
+      setCharIndex((i) => i + 1);
+    }, TYPING_SPEED_MS);
     return () => clearTimeout(id);
-  }, [i, fullText]);
+  }, [charIndex]);
 
-  // Safely render with highlight only when the full word exists
-  const renderWithHighlight = () => {
-    const idx = text.indexOf(highlight);
+  const renderWithHighlight = (): React.ReactNode => {
+    const idx = text.indexOf(HIGHLIGHT);
     if (idx === -1) return text;
     const before = text.slice(0, idx);
-    const word = text.slice(idx, idx + highlight.length);
-    const after = text.slice(idx + highlight.length);
+    const word = text.slice(idx, idx + HIGHLIGHT.length);
+    const after = text.slice(idx + HIGHLIGHT.length);
     return (
       <>
         {before}
@@ -40,7 +41,7 @@ export default function LandingMessage() {
         userSelect: 'none',
         whiteSpace: 'pre-wrap',
       }}
-      aria-label={fullText}
+      aria-label={FULL_TEXT}
     >
       {renderWithHighlight()}
     </h1>
