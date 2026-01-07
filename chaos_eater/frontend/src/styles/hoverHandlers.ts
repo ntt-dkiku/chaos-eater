@@ -172,6 +172,21 @@ export const hoverHandlers = {
     defaultBg: colors.transparent,
     defaultColor: colors.textMuted,
   }),
+
+  /**
+   * Send/action button hover
+   * Scale effect with lighter accent
+   */
+  actionButton: {
+    onMouseEnter: (e: React.MouseEvent<HTMLElement>) => {
+      e.currentTarget.style.backgroundColor = colors.accentHover;
+      e.currentTarget.style.transform = 'scale(1.05)';
+    },
+    onMouseLeave: (e: React.MouseEvent<HTMLElement>) => {
+      e.currentTarget.style.backgroundColor = colors.accent;
+      e.currentTarget.style.transform = 'scale(1)';
+    },
+  },
 } as const;
 
 /**

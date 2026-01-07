@@ -74,11 +74,15 @@ import {
   colors,
   buttonStyles,
   inputStyles,
+  cardStyles,
+  snapshotStyles,
   chipStyles,
   composerStyles,
   menuStyles,
   containerStyles,
   textStyles,
+  notificationStyles,
+  actionButtonStyles,
   hoverHandlers,
   focusHandlers,
   mergeStyles,
@@ -324,35 +328,6 @@ export default function ChaosEaterApp() {
       setOllamaPull({ inProgress: false, pct: null, status: null, model: null, abort: null });
     }
   }, [formData.model]);
-
-  //--------
-  // Styles
-  //--------
-  const styles = {
-    exampleCard: (isHovered) => ({
-      padding: '24px',
-      backgroundColor: isHovered ? '#2a2a2a' : '#1f1f1f',
-      borderRadius: '8px',
-      border: `1px solid ${isHovered ? '#84cc16' : '#374151'}`,
-      transition: 'all 0.3s ease',
-      transform: isHovered ? 'translateY(-4px)' : 'translateY(0)',
-      boxShadow: isHovered ? '0 10px 30px rgba(132, 204, 22, 0.2)' : 'none',
-      cursor: 'pointer',
-      textAlign: 'center'
-    }),
-    exampleTitle: (isHovered) => ({
-      fontSize: '14px',
-      fontWeight: '500',
-      marginBottom: '8px',
-      color: isHovered ? '#84cc16' : '#ffffff',
-      transition: 'color 0.3s ease'
-    }),
-    exampleDesc: (isHovered) => ({
-      fontSize: '12px',
-      color: isHovered ? '#d1d5db' : '#9ca3af',
-      transition: 'color 0.3s ease'
-    })
-  };
 
   //----------------
   // file uploading (uploadZipToBackend is imported from ./api/uploads)
@@ -1857,37 +1832,14 @@ export default function ChaosEaterApp() {
                     }
                     setJobId(restoredJobId);
                   }}
-                  style={{
-                    width: '100%',
-                    textAlign: 'left',
-                    padding: '3px 12px',
-                    backgroundColor:
-                      hoveredSnapshotId === s.id
-                        ? '#1a1a1a'
-                        : currentSnapshotId === s.id
-                          ? '#222222'
-                          : 'transparent',
-                    color: hoveredSnapshotId === s.id ? '#84cc16' : '#e5e7eb',
-                    border: 'none',
-                    borderRadius: 8,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: 8,
-                    transition: 'background-color 0.2s ease, color 0.2s ease',
-                  }}
+                  style={mergeStyles(
+                    snapshotStyles.item,
+                    currentSnapshotId === s.id && snapshotStyles.itemSelected,
+                    hoveredSnapshotId === s.id && snapshotStyles.itemHover
+                  )}
                   title={new Date(s.createdAt || s.updatedAt || Date.now()).toLocaleString()}
                 >
-                  <div style={{
-                    fontSize: 14,
-                    fontWeight: 600,
-                    marginLeft: -4,
-                    marginRight: 8,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap'
-                  }}>
+                  <div style={snapshotStyles.itemTitle}>
                     {s.title}
                   </div>
                   <button
@@ -2012,30 +1964,30 @@ export default function ChaosEaterApp() {
                 onClick={() => loadExample('nginxLimited')}
                 onMouseEnter={() => setHoveredExample('nginxLimited')}
                 onMouseLeave={() => setHoveredExample(null)}
-                style={styles.exampleCard(hoveredExample === 'nginxLimited')}
+                style={mergeStyles(cardStyles.example, hoveredExample === 'nginxLimited' && cardStyles.exampleHover)}
               >
-                <div style={styles.exampleTitle(hoveredExample === 'nginxLimited')}>example#1:</div>
-                <div style={styles.exampleDesc(hoveredExample === 'nginxLimited')}>Nginx w/ limited experiment duration</div>
+                <div style={mergeStyles(cardStyles.exampleTitle, hoveredExample === 'nginxLimited' && cardStyles.exampleTitleHover)}>example#1:</div>
+                <div style={mergeStyles(cardStyles.exampleDesc, hoveredExample === 'nginxLimited' && cardStyles.exampleDescHover)}>Nginx w/ limited experiment duration</div>
               </div>
 
               <div
                 onClick={() => loadExample('nginx')}
                 onMouseEnter={() => setHoveredExample('nginx')}
                 onMouseLeave={() => setHoveredExample(null)}
-                style={styles.exampleCard(hoveredExample === 'nginx')}
+                style={mergeStyles(cardStyles.example, hoveredExample === 'nginx' && cardStyles.exampleHover)}
               >
-                <div style={styles.exampleTitle(hoveredExample === 'nginx')}>example#2:</div>
-                <div style={styles.exampleDesc(hoveredExample === 'nginx')}>Nginx w/ detailed CE instructions</div>
+                <div style={mergeStyles(cardStyles.exampleTitle, hoveredExample === 'nginx' && cardStyles.exampleTitleHover)}>example#2:</div>
+                <div style={mergeStyles(cardStyles.exampleDesc, hoveredExample === 'nginx' && cardStyles.exampleDescHover)}>Nginx w/ detailed CE instructions</div>
               </div>
-              
+
               <div
                 onClick={() => loadExample('sockshop')}
                 onMouseEnter={() => setHoveredExample('sockshop')}
                 onMouseLeave={() => setHoveredExample(null)}
-                style={styles.exampleCard(hoveredExample === 'sockshop')}
+                style={mergeStyles(cardStyles.example, hoveredExample === 'sockshop' && cardStyles.exampleHover)}
               >
-                <div style={styles.exampleTitle(hoveredExample === 'sockshop')}>example#3:</div>
-                <div style={styles.exampleDesc(hoveredExample === 'sockshop')}>Sock shop w/ limited experiment duration</div>
+                <div style={mergeStyles(cardStyles.exampleTitle, hoveredExample === 'sockshop' && cardStyles.exampleTitleHover)}>example#3:</div>
+                <div style={mergeStyles(cardStyles.exampleDesc, hoveredExample === 'sockshop' && cardStyles.exampleDescHover)}>Sock shop w/ limited experiment duration</div>
               </div>
             </div>
           </>
@@ -2125,25 +2077,9 @@ export default function ChaosEaterApp() {
                   }
                 }}
                 rows={1}
-                style={{
-                  width: '100%',
-                  padding: '16px',
-                  backgroundColor: 'transparent',
-                  borderRadius: '8px 8px 0 0',
-                  border: 'none',
-                  color: '#e5e7eb',
-                  fontSize: '16px',
-                  fontFamily: 'inherit',
-                  resize: 'none',
-                  outline: 'none',
-                  transition: 'all 0.2s ease',
-                  lineHeight: '24px',
-                  boxSizing: 'border-box',
-                  minHeight: '32px',
-                  overflow: 'hidden'
-                }}
-                onFocus={(e) => e.target.parentElement.parentElement.style.borderColor = '#84cc16'}
-                onBlur={(e) => e.target.parentElement.parentElement.style.borderColor = '#374151'}
+                style={composerStyles.textarea}
+                onFocus={(e) => e.target.parentElement.parentElement.style.borderColor = colors.accent}
+                onBlur={(e) => e.target.parentElement.parentElement.style.borderColor = colors.border}
                 onInput={(e) => {
                   const ta = e.currentTarget;
                   ta.style.height = 'auto';
@@ -2155,42 +2091,13 @@ export default function ChaosEaterApp() {
             </div>
             
             {/* Lower section - Controls */}
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '8px 12px',
-                backgroundColor: '#1a1a1a',
-                borderRadius: '0 0 8px 8px',
-              }}
-            >
+            <div style={composerStyles.controls}>
               {/* Left group */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={composerStyles.controlGroup}>
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  style={{
-                    width: 32,
-                    height: 32,
-                    padding: 0,
-                    backgroundColor: 'transparent',
-                    border: 'none',
-                    borderRadius: 6,
-                    color: '#9ca3af',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    transition: 'all 0.2s ease',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = '#374151';
-                    e.currentTarget.style.color = '#84cc16';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = 'transparent';
-                    e.currentTarget.style.color = '#9ca3af';
-                  }}
+                  style={mergeStyles(buttonStyles.icon, { padding: 0, color: colors.textSecondary })}
+                  {...hoverHandlers.iconButton}
                   title="Add files"
                 >
                   <Paperclip size={18} />
@@ -2198,25 +2105,14 @@ export default function ChaosEaterApp() {
               </div>
 
               {/* Right group: [toast][Send] */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={composerStyles.controlGroup}>
                 {notification && (
                   <div
-                    style={{
-                      backgroundColor:
-                        notification.type === 'error' ? '#7f1d1d' : '#84cc16',
-                      color:
-                        notification.type === 'error' ? '#e5e7eb' : '#000000',
-                      border: 'none',
-                      borderRadius: 6,
-                      padding: '6px 10px',
-                      fontSize: 13,
-                      opacity: visible ? 1 : 0,
-                      transition: 'opacity 0.5s ease',
-                      whiteSpace: 'nowrap',
-                      maxWidth: 360,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                    }}
+                    style={mergeStyles(
+                      notificationStyles.base,
+                      notification.type === 'error' ? notificationStyles.error : notificationStyles.success,
+                      { opacity: visible ? 1 : 0 }
+                    )}
                   >
                     {notification.message}
                   </div>
@@ -2225,29 +2121,8 @@ export default function ChaosEaterApp() {
                 {runState === 'running' ? (
                   <button
                     onClick={handleStop}
-                    style={{
-                      width: 32,
-                      height: 32,
-                      padding: 0,
-                      backgroundColor: '#84cc16',
-                      border: 'none',
-                      borderRadius: 6,
-                      color: '#000000',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      transition: 'all 0.2s ease',
-                      boxShadow: '0 2px 8px rgba(239, 68, 68, 0.3)',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = '#a3d635';
-                      e.currentTarget.style.transform = 'scale(1.05)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = '#84cc16';
-                      e.currentTarget.style.transform = 'scale(1)';
-                    }}
+                    style={actionButtonStyles.stop}
+                    {...hoverHandlers.actionButton}
                     title="Stop"
                   >
                     <Pause size={18} strokeWidth={2} />
@@ -2256,30 +2131,18 @@ export default function ChaosEaterApp() {
                   <button
                     onClick={handleSubmit}
                     disabled={isLoading}
-                    style={{
-                      width: 32,
-                      height: 32,
-                      padding: 0,
-                      backgroundColor: '#84cc16',
-                      border: 'none',
-                      borderRadius: 6,
-                      color: '#000000',
-                      cursor: isLoading ? 'not-allowed' : 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      transition: 'all 0.2s ease',
-                      opacity: isLoading ? 0.6 : 1,
-                      boxShadow: '0 2px 8px rgba(132, 204, 22, 0.3)',
-                    }}
+                    style={mergeStyles(
+                      actionButtonStyles.send,
+                      isLoading && actionButtonStyles.sendDisabled
+                    )}
                     onMouseEnter={(e) => {
                       if (!isLoading) {
-                        e.currentTarget.style.backgroundColor = '#a3d635';
+                        e.currentTarget.style.backgroundColor = colors.accentHover;
                         e.currentTarget.style.transform = 'scale(1.05)';
                       }
                     }}
                     onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = '#84cc16';
+                      e.currentTarget.style.backgroundColor = colors.accent;
                       e.currentTarget.style.transform = 'scale(1)';
                     }}
                     title="Send (Enter to submit)"

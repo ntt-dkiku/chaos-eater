@@ -272,6 +272,122 @@ export const inputStyles = {
 } as const;
 
 // =============================================================================
+// Card Styles
+// =============================================================================
+
+export const cardStyles = {
+  /**
+   * Example card - clickable card with hover effect
+   */
+  example: {
+    padding: spacing.xl,
+    backgroundColor: colors.bgTertiary,
+    borderRadius: borderRadius.lg,
+    border: `1px solid ${colors.border}`,
+    transition: transition.slow,
+    cursor: 'pointer',
+    textAlign: 'center' as const,
+  } as CSSProperties,
+
+  /**
+   * Example card hover state
+   */
+  exampleHover: {
+    backgroundColor: colors.bgHover,
+    border: `1px solid ${colors.accent}`,
+    transform: 'translateY(-4px)',
+    boxShadow: boxShadow.accent,
+  } as CSSProperties,
+
+  /**
+   * Example card title
+   */
+  exampleTitle: {
+    fontSize: fontSize.base,
+    fontWeight: fontWeight.medium,
+    marginBottom: spacing.sm,
+    color: colors.white,
+    transition: transition.slow,
+  } as CSSProperties,
+
+  /**
+   * Example card title hover state
+   */
+  exampleTitleHover: {
+    color: colors.accent,
+  } as CSSProperties,
+
+  /**
+   * Example card description
+   */
+  exampleDesc: {
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+    transition: transition.slow,
+  } as CSSProperties,
+
+  /**
+   * Example card description hover state
+   */
+  exampleDescHover: {
+    color: colors.textLight,
+  } as CSSProperties,
+} as const;
+
+// =============================================================================
+// Snapshot List Styles
+// =============================================================================
+
+export const snapshotStyles = {
+  /**
+   * Snapshot item button base
+   */
+  item: {
+    width: '100%',
+    textAlign: 'left' as const,
+    padding: '3px 12px',
+    backgroundColor: colors.transparent,
+    border: 'none',
+    borderRadius: borderRadius.lg,
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    transition: transition.colorOnly,
+    color: colors.textPrimary,
+  } as CSSProperties,
+
+  /**
+   * Snapshot item selected state (current snapshot)
+   */
+  itemSelected: {
+    backgroundColor: '#222222',
+  } as CSSProperties,
+
+  /**
+   * Snapshot item hover state
+   */
+  itemHover: {
+    backgroundColor: colors.bgSidebarHover,
+    color: colors.accent,
+  } as CSSProperties,
+
+  /**
+   * Snapshot item title text
+   */
+  itemTitle: {
+    fontSize: fontSize.base,
+    fontWeight: fontWeight.semibold,
+    marginLeft: '-4px',
+    marginRight: spacing.sm,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap' as const,
+  } as CSSProperties,
+} as const;
+
+// =============================================================================
 // Chip/Tag Styles
 // =============================================================================
 
@@ -333,6 +449,48 @@ export const composerStyles = {
     backgroundColor: colors.bgSidebarHover,
     borderRadius: borderRadius.lg,
     border: `1px solid ${colors.border}`,
+  } as CSSProperties,
+
+  /**
+   * Composer textarea
+   */
+  textarea: {
+    width: '100%',
+    padding: spacing.lg,
+    backgroundColor: colors.transparent,
+    borderRadius: '8px 8px 0 0',
+    border: 'none',
+    color: colors.textPrimary,
+    fontSize: fontSize.lg,
+    fontFamily: 'inherit',
+    resize: 'none' as const,
+    outline: 'none',
+    transition: transition.normal,
+    lineHeight: '24px',
+    boxSizing: 'border-box' as const,
+    minHeight: '32px',
+    overflow: 'hidden' as const,
+  } as CSSProperties,
+
+  /**
+   * Lower controls section
+   */
+  controls: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: `${spacing.sm} ${spacing.md}`,
+    backgroundColor: colors.bgSidebarHover,
+    borderRadius: '0 0 8px 8px',
+  } as CSSProperties,
+
+  /**
+   * Control button group
+   */
+  controlGroup: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: spacing.sm,
   } as CSSProperties,
 } as const;
 
@@ -554,6 +712,103 @@ export const textStyles = {
    */
   accent: {
     color: colors.accent,
+  } as CSSProperties,
+} as const;
+
+// =============================================================================
+// Notification Toast Styles
+// =============================================================================
+
+export const notificationStyles = {
+  /**
+   * Base notification toast
+   */
+  base: {
+    border: 'none',
+    borderRadius: borderRadius.md,
+    padding: '6px 10px',
+    fontSize: fontSize.md,
+    transition: transition.opacity,
+    whiteSpace: 'nowrap' as const,
+    maxWidth: '360px',
+    overflow: 'hidden' as const,
+    textOverflow: 'ellipsis',
+  } as CSSProperties,
+
+  /**
+   * Success notification
+   */
+  success: {
+    backgroundColor: colors.accent,
+    color: colors.black,
+  } as CSSProperties,
+
+  /**
+   * Error notification
+   */
+  error: {
+    backgroundColor: '#7f1d1d',
+    color: colors.textPrimary,
+  } as CSSProperties,
+
+  /**
+   * Warning notification
+   */
+  warning: {
+    backgroundColor: colors.warning,
+    color: colors.black,
+  } as CSSProperties,
+} as const;
+
+// =============================================================================
+// Action Button Styles (Send/Stop)
+// =============================================================================
+
+export const actionButtonStyles = {
+  /**
+   * Send button - accent colored circular button
+   */
+  send: {
+    width: '32px',
+    height: '32px',
+    padding: 0,
+    backgroundColor: colors.accent,
+    border: 'none',
+    borderRadius: borderRadius.md,
+    color: colors.black,
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transition: transition.normal,
+    boxShadow: '0 2px 8px rgba(132, 204, 22, 0.3)',
+  } as CSSProperties,
+
+  /**
+   * Send button disabled state
+   */
+  sendDisabled: {
+    opacity: 0.5,
+    cursor: 'not-allowed',
+  } as CSSProperties,
+
+  /**
+   * Stop button
+   */
+  stop: {
+    width: '32px',
+    height: '32px',
+    padding: 0,
+    backgroundColor: colors.accent,
+    border: 'none',
+    borderRadius: borderRadius.md,
+    color: colors.black,
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transition: transition.normal,
+    boxShadow: '0 2px 8px rgba(239, 68, 68, 0.3)',
   } as CSSProperties,
 } as const;
 
