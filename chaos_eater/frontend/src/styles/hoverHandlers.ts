@@ -139,6 +139,17 @@ export const hoverHandlers = {
     defaultBg: colors.transparent,
     defaultColor: colors.textPrimary,
   }),
+
+  /**
+   * Danger button hover (delete, clear, etc.)
+   * Turns red on hover
+   */
+  danger: createHoverHandlers({
+    hoverBg: colors.transparent,
+    hoverColor: colors.error,
+    defaultBg: colors.transparent,
+    defaultColor: colors.textSecondary,
+  }),
 } as const;
 
 /**

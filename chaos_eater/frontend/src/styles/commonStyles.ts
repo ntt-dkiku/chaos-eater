@@ -95,6 +95,23 @@ export const buttonStyles = {
   } as CSSProperties,
 
   /**
+   * Medium icon button - 28x28 for delete/action icons
+   */
+  iconMedium: {
+    width: '28px',
+    height: '28px',
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.transparent,
+    border: 'none',
+    color: colors.textSecondary,
+    cursor: 'pointer',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transition: transition.normal,
+  } as CSSProperties,
+
+  /**
    * Danger button - for destructive actions
    */
   danger: {

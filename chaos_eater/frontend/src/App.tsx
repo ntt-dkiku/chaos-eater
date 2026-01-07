@@ -1930,29 +1930,16 @@ export default function ChaosEaterApp() {
             display: 'flex',
             alignItems: 'center',
             gap: '10px',
-            color: '#a9a9a9'
+            color: colors.textDark
           }}>
-            <span style={{ fontSize: '14px', fontWeight: '500', flex: 1 }}>
+            <span style={mergeStyles(textStyles.sectionTitle, { flex: 1 })}>
               History
             </span>
             <button
               onClick={handleClearAllSnapshots}
               title="Clear all snapshots"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 28,
-                height: 28,
-                borderRadius: 6,
-                backgroundColor: 'transparent',
-                border: 'none',
-                color: '#9ca3af',
-                cursor: 'pointer',
-                marginRight: '0px'
-              }}
-              onMouseEnter={e => { e.currentTarget.style.color = '#ef4444'; e.currentTarget.style.borderColor = '#4b5563'; }}
-              onMouseLeave={e => { e.currentTarget.style.color = '#9ca3af'; e.currentTarget.style.borderColor = '#374151'; }}
+              style={buttonStyles.iconMedium}
+              {...hoverHandlers.danger}
             >
               <Trash2 size={14} />
             </button>
