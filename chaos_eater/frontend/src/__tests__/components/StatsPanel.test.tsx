@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
-import StatsPanel from './StatsPanel';
+import StatsPanel from '../../components/StatsPanel';
 
 describe('StatsPanel', () => {
   const mockFetch = vi.fn();

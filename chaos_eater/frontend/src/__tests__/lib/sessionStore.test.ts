@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { db } from './sessionStore';
+import { db } from '../../lib/sessionStore';
 
 describe('sessionStore', () => {
   beforeEach(async () => {

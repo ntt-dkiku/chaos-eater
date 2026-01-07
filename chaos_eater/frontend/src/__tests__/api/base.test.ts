@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { fetchJSON, postJSON } from './base';
+import { fetchJSON, postJSON } from '../../api/base';
 
 describe('API base', () => {
   const mockFetch = vi.fn();

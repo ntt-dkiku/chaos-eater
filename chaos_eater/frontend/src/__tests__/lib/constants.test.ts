@@ -7,7 +7,7 @@ import {
   NOTIFICATION_TIMEOUT,
   WS_RECONNECT_DELAY,
   CLUSTER_REFRESH_INTERVAL,
-} from './constants';
+} from '../../lib/constants';
 
 describe('constants', () => {
   describe('MODELS', () => {

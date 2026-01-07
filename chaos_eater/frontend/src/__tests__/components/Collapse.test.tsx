@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, act } from '@testing-library/react';
-import Collapse from './Collapse';
+import Collapse from '../../components/Collapse';
 
 describe('Collapse', () => {
   beforeEach(() => {

@@ -12,8 +12,8 @@ import type {
   StatsSnapshot,
   WSEvent,
   DEFAULT_FORM_DATA,
-} from './index';
-import { DEFAULT_FORM_DATA as defaultFormData } from './index';
+} from '../../types/index';
+import { DEFAULT_FORM_DATA as defaultFormData } from '../../types/index';
 
 describe('Type Definitions', () => {
   describe('Message types', () => {

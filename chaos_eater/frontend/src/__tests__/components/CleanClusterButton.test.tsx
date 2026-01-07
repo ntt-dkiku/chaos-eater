@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import CleanClusterButton from './CleanClusterButton';
-import * as clusterApi from '../api/cluster';
+import CleanClusterButton from '../../components/CleanClusterButton';
+import * as clusterApi from '../../api/cluster';
 
-vi.mock('../api/cluster', () => ({
+vi.mock('../../api/cluster', () => ({
   cleanCluster: vi.fn(),
 }));
 

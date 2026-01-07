@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { cleanCluster } from './cluster';
+import { cleanCluster } from '../../api/cluster';
 
 describe('cleanCluster', () => {
   const mockFetch = vi.fn();

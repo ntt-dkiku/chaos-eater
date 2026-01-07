@@ -12,9 +12,9 @@ import {
   deleteSnapshot,
   renameSnapshot,
   clearSnapshots,
-} from './useSessionStore';
-import { db } from './sessionStore';
-import type { FormData } from '../types';
+} from '../../lib/useSessionStore';
+import { db } from '../../lib/sessionStore';
+import type { FormData } from '../../types';
 
 describe('useSessionStore', () => {
   beforeEach(async () => {

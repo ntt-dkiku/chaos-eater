@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
-import LandingLogo from './LandingLogo';
+import LandingLogo from '../../components/LandingLogo';
 
 describe('LandingLogo', () => {
   beforeEach(() => {

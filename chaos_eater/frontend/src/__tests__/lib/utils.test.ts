@@ -8,7 +8,7 @@ import {
   resolveApiUrl,
   formatNumber,
   formatDuration,
-} from './utils';
+} from '../../lib/utils';
 
 describe('utils', () => {
   describe('getApiBase', () => {

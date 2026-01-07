@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import MessagesPanel from './MessagesPanel';
-import type { Message } from '../types';
+import MessagesPanel from '../../components/MessagesPanel';
+import type { Message } from '../../types';
 
 // Mock the CSS module
-vi.mock('../MessagesPanel.module.css', () => ({
+vi.mock('../../components/MessagesPanel.module.css', () => ({
   default: {
     container: 'container',
     subheader: 'subheader',
@@ -27,8 +27,9 @@ describe('MessagesPanel', () => {
 
   it('should render empty state', () => {
     render(<MessagesPanel messages={[]} />);
-    // Should render without errors
-    expect(document.querySelector('.container')).toBeInTheDocument();
+    // Should render without errors - check for the main container element
+    const container = document.querySelector('[class*="container"]');
+    expect(container).toBeInTheDocument();
   });
 
   it('should render text messages', () => {
@@ -48,8 +49,10 @@ describe('MessagesPanel', () => {
 
     render(<MessagesPanel messages={messages} />);
 
-    expect(screen.getByText('Section Title')).toBeInTheDocument();
-    expect(screen.getByText('Section Title')).toHaveClass('subheader');
+    const subheader = screen.getByText('Section Title');
+    expect(subheader).toBeInTheDocument();
+    // CSS module generates hashed class names like "_subheader_bc2a0f"
+    expect(subheader.className).toMatch(/subheader/i);
   });
 
   it('should not render status messages', () => {

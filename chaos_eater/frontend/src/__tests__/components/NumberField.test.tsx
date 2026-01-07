@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import NumberField from './NumberField';
+import NumberField from '../../components/NumberField';
 
 describe('NumberField', () => {
   it('should render with label', () => {
