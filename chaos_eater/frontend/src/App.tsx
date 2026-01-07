@@ -1,3 +1,6 @@
+// @ts-nocheck
+// TODO: Gradually add TypeScript types to this large component
+// This file is in the process of being migrated to TypeScript
 import React, { useState, useEffect, useRef } from 'react';
 import {
   ChevronDown,
