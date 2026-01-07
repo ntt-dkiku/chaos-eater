@@ -1,0 +1,27 @@
+services:
+  frontend-test:
+    build:
+      context: ../chaos_eater/frontend
+      dockerfile: Dockerfile.test
+    volumes:
+      - ../chaos_eater/frontend/src:/app/src:ro
+      - ../chaos_eater/frontend/vitest.config.ts:/app/vitest.config.ts:ro
+      - ../chaos_eater/frontend/tsconfig.json:/app/tsconfig.json:ro
+    command: npm run test:coverage
+    environment:
+      - CI=true
+      - NODE_ENV=test
+
+  frontend-test-watch:
+    build:
+      context: ../chaos_eater/frontend
+      dockerfile: Dockerfile.test
+    volumes:
+      - ../chaos_eater/frontend/src:/app/src
+      - ../chaos_eater/frontend/vitest.config.ts:/app/vitest.config.ts:ro
+      - ../chaos_eater/frontend/tsconfig.json:/app/tsconfig.json:ro
+    command: npm run test:watch
+    stdin_open: true
+    tty: true
+    environment:
+      - NODE_ENV=test

@@ -1,0 +1,13 @@
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Install dependencies first for better caching
+COPY package*.json ./
+RUN npm install --legacy-peer-deps
+
+# Copy source files
+COPY . .
+
+# Default command runs tests with coverage
+CMD ["npm", "run", "test:coverage"]

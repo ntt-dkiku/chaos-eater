@@ -2,6 +2,7 @@
 .PHONY: setup-standard set-mode-standard start-standard cluster-standard
 .PHONY: reload stop
 .PHONY: test test-cov test-watch test-file test-match build-test clean-test
+.PHONY: frontend-test frontend-test-watch frontend-test-coverage build-frontend-test clean-frontend-test
 
 
 #----------------
@@ -138,3 +139,30 @@ build-test:
 # Clean up test containers
 clean-test:
 	@$(TEST_COMPOSE) down --rmi local -v
+
+
+#-----------------
+# frontend testing
+#-----------------
+FRONTEND_TEST_COMPOSE := docker compose -f docker/docker-compose.frontend-test.yaml
+
+# Run frontend tests with coverage
+frontend-test:
+	@$(FRONTEND_TEST_COMPOSE) run --rm frontend-test
+
+# Run frontend tests in watch mode
+frontend-test-watch:
+	@$(FRONTEND_TEST_COMPOSE) run --rm frontend-test-watch
+
+# Run frontend tests with coverage report
+frontend-test-coverage:
+	@$(FRONTEND_TEST_COMPOSE) run --rm frontend-test
+	@echo "Coverage report: chaos_eater/frontend/coverage/index.html"
+
+# Build frontend test container
+build-frontend-test:
+	@$(FRONTEND_TEST_COMPOSE) build
+
+# Clean up frontend test containers
+clean-frontend-test:
+	@$(FRONTEND_TEST_COMPOSE) down --rmi local -v
