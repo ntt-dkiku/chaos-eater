@@ -66,6 +66,9 @@ import {
   releaseClusterBeacon,
 } from './api/cluster';
 
+// Custom hooks
+import { useNotification } from './hooks/useNotification';
+
 
 export default function ChaosEaterApp() {
   // === API constants & helpers ===
@@ -149,7 +152,8 @@ export default function ChaosEaterApp() {
   const seenModelsRef = useRef(new Set());
   const [pullNonce, setPullNonce] = useState(0);
 
-  const [notification, setNotification] = useState(null);
+  // Use custom notification hook
+  const { notification, visible, setNotification } = useNotification({ timeout: 10000 });
   const [hoveredExample, setHoveredExample] = useState(null);
   const fileInputRef = useRef(null);
 
@@ -157,8 +161,6 @@ export default function ChaosEaterApp() {
   const [messages, setMessages] = useState([]); // [{role: 'assistant'|'user', content: string}]
   const [jobId, setJobId] = useState(null);
   const wsRef = useRef(null);
-  const hideTimerRef = useRef(null);
-  const [visible, setVisible] = useState(false);
   // model list
   const models = [
     'openai/gpt-4.1',
@@ -267,25 +269,7 @@ export default function ChaosEaterApp() {
     return () => window.removeEventListener('beforeunload', handler);
   }, []);
 
-  // hide notification a few seconds later
-  useEffect(() => {
-    // auto-dismiss after 3s whenever notification changes
-    if (notification) {
-      setVisible(true);
-      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-      hideTimerRef.current = setTimeout(() => {
-        setVisible(false);
-        // wait for fade-out (0.5s) before removing
-        setTimeout(() => setNotification(null), 500);
-      }, 10000);
-    }
-    return () => {
-      if (hideTimerRef.current) {
-        clearTimeout(hideTimerRef.current);
-        hideTimerRef.current = null;
-      }
-    };
-  }, [notification]);
+  // Note: notification auto-dismiss is now handled by useNotification hook
 
   //----------------
   // Ollama pulling
