@@ -1,7 +1,7 @@
 // @ts-nocheck
 // TODO: Gradually add TypeScript types to this large component
 // This file is in the process of being migrated to TypeScript
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   ChevronDown,
   Send,
@@ -39,6 +39,32 @@ import LandingLogo from './components/LandingLogo';
 import LandingMessage from './components/LandingMessage';
 import CleanClusterButton from './components/CleanClusterButton';
 import StatsPanel from './components/StatsPanel';
+
+// API modules
+import { uploadZipToBackend } from './api/uploads';
+import { checkProviderStatus, saveApiKey } from './api/config';
+import {
+  shortOllamaName,
+  verifyOllamaModelExists,
+  pullOllamaModel,
+  waitOllamaTag,
+} from './api/ollama';
+import { downloadFromApi } from './api/downloads';
+import {
+  createJob,
+  pauseJob,
+  resumeJob,
+  deleteJob,
+  purgeJob,
+  getJob,
+  restoreJob,
+} from './api/jobs';
+import {
+  fetchClusters,
+  claimCluster as claimClusterApi,
+  releaseCluster as releaseClusterApi,
+  releaseClusterBeacon,
+} from './api/cluster';
 
 
 export default function ChaosEaterApp() {
@@ -191,13 +217,12 @@ export default function ChaosEaterApp() {
       : res.text();
   }
 
-  // get clusters（/clusters?session_id=...）
+  // get clusters using imported API function
   const loadClusters = async () => {
     try {
       setClustersLoading(true);
       setClustersError(null);
-      const q = encodeURIComponent(sessionIdRef.current || '');
-      const data = await fetchJSON(`/clusters?session_id=${q}`);
+      const data = await fetchClusters(API_BASE, sessionIdRef.current || '');
       setClusters(prev => {
         return JSON.stringify(prev) === JSON.stringify(data) ? prev : data;
       });
@@ -211,7 +236,7 @@ export default function ChaosEaterApp() {
       setClustersLoading(false);
     }
   };
-  
+
   // 1st time & periodic update（60s）
   useEffect(() => {
     loadClusters();
@@ -221,30 +246,23 @@ export default function ChaosEaterApp() {
   }, []);
 
   const claimCluster = async (preferred) => {
-    const body = { session_id: sessionIdRef.current, preferred };
-    const data = await fetchJSON(`/clusters/claim`, {
-      method: 'POST',
-      body: JSON.stringify(body),
-    });
+    const data = await claimClusterApi(API_BASE, sessionIdRef.current, preferred);
     setFormData(prev => ({ ...prev, cluster: data.cluster }));
     setNotification({ type: 'success', message: `Cluster claimed: ${data.cluster}` });
     await loadClusters();
   };
-  
+
   const releaseCluster = async () => {
     try {
-      await fetchJSON(`/clusters/release`, {
-        method: 'POST',
-        body: JSON.stringify({ session_id: sessionIdRef.current }),
-      });
+      await releaseClusterApi(API_BASE, sessionIdRef.current);
     } catch (_) { }
   };
-  
-  // release the cluster by closing tab or transitioning the screen 
+
+  // release the cluster by closing tab or transitioning the screen
   useEffect(() => {
-    const handler = () => { navigator.sendBeacon?.(`${API_BASE}/clusters/release`,
-      new Blob([JSON.stringify({ session_id: sessionIdRef.current })], { type: 'application/json' })
-    ); };
+    const handler = () => {
+      releaseClusterBeacon(API_BASE, sessionIdRef.current);
+    };
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
   }, []);
@@ -352,26 +370,8 @@ export default function ChaosEaterApp() {
   };
 
   //----------------
-  // file uploading
-  //----------------  
-  async function uploadZipToBackend(file) {
-    const form = new FormData();
-    form.append('file', file);
-  
-    const res = await fetch(`${API_BASE}/upload`, {
-      method: 'POST',
-      body: form
-    });
-  
-    if (!res.ok) {
-      const t = await res.text();
-      throw new Error(`Upload failed: ${t || res.statusText}`);
-    }
-    const json = await res.json();
-    if (!json?.project_path) throw new Error('Server did not return project_path');
-    return json.project_path;
-  }
-
+  // file uploading (uploadZipToBackend is imported from ./api/uploads)
+  //----------------
   const handleFileUpload = async (event) => {
     const files = Array.from(event.target?.files || event.dataTransfer?.files || []);
     // const files = Array.from(event.target.files || []);
@@ -382,7 +382,7 @@ export default function ChaosEaterApp() {
         files.length === 1 &&
         (files[0].type?.includes('zip') || files[0].name.toLowerCase().endsWith('.zip'))
       ) {
-        const projectPath = await uploadZipToBackend(files[0]);
+        const projectPath = await uploadZipToBackend(API_BASE, files[0]);
         setBackendProjectPath(projectPath);
         setNotification({ type: 'success', message: 'File Uploaded!' });
         // Also show in the UI that a zip was chosen
@@ -929,16 +929,16 @@ export default function ChaosEaterApp() {
     return null;
   }
 
-  async function checkProviderStatus(model) {
+  // Uses imported checkProviderStatus from ./api/config
+  async function checkProviderStatusAndSetState(model) {
     const provider = providerFromModel(model);
     if (!provider) {
       setApiKeyConfigured(false);
       return;
     }
     try {
-      const r = await fetch(`${API_BASE}/config/api-key?provider=${provider}`);
-      const info = await r.json();
-      setApiKeyConfigured(info?.configured);
+      const configured = await checkProviderStatus(API_BASE, provider);
+      setApiKeyConfigured(configured);
     } catch {
       setApiKeyConfigured(false);
     }
@@ -946,7 +946,7 @@ export default function ChaosEaterApp() {
 
   useEffect(() => {
     if (formData.model) {
-      checkProviderStatus(formData.model);
+      checkProviderStatusAndSetState(formData.model);
     }
   }, [formData.model]);
 
@@ -1022,106 +1022,18 @@ export default function ChaosEaterApp() {
     })();
   }, [formData.model, pullNonce]);
 
+  // Uses imported saveApiKey from ./api/config
   async function saveApiKeyForCurrentModel(apiKey, model) {
     const provider = providerFromModel(model);
     if (!provider) throw new Error(`Unknown provider from model: ${model}`);
-    if (!apiKey || !apiKey.trim()) throw new Error("API Key is empty");
-  
-    const res = await fetch(`${API_BASE}/config/api-key?persist=true`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider, api_key: apiKey.trim() }),
-    });
-    if (!res.ok) {
-      const t = await res.text().catch(()=>'');
-      throw new Error(t || `HTTP ${res.status}`);
-    }
-    await checkProviderStatus(model);
-    return res.json(); // { provider, configured }
+    const result = await saveApiKey(API_BASE, provider, apiKey);
+    await checkProviderStatusAndSetState(model);
+    return result;
   }
 
   //--------------
-  // Ollama model
-  //--------------
-  /** Convert "ollama/gpt-oss:20b" -> "gpt-oss:20b". If already short, return as-is. */
-  function shortOllamaName(modelFull) {
-    return String(modelFull).startsWith("ollama/")
-      ? modelFull.slice("ollama/".length)
-      : modelFull;
-  }
-
-  /** Check existence of an Ollama model via backend verify endpoint. */
-  async function verifyOllamaModelExists(API_BASE, modelFull) {
-    const short = shortOllamaName(modelFull);
-    const res = await fetch(`${API_BASE}/ollama/verify?model=${encodeURIComponent(short)}`);
-    if (!res.ok) throw new Error(await res.text());
-    const json = await res.json();
-    return { exists: !!json.exists, short };
-  }
-
-  /**
-   * Pull an Ollama model and wait until the server streams a final `{ "status": "success" }`.
-   * This function resolves only after pull is fully completed.
-   */
-  async function pullOllamaModel(API_BASE, modelFull, onProgress, signal) {
-    const short = shortOllamaName(modelFull);
-    const res = await fetch(`${API_BASE}/ollama/pull`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: short }),
-      signal
-    });
-    if (!res.ok) throw new Error(await res.text());
-
-    // Read NDJSON stream to the end
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder(); // Decode bytes -> string chunks
-    let buffer = '';
-    let success = false;
-
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-
-      // Parse by newline (NDJSON)
-      for (;;) {
-        const nl = buffer.indexOf('\n');
-        if (nl < 0) break;
-        const line = buffer.slice(0, nl).trim();
-        buffer = buffer.slice(nl + 1);
-        if (!line) continue;
-
-        let ev;
-        try { ev = JSON.parse(line); }
-        catch { ev = { status: line }; }
-
-        // Optional UI hook
-        onProgress?.(ev);
-
-        // Ollama finishes with {"status": "success"}
-        if (ev.status === 'success') success = true;
-      }
-    }
-
-    if (!success) throw new Error('Pull did not complete (no "success" event).');
-    return { ok: true, model: short };
-  }
-
-  /** After pull, /api/tags may lag; poll verify a few times before proceeding. */
-  async function waitOllamaTag(API_BASE, short, { tries = 6, delay = 1000 } = {}) {
-    for (let i = 0; i < tries; i++) {
-      try {
-        const r = await fetch(`${API_BASE}/ollama/verify?model=${encodeURIComponent(short)}`);
-        if (r.ok) {
-          const j = await r.json();
-          if (j.exists) return true;
-        }
-      } catch {}
-      await new Promise(r => setTimeout(r, delay));
-    }
-    return false;
-  }
+  // Ollama functions are now imported from ./api/ollama
+  // (shortOllamaName, verifyOllamaModelExists, pullOllamaModel, waitOllamaTag)
 
   //----------------
   // dialog display

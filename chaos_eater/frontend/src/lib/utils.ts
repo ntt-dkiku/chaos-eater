@@ -1,4 +1,4 @@
-import type { UploadedFile } from '../types';
+import type { UploadedFile, Message, MessageType, MessageRole } from '../types';
 
 declare global {
   interface Window {
@@ -113,4 +113,27 @@ export function formatDuration(sec: number | null | undefined): string {
   if (h > 0) return `${h}h ${m}m ${ss}s`;
   if (m > 0) return `${m}m ${ss}s`;
   return `${ss}s`;
+}
+
+/**
+ * Raw message input that may have partial fields
+ */
+export interface RawMessage {
+  type?: MessageType;
+  role?: MessageRole;
+  content?: string;
+  text?: string;
+  language?: string;
+}
+
+/**
+ * Normalize a raw message to a standard Message shape for rendering
+ */
+export function normalizeMessage(msg: RawMessage): Message {
+  return {
+    type: msg.type || 'text',
+    role: msg.role || 'assistant',
+    content: msg.content || msg.text || '',
+    ...(msg.language ? { language: msg.language } : {}),
+  } as Message;
 }

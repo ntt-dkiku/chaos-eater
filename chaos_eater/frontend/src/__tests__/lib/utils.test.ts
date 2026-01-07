@@ -8,6 +8,7 @@ import {
   resolveApiUrl,
   formatNumber,
   formatDuration,
+  normalizeMessage,
 } from '../../lib/utils';
 
 describe('utils', () => {
@@ -161,6 +162,49 @@ describe('utils', () => {
 
     it('should handle negative values', () => {
       expect(formatDuration(-10)).toBe('0s');
+    });
+  });
+
+  describe('normalizeMessage', () => {
+    it('should normalize message with defaults', () => {
+      const result = normalizeMessage({ content: 'hello' });
+      expect(result.type).toBe('text');
+      expect(result.role).toBe('assistant');
+      expect(result.content).toBe('hello');
+    });
+
+    it('should preserve type and role', () => {
+      const result = normalizeMessage({ type: 'code', role: 'user', content: 'test' });
+      expect(result.type).toBe('code');
+      expect(result.role).toBe('user');
+      expect(result.content).toBe('test');
+    });
+
+    it('should use text field as fallback for content', () => {
+      const result = normalizeMessage({ text: 'fallback' });
+      expect(result.content).toBe('fallback');
+    });
+
+    it('should prefer content over text', () => {
+      const result = normalizeMessage({ content: 'primary', text: 'fallback' });
+      expect(result.content).toBe('primary');
+    });
+
+    it('should include language for code messages', () => {
+      const result = normalizeMessage({ type: 'code', content: 'code', language: 'python' });
+      expect(result).toHaveProperty('language', 'python');
+    });
+
+    it('should not include language when not provided', () => {
+      const result = normalizeMessage({ content: 'text' });
+      expect(result).not.toHaveProperty('language');
+    });
+
+    it('should handle empty message', () => {
+      const result = normalizeMessage({});
+      expect(result.type).toBe('text');
+      expect(result.role).toBe('assistant');
+      expect(result.content).toBe('');
     });
   });
 });
