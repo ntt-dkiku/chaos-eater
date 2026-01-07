@@ -1,66 +1,56 @@
-// components/StatsPanel.jsx
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { formatNumber, formatDuration } from '../lib/utils';
+import type { StatsSnapshot, TokenUsage, AgentStats } from '../types';
 
-/** Format helpers */
-function formatNumber(n) {
-  try {
-    return new Intl.NumberFormat().format(n || 0);
-  } catch {
-    return String(n || 0);
-  }
-}
-function formatDuration(sec) {
-  if (sec == null) return "-";
-  const s = Math.max(0, Math.floor(sec));
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const ss = s % 60;
-  if (h > 0) return `${h}h ${m}m ${ss}s`;
-  if (m > 0) return `${m}m ${ss}s`;
-  return `${ss}s`;
+export interface StatsPanelProps {
+  apiBase: string;
+  jobId: string | null;
+  snapshotKey?: string;
+  collapsed?: boolean;
 }
 
-/**
- * Live usage stats panel for a job.
- * - Opens WS to /jobs/{jobId}/stats/stream for incremental updates.
- * - Falls back to one-shot GET /jobs/{jobId}/stats if WS fails.
- * - Keeps independent state per "snapshotKey" (e.g., jobId + snapshot id).
- */
+interface CacheEntry {
+  snapshot: StatsSnapshot | null;
+  error: string | null;
+}
+
 export default function StatsPanel({
   apiBase,
   jobId,
-  snapshotKey: snapshotKeyProp, // pass e.g. `${jobId}:${selectedSnapshotId}`
-  collapsed = false
-}) {
+  snapshotKey: snapshotKeyProp,
+  collapsed = false,
+}: StatsPanelProps): React.ReactElement {
   // Use provided snapshotKey or fallback to jobId so each key keeps its own state
   const key = snapshotKeyProp ?? jobId;
 
   // UI state
-  const [snapshot, setSnapshot] = useState(null);
-  const [error, setError] = useState(null);
+  const [snapshot, setSnapshot] = useState<StatsSnapshot | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
 
   // Refs for WS, reconnect timer, cache, and "generation" guard
-  const wsRef = useRef(null);
-  const reconnectTimer = useRef(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Map<key, { snapshot, error }>
-  const cacheRef = useRef(new Map());
+  const cacheRef = useRef<Map<string | null, CacheEntry>>(new Map());
 
   // Bump this number when key/apiBase/jobId changes to invalidate stale async results
   const genRef = useRef(0);
 
   /** Close WebSocket safely */
-  function closeWS() {
+  function closeWS(): void {
     try {
       wsRef.current?.close();
-    } catch {}
+    } catch {
+      // ignore
+    }
     wsRef.current = null;
     setConnected(false);
   }
 
   /** One-shot REST fetch (guarded by generation id) */
-  async function fetchOnce(gen) {
+  async function fetchOnce(gen: number): Promise<void> {
     if (!jobId) return;
     try {
       const res = await fetch(`${apiBase}/jobs/${encodeURIComponent(jobId)}/stats`);
@@ -69,14 +59,14 @@ export default function StatsPanel({
         const { detail } = await res.json().catch(() => ({}));
         throw new Error(detail || `HTTP ${res.status}`);
       }
-      const data = await res.json();
+      const data: StatsSnapshot = await res.json();
       setSnapshot(data);
       setError(null);
       // cache per key
       cacheRef.current.set(key, { snapshot: data, error: null });
     } catch (e) {
       if (gen !== genRef.current) return; // drop stale result
-      const msg = e.message || String(e);
+      const msg = (e as Error).message || String(e);
       setError(msg);
       const prev = cacheRef.current.get(key)?.snapshot ?? null;
       cacheRef.current.set(key, { snapshot: prev, error: msg });
@@ -84,43 +74,43 @@ export default function StatsPanel({
   }
 
   /** Open WebSocket for live updates (guarded by generation id) */
-  function openWS(gen) {
+  function openWS(gen: number): void {
     if (!jobId) return;
 
     const url = (() => {
       try {
         const u = new URL(apiBase);
-        u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
+        u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
         u.pathname = `/jobs/${encodeURIComponent(jobId)}/stats/stream`;
         return u.toString();
       } catch {
-        return apiBase.replace(/^http/, "ws") + `/jobs/${encodeURIComponent(jobId)}/stats/stream`;
+        return apiBase.replace(/^http/, 'ws') + `/jobs/${encodeURIComponent(jobId)}/stats/stream`;
       }
     })();
 
     const ws = new WebSocket(url);
     wsRef.current = ws;
 
-    ws.onopen = () => {
+    ws.onopen = (): void => {
       if (gen !== genRef.current) return;
       setConnected(true);
       setError(null);
     };
 
-    ws.onmessage = (ev) => {
+    ws.onmessage = (ev: MessageEvent): void => {
       if (gen !== genRef.current) return; // ignore messages from stale WS
       try {
-        const msg = JSON.parse(ev.data);
-        if (msg.type === "stats" && msg.snapshot) {
+        const msg = JSON.parse(ev.data as string);
+        if (msg.type === 'stats' && msg.snapshot) {
           setSnapshot(msg.snapshot);
           cacheRef.current.set(key, { snapshot: msg.snapshot, error: null });
-        } else if (msg.type === "warning") {
-          const warn = msg.detail || "warning";
+        } else if (msg.type === 'warning') {
+          const warn = msg.detail || 'warning';
           setError(warn);
           const prev = cacheRef.current.get(key)?.snapshot ?? null;
           cacheRef.current.set(key, { snapshot: prev, error: warn });
-        } else if (msg.type === "error") {
-          const err = msg.detail || "error";
+        } else if (msg.type === 'error') {
+          const err = msg.detail || 'error';
           setError(err);
           const prev = cacheRef.current.get(key)?.snapshot ?? null;
           cacheRef.current.set(key, { snapshot: prev, error: err });
@@ -130,15 +120,15 @@ export default function StatsPanel({
       }
     };
 
-    ws.onerror = () => {
+    ws.onerror = (): void => {
       if (gen !== genRef.current) return;
       setConnected(false);
-      setError("WebSocket error");
+      setError('WebSocket error');
       const prev = cacheRef.current.get(key)?.snapshot ?? null;
-      cacheRef.current.set(key, { snapshot: prev, error: "WebSocket error" });
+      cacheRef.current.set(key, { snapshot: prev, error: 'WebSocket error' });
     };
 
-    ws.onclose = () => {
+    ws.onclose = (): void => {
       if (gen !== genRef.current) return; // do not reconnect for stale generation
       setConnected(false);
       reconnectTimer.current = setTimeout(() => {
@@ -180,71 +170,71 @@ export default function StatsPanel({
   }, [key, jobId, apiBase]);
 
   // Derived values for rendering
-  const total = snapshot?.total || { input_tokens: 0, output_tokens: 0, total_tokens: 0 };
+  const total: TokenUsage = snapshot?.total || { input_tokens: 0, output_tokens: 0, total_tokens: 0 };
   const elapsed = snapshot?.time?.elapsed_sec ?? null;
   const firstTs = snapshot?.time?.first_ts ?? null;
   const lastTs = snapshot?.time?.last_ts ?? null;
 
-  const byAgent = useMemo(() => snapshot?.by_agent || [], [snapshot]);
+  const byAgent: AgentStats[] = useMemo(() => snapshot?.by_agent || [], [snapshot]);
   const topAgents = byAgent.slice(0, 5);
 
   return (
     <div
       style={{
-        padding: "0px",
-        display: collapsed ? "none" : "block",
+        padding: '0px',
+        display: collapsed ? 'none' : 'block',
       }}
       aria-live="polite"
     >
       {/* Totals header with Live/Idle at the right */}
       <div
         style={{
-          padding: "12px",
-          background: "transparent",
-          border: "1px solid #374151",
+          padding: '12px',
+          background: 'transparent',
+          border: '1px solid #374151',
           borderRadius: 8,
           marginBottom: 10,
         }}
       >
         <div
           style={{
-            display: "flex",
-            alignItems: "center",
+            display: 'flex',
+            alignItems: 'center',
             gap: 8,
             marginBottom: 6,
           }}
         >
-          <div style={{ fontSize: 12, color: "#9ca3af", fontWeight: 500 }}>Totals</div>
-          <div style={{ marginLeft: "auto", fontSize: 11, color: connected ? "#84cc16" : "#9ca3af" }}>
-            {connected ? "Live" : "Idle"}
+          <div style={{ fontSize: 12, color: '#9ca3af', fontWeight: 500 }}>Totals</div>
+          <div style={{ marginLeft: 'auto', fontSize: 11, color: connected ? '#84cc16' : '#9ca3af' }}>
+            {connected ? 'Live' : 'Idle'}
           </div>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
           <div>
-            <div style={{ fontSize: 12, color: "#9ca3af" }}>Input tokens</div>
+            <div style={{ fontSize: 12, color: '#9ca3af' }}>Input tokens</div>
             <div style={{ fontSize: 16, fontWeight: 700 }}>{formatNumber(total.input_tokens)}</div>
           </div>
           <div>
-            <div style={{ fontSize: 12, color: "#9ca3af" }}>Output tokens</div>
+            <div style={{ fontSize: 12, color: '#9ca3af' }}>Output tokens</div>
             <div style={{ fontSize: 16, fontWeight: 700 }}>{formatNumber(total.output_tokens)}</div>
           </div>
           <div>
-            <div style={{ fontSize: 12, color: "#9ca3af" }}>Total tokens</div>
+            <div style={{ fontSize: 12, color: '#9ca3af' }}>Total tokens</div>
             <div style={{ fontSize: 16, fontWeight: 700 }}>{formatNumber(total.total_tokens)}</div>
           </div>
           <div>
-            <div style={{ fontSize: 12, color: "#9ca3af" }}>Elapsed</div>
+            <div style={{ fontSize: 12, color: '#9ca3af' }}>Elapsed</div>
             <div style={{ fontSize: 16, fontWeight: 700 }}>{formatDuration(elapsed)}</div>
           </div>
         </div>
 
-        <div style={{ marginTop: 8, fontSize: 11, color: "#6b7280" }}>
+        <div style={{ marginTop: 8, fontSize: 11, color: '#6b7280' }}>
           {firstTs != null && lastTs != null
             ? `Window: ${new Date(firstTs * 1000).toLocaleTimeString()} – ${new Date(
                 lastTs * 1000
               ).toLocaleTimeString()}`
-            : "Window: -"}
+            : 'Window: -'}
         </div>
 
         {/* Compact error row under the totals card */}
@@ -253,10 +243,10 @@ export default function StatsPanel({
             style={{
               marginTop: 6,
               fontSize: 11,
-              color: "#ef4444",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
+              color: '#ef4444',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
             }}
             title={error}
           >
@@ -268,41 +258,39 @@ export default function StatsPanel({
       {/* By Agent (top 5) */}
       <div
         style={{
-          padding: "12px",
-          background: "transparent",
-          border: "1px solid #374151",
+          padding: '12px',
+          background: 'transparent',
+          border: '1px solid #374151',
           borderRadius: 8,
           marginBottom: 10,
         }}
       >
-        <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 6, fontWeight: 500 }}>
-          By Agent (top 5)
-        </div>
+        <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 6, fontWeight: 500 }}>By Agent (top 5)</div>
         {topAgents.length === 0 ? (
-          <div style={{ fontSize: 12, color: "#6b7280" }}>No data yet</div>
+          <div style={{ fontSize: 12, color: '#6b7280' }}>No data yet</div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {topAgents.map((row) => (
               <div
                 key={row.agent_name}
                 style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
                   fontSize: 12,
-                  padding: "6px 8px",
-                  background: "transparent",
-                  border: "1px solid #1f2937",
+                  padding: '6px 8px',
+                  background: 'transparent',
+                  border: '1px solid #1f2937',
                   borderRadius: 6,
                 }}
                 title={`${row.agent_name}`}
               >
-                <span style={{ color: "#e5e7eb", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <span
+                  style={{ color: '#e5e7eb', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                >
                   {row.agent_name}
                 </span>
-                <span style={{ color: "#9ca3af" }}>
-                  {formatNumber(row.token_usage.total_tokens)}
-                </span>
+                <span style={{ color: '#9ca3af' }}>{formatNumber(row.token_usage.total_tokens)}</span>
               </div>
             ))}
           </div>
