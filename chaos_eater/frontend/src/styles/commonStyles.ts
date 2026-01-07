@@ -272,6 +272,71 @@ export const inputStyles = {
 } as const;
 
 // =============================================================================
+// Chip/Tag Styles
+// =============================================================================
+
+export const chipStyles = {
+  /**
+   * File chip - for uploaded files display
+   */
+  file: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: spacing.sm,
+    padding: '6px 12px',
+    backgroundColor: colors.bgHover,
+    borderRadius: borderRadius.full,
+    fontSize: fontSize.sm,
+    color: colors.textPrimary,
+    border: `1px solid ${colors.border}`,
+  } as CSSProperties,
+
+  /**
+   * Close button for chips
+   */
+  closeButton: {
+    background: 'none',
+    border: 'none',
+    color: colors.textSecondary,
+    cursor: 'pointer',
+    padding: '2px',
+    display: 'flex',
+    alignItems: 'center',
+    borderRadius: borderRadius.full,
+    transition: transition.normal,
+  } as CSSProperties,
+} as const;
+
+// =============================================================================
+// Composer/Input Area Styles
+// =============================================================================
+
+export const composerStyles = {
+  /**
+   * Main composer container
+   */
+  container: {
+    position: 'relative' as const,
+    borderRadius: borderRadius.lg,
+    border: `1px solid ${colors.border}`,
+    backgroundColor: colors.bgTertiary,
+    transition: transition.normal,
+    boxShadow: boxShadow.md,
+  } as CSSProperties,
+
+  /**
+   * Files preview container
+   */
+  filesPreview: {
+    marginBottom: spacing.md,
+    padding: spacing.md,
+    backgroundColor: colors.bgSidebarHover,
+    borderRadius: borderRadius.lg,
+    border: `1px solid ${colors.border}`,
+  } as CSSProperties,
+} as const;
+
+// =============================================================================
 // Menu/Dropdown Styles
 // =============================================================================
 

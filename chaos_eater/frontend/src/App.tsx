@@ -74,6 +74,8 @@ import {
   colors,
   buttonStyles,
   inputStyles,
+  chipStyles,
+  composerStyles,
   menuStyles,
   containerStyles,
   textStyles,
@@ -2058,47 +2060,20 @@ export default function ChaosEaterApp() {
           
           {/* Uploaded files display */}
           {draftFiles.length > 0 && (
-            <div style={{ 
-              marginBottom: '12px',
-              padding: '12px',
-              backgroundColor: '#1a1a1a',
-              borderRadius: '8px',
-              border: '1px solid #374151'
-            }}>
-              <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '10px', fontWeight: '500' }}>
+            <div style={composerStyles.filesPreview}>
+              <div style={{ fontSize: '12px', color: colors.textSecondary, marginBottom: '10px', fontWeight: '500' }}>
                 Uploaded files ({draftFiles.length}):
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                 {draftFiles.map((file, index) => (
-                  <div key={index} style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    padding: '6px 12px',
-                    backgroundColor: '#2a2a2a',
-                    borderRadius: '16px',
-                    fontSize: '12px',
-                    color: '#e5e7eb',
-                    border: '1px solid #374151'
-                  }}>
+                  <div key={index} style={chipStyles.file}>
                     <span style={{ maxWidth: '150px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {file.name}
                     </span>
                     <button
                       onClick={() => setDraftFiles(files => files.filter((_, i) => i !== index))}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        color: '#9ca3af',
-                        cursor: 'pointer',
-                        padding: '2px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        borderRadius: '50%',
-                        transition: 'all 0.2s ease'
-                      }}
-                      onMouseEnter={(e) => e.currentTarget.style.color = '#ef4444'}
-                      onMouseLeave={(e) => e.currentTarget.style.color = '#9ca3af'}
+                      style={chipStyles.closeButton}
+                      {...hoverHandlers.danger}
                     >
                       <X size={12} />
                     </button>
@@ -2111,19 +2086,12 @@ export default function ChaosEaterApp() {
           <div
             onDragOver={handleDragOver}
             onDrop={handleDrop}
-            style={{ 
-              position: 'relative',
-              borderRadius: '8px',
-              border: '1px solid #374151',
-              backgroundColor: '#1f1f1f',
-              transition: 'all 0.2s ease',
-              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)'
-            }}
+            style={composerStyles.container}
             onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = '#84cc16';
+              e.currentTarget.style.borderColor = colors.accent;
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = '#374151';
+              e.currentTarget.style.borderColor = colors.border;
             }}
           >
             {/* Upper section - Text area */}
