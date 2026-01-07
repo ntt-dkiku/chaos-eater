@@ -74,6 +74,7 @@ import {
   colors,
   buttonStyles,
   inputStyles,
+  menuStyles,
   containerStyles,
   textStyles,
   hoverHandlers,
@@ -1891,52 +1892,35 @@ export default function ChaosEaterApp() {
                     type="button"
                     onClick={(e) => { e.stopPropagation(); setOpenMenuId(prev => prev === s.id ? null : s.id); }}
                     title="Options"
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      width: 28,
-                      height: 28,
-                      borderRadius: 6,
-                      background: 'transparent',
-                      border: 'none',
-                      color: '#9ca3af',
-                      cursor: 'pointer',
+                    style={mergeStyles(buttonStyles.iconMedium, {
+                      color: colors.textSecondary,
                       marginRight: '-4px',
                       opacity: openMenuId === s.id || hoveredSnapshotId === s.id ? 1 : 0,
                       pointerEvents: openMenuId === s.id || hoveredSnapshotId === s.id ? 'auto' : 'none',
                       transition: 'opacity 0.15s ease',
-                    }}
-                    onMouseEnter={e => { e.currentTarget.style.color = '#e5e7eb'; }}
-                    onMouseLeave={e => { e.currentTarget.style.color = '#9ca3af'; }}
+                    })}
+                    onMouseEnter={e => { e.currentTarget.style.color = colors.textPrimary; }}
+                    onMouseLeave={e => { e.currentTarget.style.color = colors.textSecondary; }}
                   >
                     <MoreHorizontal size={16} />
                   </button>
                 </button>
             
                 {openMenuId === s.id && (
-                  <div
-                    style={{
-                      position: 'absolute', right: 12, top: 44, zIndex: 10,
-                      minWidth: 160, backgroundColor: '#111827', border: '1px solid #374151',
-                      borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.35)', overflow: 'hidden'
-                    }}
-                  >
+                  <div style={mergeStyles(menuStyles.dropdown, { right: 12, top: 44 })}>
                     <button
                       onClick={() => handleRenameSnapshot(s.id, s.title)}
-                      style={{ width: '100%', padding: '8px 10px', background: 'transparent', border: 'none', color: '#e5e7eb', textAlign: 'left', display: 'flex', gap: 8, alignItems: 'center', cursor: 'pointer' }}
-                      onMouseEnter={e => e.currentTarget.style.backgroundColor = '#1f2937'}
-                      onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                      style={menuStyles.item}
+                      {...hoverHandlers.menuItem}
                     >
-                      <Edit3 size={16} /><span style={{ fontSize: 13 }}>Rename</span>
+                      <Edit3 size={16} /><span>Rename</span>
                     </button>
                     <button
                       onClick={() => handleDeleteSnapshot(s.id)}
-                      style={{ width: '100%', padding: '8px 10px', background: 'transparent', border: 'none', color: '#ef4444', textAlign: 'left', display: 'flex', gap: 8, alignItems: 'center', cursor: 'pointer' }}
-                      onMouseEnter={e => e.currentTarget.style.backgroundColor = '#1f2937'}
-                      onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                      style={menuStyles.itemDanger}
+                      {...hoverHandlers.menuItem}
                     >
-                      <Trash2 size={16} /><span style={{ fontSize: 13 }}>Delete</span>
+                      <Trash2 size={16} /><span>Delete</span>
                     </button>
                   </div>
                 )}
@@ -1954,32 +1938,8 @@ export default function ChaosEaterApp() {
           aria-label="Open sidebar"
           onClick={() => setSidebarOpen(true)}
           title="Open sidebar"
-          style={{
-            position: 'fixed',
-            top: '12px',
-            left: '12px',
-            width: '32px',
-            height: '32px',
-            borderRadius: '10px',
-            backgroundColor: '#1f1f1f',
-            border: '1px solid #374151',
-            color: '#d1d5db',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            transition: 'all 0.2s ease',
-            zIndex: 1000,
-            boxShadow: '0 4px 12px rgba(0,0,0,0.25)'
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = '#2a2a2a';
-            e.currentTarget.style.color = '#84cc16';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = '#1f1f1f';
-            e.currentTarget.style.color = '#d1d5db';
-          }}
+          style={mergeStyles(buttonStyles.floating, { top: '12px', left: '12px', zIndex: 1000 })}
+          {...hoverHandlers.iconButton}
         >
           <PanelLeftOpen size={18} />
         </button>

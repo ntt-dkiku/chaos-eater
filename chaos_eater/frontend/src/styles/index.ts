@@ -35,6 +35,7 @@ export {
 export {
   buttonStyles,
   inputStyles,
+  menuStyles,
   layoutStyles,
   containerStyles,
   textStyles,

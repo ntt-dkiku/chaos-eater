@@ -3,7 +3,7 @@
  * Use these to maintain consistency and reduce inline styles
  */
 import type { CSSProperties } from 'react';
-import { colors, spacing, borderRadius, fontSize, fontWeight, transition, boxShadow } from './theme';
+import { colors, spacing, borderRadius, fontSize, fontWeight, transition, boxShadow, zIndex } from './theme';
 
 // =============================================================================
 // Button Styles
@@ -131,6 +131,25 @@ export const buttonStyles = {
     opacity: 0.5,
     cursor: 'not-allowed',
   } as CSSProperties,
+
+  /**
+   * Floating button - fixed position with shadow
+   */
+  floating: {
+    position: 'fixed' as const,
+    width: '32px',
+    height: '32px',
+    borderRadius: '10px',
+    backgroundColor: colors.bgTertiary,
+    border: `1px solid ${colors.border}`,
+    color: colors.textLight,
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transition: transition.normal,
+    boxShadow: boxShadow.md,
+  } as CSSProperties,
 } as const;
 
 // =============================================================================
@@ -249,6 +268,60 @@ export const inputStyles = {
     left: '4px',
     color: colors.accent,
     pointerEvents: 'none' as const,
+  } as CSSProperties,
+} as const;
+
+// =============================================================================
+// Menu/Dropdown Styles
+// =============================================================================
+
+export const menuStyles = {
+  /**
+   * Dropdown menu container
+   */
+  dropdown: {
+    position: 'absolute' as const,
+    minWidth: 160,
+    backgroundColor: '#111827',
+    border: `1px solid ${colors.border}`,
+    borderRadius: borderRadius.lg,
+    boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
+    overflow: 'hidden',
+    zIndex: zIndex.dropdown,
+  } as CSSProperties,
+
+  /**
+   * Menu item button style
+   */
+  item: {
+    width: '100%',
+    padding: `${spacing.sm} 10px`,
+    backgroundColor: colors.transparent,
+    border: 'none',
+    color: colors.textPrimary,
+    textAlign: 'left' as const,
+    display: 'flex',
+    gap: spacing.sm,
+    alignItems: 'center',
+    cursor: 'pointer',
+    fontSize: fontSize.md,
+  } as CSSProperties,
+
+  /**
+   * Danger menu item (delete, etc.)
+   */
+  itemDanger: {
+    width: '100%',
+    padding: `${spacing.sm} 10px`,
+    backgroundColor: colors.transparent,
+    border: 'none',
+    color: colors.error,
+    textAlign: 'left' as const,
+    display: 'flex',
+    gap: spacing.sm,
+    alignItems: 'center',
+    cursor: 'pointer',
+    fontSize: fontSize.md,
   } as CSSProperties,
 } as const;
 
