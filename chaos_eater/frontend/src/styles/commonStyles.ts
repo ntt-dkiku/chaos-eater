@@ -813,6 +813,344 @@ export const actionButtonStyles = {
 } as const;
 
 // =============================================================================
+// Progress Bar Styles
+// =============================================================================
+
+export const progressStyles = {
+  /**
+   * Progress bar container
+   */
+  container: {
+    width: '100%',
+    height: '6px',
+    background: colors.bgHover,
+    borderRadius: borderRadius.sm,
+    overflow: 'hidden' as const,
+  } as CSSProperties,
+
+  /**
+   * Progress bar fill
+   */
+  fill: {
+    height: '100%',
+    background: colors.accent,
+    transition: 'width 0.2s ease',
+  } as CSSProperties,
+
+  /**
+   * Progress bar fill error state
+   */
+  fillError: {
+    background: colors.error,
+  } as CSSProperties,
+
+  /**
+   * Progress info row
+   */
+  infoRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+  } as CSSProperties,
+
+  /**
+   * Progress status text
+   */
+  statusText: {
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+  } as CSSProperties,
+} as const;
+
+// =============================================================================
+// Sidebar Styles
+// =============================================================================
+
+export const sidebarStyles = {
+  /**
+   * Logo container
+   */
+  logoContainer: {
+    padding: spacing.lg,
+    display: 'flex',
+    alignItems: 'center',
+    gap: spacing.sm,
+  } as CSSProperties,
+
+  /**
+   * Logo text
+   */
+  logoText: {
+    fontSize: fontSize.xl,
+    fontWeight: fontWeight.extrabold,
+    fontVariant: 'small-caps' as const,
+  } as CSSProperties,
+
+  /**
+   * Chevron icon wrapper with rotation
+   */
+  chevron: {
+    gap: spacing.sm,
+    display: 'inline-flex',
+    transition: 'transform 180ms ease',
+  } as CSSProperties,
+
+  /**
+   * Collapse content wrapper
+   */
+  collapseContent: {
+    padding: `0 ${spacing.lg} ${spacing.lg}`,
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: spacing.lg,
+  } as CSSProperties,
+
+  /**
+   * Section title with trash button
+   */
+  sectionHeader: {
+    padding: '22px 16px 4px 16px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    color: colors.textDark,
+  } as CSSProperties,
+
+  /**
+   * History list container
+   */
+  historyList: {
+    padding: '0 8px 12px',
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: '0px',
+  } as CSSProperties,
+
+  /**
+   * Empty state text
+   */
+  emptyText: {
+    color: colors.textMuted,
+    fontSize: fontSize.sm,
+    padding: '0 8px 8px',
+  } as CSSProperties,
+} as const;
+
+// =============================================================================
+// Main Content Styles
+// =============================================================================
+
+export const mainContentStyles = {
+  /**
+   * Main content container
+   */
+  container: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column' as const,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.xxl,
+    transition: 'margin-left 0.3s ease',
+    minHeight: 0,
+  } as CSSProperties,
+
+  /**
+   * Dialog/panel wrapper
+   */
+  dialogWrapper: {
+    width: '100%',
+    maxWidth: '768px',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'stretch',
+    transition: transition.slow,
+    overflow: 'hidden' as const,
+    minHeight: 0,
+  } as CSSProperties,
+
+  /**
+   * Example cards grid
+   */
+  exampleGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(3, 1fr)',
+    gap: spacing.lg,
+    marginBottom: '28px',
+    width: '100%',
+    maxWidth: '768px',
+  } as CSSProperties,
+
+  /**
+   * Chat input wrapper
+   */
+  chatInputWrapper: {
+    width: '100%',
+    maxWidth: '768px',
+    position: 'relative' as const,
+    marginBottom: '0px',
+    flexShrink: 0,
+  } as CSSProperties,
+
+  /**
+   * Placeholder text style
+   */
+  placeholder: {
+    position: 'absolute' as const,
+    top: spacing.lg,
+    left: spacing.lg,
+    color: colors.textSecondary,
+    fontSize: fontSize.lg,
+    pointerEvents: 'none' as const,
+    zIndex: 1,
+  } as CSSProperties,
+
+  /**
+   * Files preview label
+   */
+  filesLabel: {
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+    marginBottom: '10px',
+    fontWeight: fontWeight.medium,
+  } as CSSProperties,
+
+  /**
+   * Files flex container
+   */
+  filesContainer: {
+    display: 'flex',
+    flexWrap: 'wrap' as const,
+    gap: spacing.sm,
+  } as CSSProperties,
+
+  /**
+   * File name truncation
+   */
+  fileName: {
+    maxWidth: '150px',
+    overflow: 'hidden' as const,
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap' as const,
+  } as CSSProperties,
+} as const;
+
+// =============================================================================
+// Grid Styles
+// =============================================================================
+
+export const gridStyles = {
+  /**
+   * 2-column parameter grid
+   */
+  twoColumn: {
+    marginTop: spacing.sm,
+    display: 'grid',
+    gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
+    columnGap: spacing.md,
+    rowGap: spacing.md,
+    alignItems: 'start',
+  } as CSSProperties,
+} as const;
+
+// =============================================================================
+// Positioning Styles
+// =============================================================================
+
+export const positionStyles = {
+  /**
+   * Absolute position wrapper for icons
+   */
+  inputIconWrapper: {
+    position: 'absolute' as const,
+    right: spacing.sm,
+    top: '50%',
+    transform: 'translateY(-50%)',
+    backgroundColor: colors.transparent,
+    border: 'none',
+    color: colors.textMuted,
+    cursor: 'pointer',
+    padding: spacing.xs,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  } as CSSProperties,
+
+  /**
+   * Relative position wrapper
+   */
+  relative: {
+    position: 'relative' as const,
+  } as CSSProperties,
+} as const;
+
+// =============================================================================
+// Utility Styles
+// =============================================================================
+
+export const utilityStyles = {
+  /**
+   * Hidden element
+   */
+  hidden: {
+    display: 'none',
+  } as CSSProperties,
+
+  /**
+   * Flex spacer
+   */
+  flexSpacer: {
+    flex: 1,
+  } as CSSProperties,
+
+  /**
+   * Checkbox column container
+   */
+  checkboxColumn: {
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: spacing.md,
+  } as CSSProperties,
+
+  /**
+   * Light font weight text
+   */
+  lightText: {
+    fontWeight: 300,
+  } as CSSProperties,
+
+  /**
+   * Pull progress wrapper
+   */
+  pullProgressWrapper: {
+    marginTop: '-4px',
+    padding: 0,
+  } as CSSProperties,
+
+  /**
+   * Stats collapse padding
+   */
+  statsCollapse: {
+    padding: `0 ${spacing.lg} ${spacing.lg}`,
+  } as CSSProperties,
+} as const;
+
+// =============================================================================
+// Option Styles
+// =============================================================================
+
+export const optionStyles = {
+  /**
+   * Select option background
+   */
+  option: {
+    backgroundColor: colors.bgInput,
+    padding: spacing.sm,
+  } as CSSProperties,
+} as const;
+
+// =============================================================================
 // Utility function to merge styles
 // =============================================================================
 

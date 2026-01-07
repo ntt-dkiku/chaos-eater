@@ -45,6 +45,13 @@ export {
   textStyles,
   notificationStyles,
   actionButtonStyles,
+  progressStyles,
+  sidebarStyles,
+  mainContentStyles,
+  gridStyles,
+  positionStyles,
+  utilityStyles,
+  optionStyles,
   mergeStyles,
 } from './commonStyles';
 

@@ -83,6 +83,13 @@ import {
   textStyles,
   notificationStyles,
   actionButtonStyles,
+  progressStyles,
+  sidebarStyles,
+  mainContentStyles,
+  gridStyles,
+  positionStyles,
+  utilityStyles,
+  optionStyles,
   hoverHandlers,
   focusHandlers,
   mergeStyles,
@@ -1204,47 +1211,25 @@ export default function ChaosEaterApp() {
   //
   //
   return (
-    <div style={{
-      display: 'flex',
-      height: '100vh',
-      backgroundColor: '#191919',
-      color: '#e5e7eb',
-      position: 'relative'
-    }}>      
+    <div style={containerStyles.app}>
       {/* Sidebar */}
       <div
-        style={{ 
+        style={mergeStyles(containerStyles.sidebar, {
           width: sidebarOpen ? `${SIDEBAR_WIDTH}px` : '0px',
           minWidth: sidebarOpen ? `${SIDEBAR_WIDTH}px` : '0px',
-          backgroundColor: '#111111', 
-          borderRight: sidebarOpen ? '1px solid #374151' : 'none',
-          overflowY: 'auto',
-          overflowX: 'hidden',
-          transition: 'all 0.3s ease',
-          position: 'relative',
-          userSelect: 'none',
-          WebkitUserSelect: 'none'
-        }}
+          borderRight: sidebarOpen ? `1px solid ${colors.border}` : 'none',
+        })}
       >
-        <div style={{ 
+        <div style={{
           width: `${SIDEBAR_WIDTH}px`,
           opacity: sidebarOpen ? 1 : 0,
           transition: 'opacity 0.3s ease',
           pointerEvents: sidebarOpen ? 'auto' : 'none'
         }}>
           {/* Logo with Close Button */}
-          <div style={{
-            padding: '16px 16px 16px 16px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px'
-          }}>
+          <div style={sidebarStyles.logoContainer}>
             {/* <img src="/chaoseater_logo.png" style={{ width: 'auto', height: '52px'}} /> */}
-            <span style={{
-              fontSize: '20px',
-              fontWeight: '800',
-              fontVariant: 'small-caps'
-            }}>
+            <span style={sidebarStyles.logoText}>
               ChaosEater
             </span>
 
@@ -1290,12 +1275,9 @@ export default function ChaosEaterApp() {
             </span>
             {/* Rotate chevron with transition */}
             <span
-              style={{
-                gap: '8px',
-                display: 'inline-flex',
-                transition: 'transform 180ms ease',
+              style={mergeStyles(sidebarStyles.chevron, {
                 transform: sidebarCollapsed.general ? 'rotate(0deg)' : 'rotate(180deg)',
-              }}
+              })}
             >
               <ChevronDown size={16} />
             </span>
@@ -1303,12 +1285,7 @@ export default function ChaosEaterApp() {
 
           {/* Smoothly animated content */}
           <Collapse isOpen={!sidebarCollapsed.general}>
-            <div id="settings-collapse" style={{
-              padding: '0 16px 16px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '16px'
-            }}>
+            <div id="settings-collapse" style={sidebarStyles.collapseContent}>
               {/* Model Selection */}
               <div>
                 <label style={inputStyles.label}>Model</label>
@@ -1356,15 +1333,10 @@ export default function ChaosEaterApp() {
 
               {/* Ollama pull progress under Custom model field */}
               {providerFromModel(formData.model) === 'ollama' && ollamaPull.model && (
-                <div style={{ marginTop: '-4px', padding: 0 }}>
+                <div style={utilityStyles.pullProgressWrapper}>
                   {/* Top row: text + action button horizontally aligned */}
-                  <div style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    marginBottom: 8
-                  }}>
-                    <div style={{ fontSize: 12, color: colors.textSecondary }}>
+                  <div style={progressStyles.infoRow}>
+                    <div style={progressStyles.statusText}>
                       Pulling {ollamaPull.model}
                       {ollamaPull.inProgress
                         ? `… ${ollamaPull.pct != null ? `${ollamaPull.pct}%` : (ollamaPull.status || 'in progress')}`
@@ -1413,19 +1385,12 @@ export default function ChaosEaterApp() {
                   </div>
 
                   {/* Progress bar full width */}
-                  <div style={{
-                    width: '100%',
-                    height: 6,
-                    background: colors.bgHover,
-                    borderRadius: 4,
-                    overflow: 'hidden'
-                  }}>
-                    <div style={{
-                      width: `${ollamaPull.pct ?? (ollamaPull.inProgress ? 20 : 0)}%`,
-                      height: '100%',
-                      background: ollamaPull.status === 'error' ? colors.error : colors.accent,
-                      transition: 'width 0.2s ease'
-                    }} />
+                  <div style={progressStyles.container}>
+                    <div style={mergeStyles(
+                      progressStyles.fill,
+                      ollamaPull.status === 'error' && progressStyles.fillError,
+                      { width: `${ollamaPull.pct ?? (ollamaPull.inProgress ? 20 : 0)}%` }
+                    )} />
                   </div>
                 </div>
               )}
@@ -1471,20 +1436,7 @@ export default function ChaosEaterApp() {
                     />
                     <button
                       onClick={() => setFormData({...formData, apiKeyVisible: !formData.apiKeyVisible})}
-                      style={{
-                        position: 'absolute',
-                        right: '8px',
-                        top: '50%',
-                        transform: 'translateY(-50%)',
-                        backgroundColor: colors.transparent,
-                        border: 'none',
-                        color: colors.textMuted,
-                        cursor: 'pointer',
-                        padding: '4px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
-                      }}
+                      style={positionStyles.inputIconWrapper}
                       {...hoverHandlers.mutedIcon}
                     >
                       {formData.apiKeyVisible ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -1497,16 +1449,7 @@ export default function ChaosEaterApp() {
               <div>
                 <label style={inputStyles.label}>Parameters</label>
 
-                <div
-                  style={{
-                    marginTop: '8px',
-                    display: 'grid',
-                    gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
-                    columnGap: '12px',
-                    rowGap: '12px',
-                    alignItems: 'start'
-                  }}
-                >
+                <div style={gridStyles.twoColumn}>
                   {/* Seed */}
                   <NumberField
                     label="Seed"
@@ -1619,9 +1562,9 @@ export default function ChaosEaterApp() {
               />
               
               {/* Checkboxes */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div style={utilityStyles.checkboxColumn}>
                 <label style={inputStyles.checkboxLabel}>
-                  <div style={{ position: 'relative' }}>
+                  <div style={positionStyles.relative}>
                     <input
                       type="checkbox"
                       checked={formData.cleanBefore}
@@ -1632,11 +1575,11 @@ export default function ChaosEaterApp() {
                       <CheckCircle size={14} style={inputStyles.checkboxIcon} />
                     )}
                   </div>
-                  <span style={{ fontWeight: '300' }}>Clean cluster before run</span>
+                  <span style={utilityStyles.lightText}>Clean cluster before run</span>
                 </label>
 
                 <label style={inputStyles.checkboxLabel}>
-                  <div style={{ position: 'relative' }}>
+                  <div style={positionStyles.relative}>
                     <input
                       type="checkbox"
                       checked={formData.cleanAfter}
@@ -1647,11 +1590,11 @@ export default function ChaosEaterApp() {
                       <CheckCircle size={14} style={inputStyles.checkboxIcon} />
                     )}
                   </div>
-                  <span style={{ fontWeight: '300' }}>Clean cluster after run</span>
+                  <span style={utilityStyles.lightText}>Clean cluster after run</span>
                 </label>
 
                 <label style={inputStyles.checkboxLabel}>
-                  <div style={{ position: 'relative' }}>
+                  <div style={positionStyles.relative}>
                     <input
                       type="checkbox"
                       checked={formData.newDeployment}
@@ -1662,7 +1605,7 @@ export default function ChaosEaterApp() {
                       <CheckCircle size={14} style={inputStyles.checkboxIcon} />
                     )}
                   </div>
-                  <span style={{ fontWeight: '300' }}>New deployment</span>
+                  <span style={utilityStyles.lightText}>New deployment</span>
                 </label>
               </div>
             </div>
@@ -1685,20 +1628,17 @@ export default function ChaosEaterApp() {
               Statics
             </span>
             <span
-              style={{
-                gap: '8px',
-                display: 'inline-flex',
-                transition: 'transform 180ms ease',
+              style={mergeStyles(sidebarStyles.chevron, {
                 transform: sidebarCollapsed.usage ? 'rotate(0deg)' : 'rotate(180deg)',
-                marginLeft: '9px'
-              }}
+                marginLeft: '9px',
+              })}
             >
               <ChevronDown size={16} />
             </span>
           </button>
 
           <Collapse isOpen={!sidebarCollapsed.usage}>
-            <div id="stats-collapse" style={{ padding: '0 16px 16px' }}>
+            <div id="stats-collapse" style={utilityStyles.statsCollapse}>
               <StatsPanel
                 apiBase={API_BASE}
                 jobId={jobId}
@@ -1712,13 +1652,7 @@ export default function ChaosEaterApp() {
         {/* History (Snapshots) */}
         <div>
           {/* title */}
-          <div style={{
-            padding: '22px 16px 4px 16px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '10px',
-            color: colors.textDark
-          }}>
+          <div style={sidebarStyles.sectionHeader}>
             <span style={mergeStyles(textStyles.sectionTitle, { flex: 1 })}>
               History
             </span>
@@ -1731,16 +1665,11 @@ export default function ChaosEaterApp() {
               <Trash2 size={14} />
             </button>
           </div>
-          
+
           {/* items */}
-          <div style={{
-            padding: '0 8px 12px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '0px'
-          }}>
+          <div style={sidebarStyles.historyList}>
             {snapshots.length === 0 && (
-              <div style={{ color: '#6b7280', fontSize: 12, padding: '0 8px 8px' }}>No cycles yet</div>
+              <div style={sidebarStyles.emptyText}>No cycles yet</div>
             )}
             {snapshots.map((s) => (
               <div
@@ -1900,33 +1829,15 @@ export default function ChaosEaterApp() {
       )}
       
       {/* Main Content */}
-      <div style={{ 
-          flex: 1, 
-          display: 'flex', 
-          flexDirection: 'column', 
-          alignItems: 'center', 
-          justifyContent: 'center', 
-          padding: '32px',
-          marginLeft: sidebarOpen ? '0' : '0',
-          transition: 'margin-left 0.3s ease',
-          minHeight: 0
-      }}>
+      <div style={mainContentStyles.container}>
         {/* dialog */}
-        <div style={{ 
+        <div style={mergeStyles(mainContentStyles.dialogWrapper, {
           position: panelVisible ? 'relative' : 'absolute',
           visibility: panelVisible ? 'visible' : 'hidden',
           opacity: panelVisible ? 1 : 0,
-          width: '100%',
-          maxWidth: '768px', 
           height: panelVisible ? 'calc(100% - 150px)' : '0',
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'stretch',
-          transition: 'opacity 0.3s ease',
           pointerEvents: panelVisible ? 'auto' : 'none',
-          overflow: 'hidden',
-          minHeight: 0,
-        }}>
+        })}>
           <MessagesPanel
             messages={messages}
             showResume={runState === 'paused'}
@@ -1949,17 +1860,10 @@ export default function ChaosEaterApp() {
             <LandingMessage />
         
             {/* Spacer to push chatbox down */}
-            <div style={{ flex: 1 }}></div>
+            <div style={utilityStyles.flexSpacer} />
 
             {/* Example Cards */}
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(3, 1fr)',
-              gap: '16px',
-              marginBottom: '28px',
-              width: '100%',
-              maxWidth: '768px'
-            }}>
+            <div style={mainContentStyles.exampleGrid}>
               <div
                 onClick={() => loadExample('nginxLimited')}
                 onMouseEnter={() => setHoveredExample('nginxLimited')}
@@ -1994,32 +1898,26 @@ export default function ChaosEaterApp() {
         )}
         
         {/* Unified Chat Input Area */}
-        <div style={{ 
-          width: '100%', 
-          maxWidth: '768px', 
-          position: 'relative',
-          marginBottom: '0px',
-          flexShrink: 0 
-        }}>
+        <div style={mainContentStyles.chatInputWrapper}>
           <input
             ref={fileInputRef}
             type="file"
             multiple
             accept=".yaml,.yml,.zip"
             onChange={handleFileUpload}
-            style={{ display: 'none' }}
+            style={utilityStyles.hidden}
           />
-          
+
           {/* Uploaded files display */}
           {draftFiles.length > 0 && (
             <div style={composerStyles.filesPreview}>
-              <div style={{ fontSize: '12px', color: colors.textSecondary, marginBottom: '10px', fontWeight: '500' }}>
+              <div style={mainContentStyles.filesLabel}>
                 Uploaded files ({draftFiles.length}):
               </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+              <div style={mainContentStyles.filesContainer}>
                 {draftFiles.map((file, index) => (
                   <div key={index} style={chipStyles.file}>
-                    <span style={{ maxWidth: '150px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <span style={mainContentStyles.fileName}>
                       {file.name}
                     </span>
                     <button
@@ -2050,15 +1948,7 @@ export default function ChaosEaterApp() {
             <div style={{ position: 'relative' }} key={composerKey}>
               {/* Custom placeholder text positioned left aligned */}
               {!draftInstructions.trim() && (
-                <div style={{
-                  position: 'absolute',
-                  top: '16px',
-                  left: '16px',
-                  color: '#9ca3af',
-                  fontSize: '16px',
-                  pointerEvents: 'none',
-                  zIndex: 1
-                }}>
+                <div style={mainContentStyles.placeholder}>
                   Input instructions for your Chaos Engineering...
                 </div>
               )}
