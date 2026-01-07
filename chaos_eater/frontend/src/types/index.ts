@@ -96,6 +96,8 @@ export interface Notification {
   message: string;
 }
 
+export type NotifyFn = (type: NotificationType, message: string) => void;
+
 // ===== File Upload =====
 export interface UploadedFile {
   name: string;
