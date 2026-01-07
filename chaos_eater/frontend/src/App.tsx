@@ -69,6 +69,17 @@ import {
 // Custom hooks
 import { useNotification } from './hooks/useNotification';
 
+// Styles
+import {
+  colors,
+  buttonStyles,
+  inputStyles,
+  containerStyles,
+  textStyles,
+  hoverHandlers,
+  mergeStyles,
+} from './styles';
+
 
 export default function ChaosEaterApp() {
   // === API constants & helpers ===
@@ -1305,70 +1316,32 @@ export default function ChaosEaterApp() {
           </div>
           
           {/* New cycle row */}
-          <div style={{ padding: '0 8px' }}>
+          <div style={containerStyles.section}>
             <button
               onClick={handleNewCycle}
               title="Start a new cycle (fresh session)"
-              style={{
-                width: '100%',
-                padding: '10px 8px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px',
-                backgroundColor: 'transparent',
-                border: 'none',
-                borderRadius: 8,
-                color: '#e5e7eb',
-                cursor: 'pointer',
-                transition: 'background-color 0.2s ease, color 0.2s ease'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = '#1a1a1a';
-                e.currentTarget.style.color = '#84cc16';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = 'transparent';
-                e.currentTarget.style.color = '#e5e7eb';
-              }}
+              style={buttonStyles.ghost}
+              {...hoverHandlers.sidebarItem}
             >
               <PlusCircle size={16} />
-              <span style={{ fontSize: '14px', fontWeight: 500 }}>New project</span>
+              <span style={textStyles.sectionTitle}>New project</span>
             </button>
           </div>
 
 
         {/* General Settings */}
-        <div style={{ padding: '0 8px' }}>
+        <div style={containerStyles.section}>
           <button
             onClick={() =>
               setSidebarCollapsed(prev => ({ ...prev, general: !prev.general }))
             }
-            style={{
-              width: '100%',
-              padding: '10px 8px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px',
-              backgroundColor: 'transparent',
-              border: 'none',
-              borderRadius: 8,
-              color: '#e5e7eb',
-              cursor: 'pointer',
-              transition: 'background-color 0.2s ease, color 0.2s ease'
-            }}
-            onMouseEnter={e => {
-              e.currentTarget.style.backgroundColor = '#1a1a1a';
-              e.currentTarget.style.color = '#84cc16';
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.backgroundColor = 'transparent';
-              e.currentTarget.style.color = '#e5e7eb';
-            }}
+            style={buttonStyles.ghost}
+            {...hoverHandlers.sidebarItem}
             aria-expanded={!sidebarCollapsed.general}
             aria-controls="settings-collapse"
           >
             <Wrench size={16} />
-            <span style={{ fontSize: '14px', fontWeight: '500' }}>
+            <span style={textStyles.sectionTitle}>
               Settings
             </span>
             {/* Rotate chevron with transition */}
@@ -1910,37 +1883,18 @@ export default function ChaosEaterApp() {
         </div>
 
         {/* Statics (tokens & time) */}
-        <div style={{ padding: '0 8px' }}> 
+        <div style={containerStyles.section}>
           <button
             onClick={() =>
               setSidebarCollapsed(prev => ({ ...prev, usage: !prev.usage }))
             }
-            style={{
-              width: '100%',
-              padding: '10px 8px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px',
-              backgroundColor: 'transparent',
-              border: 'none',
-              borderRadius: 8,
-              color: '#e5e7eb',
-              cursor: 'pointer',
-              transition: 'background-color 0.2s ease, color 0.2s ease'
-            }}
-            onMouseEnter={e => {
-              e.currentTarget.style.backgroundColor = '#1a1a1a';
-              e.currentTarget.style.color = '#84cc16';
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.backgroundColor = 'transparent';
-              e.currentTarget.style.color = '#e5e7eb';
-            }}
+            style={buttonStyles.ghost}
+            {...hoverHandlers.sidebarItem}
             aria-expanded={!sidebarCollapsed.usage}
             aria-controls="stats-collapse"
           >
             <BarChart3 size={16} />
-            <span style={{ fontSize: '14px', fontWeight: '500' }}>
+            <span style={textStyles.sectionTitle}>
               Statics
             </span>
             <span
