@@ -99,6 +99,17 @@ export const hoverHandlers = {
   }),
 
   /**
+   * Ghost button hover (Cancel/Retry buttons)
+   * Background: #2a2a2a, Color: lime accent
+   */
+  ghostButton: createHoverHandlers({
+    hoverBg: colors.bgHover,
+    hoverColor: colors.accent,
+    defaultBg: colors.bgTertiary,
+    defaultColor: colors.textPrimary,
+  }),
+
+  /**
    * Card/panel hover
    * Slightly lighter background
    */
@@ -150,6 +161,17 @@ export const hoverHandlers = {
     defaultBg: colors.transparent,
     defaultColor: colors.textSecondary,
   }),
+
+  /**
+   * Muted icon hover (visibility toggle, etc.)
+   * Subtle color change on hover
+   */
+  mutedIcon: createHoverHandlers({
+    hoverBg: colors.transparent,
+    hoverColor: colors.textSecondary,
+    defaultBg: colors.transparent,
+    defaultColor: colors.textMuted,
+  }),
 } as const;
 
 /**
@@ -186,3 +208,38 @@ export function createBorderHoverHandlers(
     },
   };
 }
+
+/**
+ * Focus handlers for input elements
+ */
+export interface FocusHandlers {
+  onFocus: (e: React.FocusEvent<HTMLElement>) => void;
+  onBlur: (e: React.FocusEvent<HTMLElement>) => void;
+}
+
+/**
+ * Create focus handlers for border color change
+ */
+export function createFocusHandlers(
+  focusBorder: string = colors.border,
+  defaultBorder: string = colors.borderLight
+): FocusHandlers {
+  return {
+    onFocus: (e: React.FocusEvent<HTMLElement>) => {
+      e.currentTarget.style.borderColor = focusBorder;
+    },
+    onBlur: (e: React.FocusEvent<HTMLElement>) => {
+      e.currentTarget.style.borderColor = defaultBorder;
+    },
+  };
+}
+
+/**
+ * Pre-defined focus handlers for inputs
+ */
+export const focusHandlers = {
+  /**
+   * Standard input focus - border highlights on focus
+   */
+  input: createFocusHandlers(colors.border, colors.borderLight),
+};

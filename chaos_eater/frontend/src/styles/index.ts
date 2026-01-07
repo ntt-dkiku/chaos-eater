@@ -46,7 +46,10 @@ export {
   createHoverHandlers,
   createBgOnlyHoverHandlers,
   createBorderHoverHandlers,
+  createFocusHandlers,
   hoverHandlers,
+  focusHandlers,
   type HoverConfig,
   type HoverHandlers,
+  type FocusHandlers,
 } from './hoverHandlers';

@@ -143,13 +143,15 @@ export const inputStyles = {
    */
   base: {
     width: '100%',
-    padding: spacing.md,
+    padding: '10px 12px',
     backgroundColor: colors.bgInput,
     border: `1px solid ${colors.borderLight}`,
     borderRadius: borderRadius.sm,
     color: colors.textPrimary,
     fontSize: fontSize.base,
     outline: 'none',
+    transition: transition.fast,
+    boxSizing: 'border-box' as const,
   } as CSSProperties,
 
   /**
@@ -157,7 +159,7 @@ export const inputStyles = {
    */
   select: {
     width: '100%',
-    padding: `${spacing.sm} 36px ${spacing.sm} ${spacing.md}`,
+    padding: `10px 36px 10px ${spacing.md}`,
     backgroundColor: colors.bgInput,
     border: `1px solid ${colors.borderLight}`,
     borderRadius: borderRadius.sm,
@@ -167,6 +169,11 @@ export const inputStyles = {
     appearance: 'none' as const,
     WebkitAppearance: 'none' as const,
     outline: 'none',
+    backgroundImage: `url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e")`,
+    backgroundRepeat: 'no-repeat',
+    backgroundPosition: 'right 8px center',
+    backgroundSize: '20px',
+    transition: transition.fast,
   } as CSSProperties,
 
   /**
@@ -199,10 +206,49 @@ export const inputStyles = {
    */
   label: {
     fontSize: fontSize.sm,
-    fontWeight: fontWeight.medium,
-    color: colors.textSecondary,
-    marginBottom: spacing.xs,
+    fontWeight: fontWeight.normal,
+    color: colors.textDark,
+    letterSpacing: '0.5px',
     display: 'block',
+  } as CSSProperties,
+
+  /**
+   * Custom checkbox style
+   */
+  checkbox: {
+    appearance: 'none' as const,
+    WebkitAppearance: 'none' as const,
+    width: '18px',
+    height: '18px',
+    backgroundColor: colors.bgInput,
+    border: `1px solid ${colors.borderLight}`,
+    borderRadius: '3px',
+    cursor: 'pointer',
+    position: 'relative' as const,
+    outline: 'none',
+  } as CSSProperties,
+
+  /**
+   * Checkbox label container style
+   */
+  checkboxLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    cursor: 'pointer',
+    fontSize: fontSize.base,
+    color: colors.textPrimary,
+  } as CSSProperties,
+
+  /**
+   * Checkbox icon overlay style
+   */
+  checkboxIcon: {
+    position: 'absolute' as const,
+    top: '5px',
+    left: '4px',
+    color: colors.accent,
+    pointerEvents: 'none' as const,
   } as CSSProperties,
 } as const;
 

@@ -77,6 +77,7 @@ import {
   containerStyles,
   textStyles,
   hoverHandlers,
+  focusHandlers,
   mergeStyles,
 } from './styles';
 
@@ -285,20 +286,6 @@ export default function ChaosEaterApp() {
   //----------------
   // Ollama pulling
   //----------------
-  const ghostButtonStyle = {
-    padding: '10px 16px',
-    backgroundColor: '#1f1f1f',
-    border: '1px solid #374151',
-    color: '#e5e7eb',
-    borderRadius: 6,
-    fontSize: 13,
-    cursor: 'pointer',
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    transition: 'all 0.2s ease'
-  };
   // Auto-hide pull progress after success or error
   const retryOllamaPull = (force = false) => {
     const model = formData.model?.trim();
@@ -1287,29 +1274,8 @@ export default function ChaosEaterApp() {
               aria-label="Close sidebar"
               onClick={() => setSidebarOpen(false)}
               title="Close sidebar"
-              style={{
-                marginLeft: 'auto',
-                width: '32px',
-                height: '32px',
-                borderRadius: '8px',
-                backgroundColor: 'transparent', // '#1f1f1f',
-                border: 'none', // '1px solid #374151',
-                color: '#d1d5db',
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                transition: 'all 0.2s ease',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.25)'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = '#2a2a2a';
-                e.currentTarget.style.color = '#84cc16';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = 'transparent'; //'#1f1f1f';
-                e.currentTarget.style.color = '#d1d5db';
-              }}
+              style={mergeStyles(buttonStyles.icon, { marginLeft: 'auto' })}
+              {...hoverHandlers.iconButton}
             >
               <PanelLeftClose size={20} />
             </button>
@@ -1367,48 +1333,22 @@ export default function ChaosEaterApp() {
             }}>
               {/* Model Selection */}
               <div>
-                <label style={{ fontSize: '12px', color: '#a9a9a9', fontWeight: '400', letterSpacing: '0.5px' }}>Model</label>
-                <select 
-                  style={{ 
-                    width: '100%', 
-                    marginTop: '4px', 
-                    padding: '10px 12px', 
-                    backgroundColor: '#0a0a0a', 
-                    borderRadius: '4px', 
-                    border: '1px solid #1f2937', 
-                    color: '#e5e7eb',
-                    fontSize: '14px',
-                    outline: 'none',
-                    cursor: 'pointer',
-                    appearance: 'none',
-                    backgroundImage: `url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e")`,
-                    backgroundRepeat: 'no-repeat',
-                    backgroundPosition: 'right 8px center',
-                    backgroundSize: '20px',
-                    paddingRight: '36px',
-                    transition: 'border-color 0.2s ease'
-                  }}
+                <label style={inputStyles.label}>Model</label>
+                <select
+                  style={mergeStyles(inputStyles.select, { marginTop: '4px' })}
                   value={selectModelValue}
                   onChange={(e) => setFormData({...formData, model: e.target.value})}
-                  onFocus={(e) => e.target.style.borderColor = '#374151'}
-                  onBlur={(e) => e.target.style.borderColor = '#1f2937'}
+                  {...focusHandlers.input}
                 >
                   {models.map(model => (
-                    <option key={model} value={model} style={{ backgroundColor: '#0a0a0a', padding: '8px' }}>{model}</option>
+                    <option key={model} value={model} style={{ backgroundColor: colors.bgInput, padding: '8px' }}>{model}</option>
                   ))}
                 </select>
               </div>
 
               {selectModelValue === 'custom' && (
                 <div>
-                  <label style={{
-                    fontSize: '12px',
-                    color: '#a9a9a9',
-                    fontWeight: '400',
-                    letterSpacing: '0.5px'
-                  }}>
-                    Custom model
-                  </label>
+                  <label style={inputStyles.label}>Custom model</label>
                   <input
                     type="text"
                     placeholder="ollama/gpt-oss:20b"
@@ -1428,22 +1368,10 @@ export default function ChaosEaterApp() {
                         ...prev,
                         model: val || defaultModel
                       }));
+                      e.currentTarget.style.borderColor = colors.borderLight;
                     }}
-                    style={{ 
-                      width: '100%', 
-                      marginTop: '4px', 
-                      padding: '10px 36px 10px 12px', 
-                      backgroundColor: '#0a0a0a', 
-                      borderRadius: '4px', 
-                      border: '1px solid #1f2937', 
-                      color: '#e5e7eb', 
-                      fontSize: '14px',
-                      outline: 'none',
-                      transition: 'border-color 0.2s ease',
-                      boxSizing: 'border-box',
-                    }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = '#374151')}
-                    onBlurCapture={(e) => (e.currentTarget.style.borderColor = '#1f2937')}
+                    style={mergeStyles(inputStyles.base, { marginTop: '4px', paddingRight: '36px' })}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = colors.border)}
                   />
                 </div>
               )}
@@ -1458,7 +1386,7 @@ export default function ChaosEaterApp() {
                     alignItems: 'center',
                     marginBottom: 8
                   }}>
-                    <div style={{ fontSize: 12, color: '#9ca3af' }}>
+                    <div style={{ fontSize: 12, color: colors.textSecondary }}>
                       Pulling {ollamaPull.model}
                       {ollamaPull.inProgress
                         ? `… ${ollamaPull.pct != null ? `${ollamaPull.pct}%` : (ollamaPull.status || 'in progress')}`
@@ -1481,9 +1409,8 @@ export default function ChaosEaterApp() {
                           });
                           setNotification({ type: 'warning', message: 'Pull cancelled' });
                         }}
-                        style={{ ...ghostButtonStyle, height: 32 }}
-                        onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#2a2a2a'; e.currentTarget.style.color = '#84cc16'; }}
-                        onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#1f1f1f'; e.currentTarget.style.color = '#e5e7eb'; }}
+                        style={mergeStyles(buttonStyles.secondary, { height: 32 })}
+                        {...hoverHandlers.ghostButton}
                         title="Cancel pull"
                       >
                         Cancel
@@ -1497,10 +1424,9 @@ export default function ChaosEaterApp() {
                           const m = formData.model?.trim();
                           if (m) seenModelsRef.current.delete(m);
                           retryOllamaPull(true);
-                        }} // your retry function (force = true)
-                        style={{ ...ghostButtonStyle, height: 32 }}
-                        onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#2a2a2a'; e.currentTarget.style.color = '#84cc16'; }}
-                        onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#1f1f1f'; e.currentTarget.style.color = '#e5e7eb'; }}
+                        }}
+                        style={mergeStyles(buttonStyles.secondary, { height: 32 })}
+                        {...hoverHandlers.ghostButton}
                         title="Retry pull"
                       >
                         Retry
@@ -1512,14 +1438,14 @@ export default function ChaosEaterApp() {
                   <div style={{
                     width: '100%',
                     height: 6,
-                    background: '#2a2a2a',
+                    background: colors.bgHover,
                     borderRadius: 4,
                     overflow: 'hidden'
                   }}>
                     <div style={{
                       width: `${ollamaPull.pct ?? (ollamaPull.inProgress ? 20 : 0)}%`,
                       height: '100%',
-                      background: ollamaPull.status === 'error' ? '#ef4444' : '#84cc16',
+                      background: ollamaPull.status === 'error' ? colors.error : colors.accent,
                       transition: 'width 0.2s ease'
                     }} />
                   </div>
@@ -1531,28 +1457,15 @@ export default function ChaosEaterApp() {
               {/* API Key */}
               {providerFromModel(formData.model) !== "ollama" && ( // Ollama does not require API key
                 <div>
-                  <label style={{ fontSize: '12px', color: '#a9a9a9', fontWeight: '400', letterSpacing: '0.5px' }}>API key</label>
+                  <label style={inputStyles.label}>API key</label>
                   <div style={{ position: 'relative' }}>
                     <input
                       type={formData.apiKeyVisible ? "text" : "password"}
-                      // placeholder="Enter your API key"
                       placeholder={apiKeyConfigured ? "Your API key is already set" : "Enter your API key"}
-                      style={{ 
-                        width: '100%', 
-                        marginTop: '4px', 
-                        padding: '10px 36px 10px 12px', 
-                        backgroundColor: '#0a0a0a', 
-                        borderRadius: '4px', 
-                        border: '1px solid #1f2937', 
-                        color: '#e5e7eb', 
-                        fontSize: '14px',
-                        outline: 'none',
-                        transition: 'border-color 0.2s ease',
-                        boxSizing: 'border-box',
-                      }}
+                      style={mergeStyles(inputStyles.base, { marginTop: '4px', paddingRight: '36px' })}
                       value={formData.apiKey}
                       onChange={(e) => setFormData({...formData, apiKey: e.target.value})}
-                      onFocus={(e) => e.target.style.borderColor = '#374151'}
+                      onFocus={(e) => e.target.style.borderColor = colors.border}
                       onKeyDown={async (e) => {
                         if (e.key === 'Enter') {
                           e.preventDefault();
@@ -1566,7 +1479,7 @@ export default function ChaosEaterApp() {
                         }
                       }}
                       onBlur={async (e) => {
-                        e.target.style.borderColor = '#1f2937';
+                        e.target.style.borderColor = colors.borderLight;
                         if (formData.apiKey.trim()) {
                           try {
                             const r = await saveApiKeyForCurrentModel(formData.apiKey, formData.model);
@@ -1580,22 +1493,21 @@ export default function ChaosEaterApp() {
                     />
                     <button
                       onClick={() => setFormData({...formData, apiKeyVisible: !formData.apiKeyVisible})}
-                      style={{ 
-                        position: 'absolute', 
-                        right: '8px', 
-                        top: '50%', 
-                        transform: 'translateY(-50%)', 
-                        backgroundColor: 'transparent', 
-                        border: 'none', 
-                        color: '#6b7280', 
+                      style={{
+                        position: 'absolute',
+                        right: '8px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        backgroundColor: colors.transparent,
+                        border: 'none',
+                        color: colors.textMuted,
                         cursor: 'pointer',
                         padding: '4px',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center'
                       }}
-                      onMouseEnter={(e) => e.currentTarget.style.color = '#9ca3af'}
-                      onMouseLeave={(e) => e.currentTarget.style.color = '#6b7280'}
+                      {...hoverHandlers.mutedIcon}
                     >
                       {formData.apiKeyVisible ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
@@ -1605,16 +1517,7 @@ export default function ChaosEaterApp() {
 
               {/* Parameters */}
               <div>
-                <label
-                  style={{
-                    fontSize: '12px',
-                    color: '#a9a9a9',
-                    fontWeight: '400',
-                    letterSpacing: '0.5px'
-                  }}
-                >
-                  Parameters
-                </label>
+                <label style={inputStyles.label}>Parameters</label>
 
                 <div
                   style={{
@@ -1667,27 +1570,12 @@ export default function ChaosEaterApp() {
 
               {/* Cluster Selection */}
               <div>
-                <label style={{ fontSize: '12px', color: '#a9a9a9', fontWeight: '400', letterSpacing: '0.5px' }}>Cluster selection</label>
-                <select 
-                  style={{ 
-                    width: '100%', 
-                    marginTop: '4px', 
-                    padding: '10px 12px', 
-                    backgroundColor: '#0a0a0a', 
-                    borderRadius: '4px', 
-                    border: '1px solid #1f2937', 
-                    color: formData.cluster ? '#e5e7eb' : '#6b7280',
-                    fontSize: '14px',
-                    outline: 'none',
-                    cursor: 'pointer',
-                    appearance: 'none',
-                    backgroundImage: `url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e")`,
-                    backgroundRepeat: 'no-repeat',
-                    backgroundPosition: 'right 8px center',
-                    backgroundSize: '20px',
-                    paddingRight: '36px',
-                    transition: 'border-color 0.2s ease'
-                  }}
+                <label style={inputStyles.label}>Cluster selection</label>
+                <select
+                  style={mergeStyles(inputStyles.select, {
+                    marginTop: '4px',
+                    color: formData.cluster ? colors.textPrimary : colors.textMuted,
+                  })}
                   value={formData.cluster}
                   onChange={async (e) => {
                     const val = e.target.value;
@@ -1698,22 +1586,21 @@ export default function ChaosEaterApp() {
                       setNotification({ type: 'error', message: `Claim failed: ${err.message || err}` });
                     }
                   }}
-                  onFocus={(e) => e.target.style.borderColor = '#374151'}
-                  onBlur={(e) => e.target.style.borderColor = '#1f2937'}
+                  {...focusHandlers.input}
                   disabled={clustersLoading}
                 >
                   {clustersLoading && (
-                    <option value="" style={{ backgroundColor: '#0a0a0a' }}>
+                    <option value="" style={{ backgroundColor: colors.bgInput }}>
                       Loading clusters...
                     </option>
                   )}
                   {!clustersLoading && clustersError && (
-                    <option value="" style={{ backgroundColor: '#0a0a0a' }}>
+                    <option value="" style={{ backgroundColor: colors.bgInput }}>
                       Failed to load clusters: {clustersError}
                     </option>
                   )}
                   {!clustersLoading && !clustersError && clusters.available.length === 0 && (
-                    <option value="" style={{ backgroundColor: '#0a0a0a' }}>
+                    <option value="" style={{ backgroundColor: colors.bgInput }}>
                       No clusters available
                     </option>
                   )}
@@ -1755,124 +1642,46 @@ export default function ChaosEaterApp() {
               
               {/* Checkboxes */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <label style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  gap: '10px', 
-                  cursor: 'pointer',
-                  fontSize: '14px',
-                  color: '#e5e7eb'
-                }}>
+                <label style={inputStyles.checkboxLabel}>
                   <div style={{ position: 'relative' }}>
                     <input
                       type="checkbox"
                       checked={formData.cleanBefore}
                       onChange={(e) => setFormData({...formData, cleanBefore: e.target.checked})}
-                      style={{ 
-                        appearance: 'none',
-                        width: '18px', 
-                        height: '18px',
-                        backgroundColor: '#0a0a0a',
-                        border: '1px solid #1f2937',
-                        borderRadius: '3px',
-                        cursor: 'pointer',
-                        position: 'relative',
-                        outline: 'none'
-                      }}
+                      style={inputStyles.checkbox}
                     />
                     {formData.cleanBefore && (
-                      <CheckCircle 
-                        size={14} 
-                        style={{ 
-                          position: 'absolute', 
-                          top: '5px', 
-                          left: '4px', 
-                          color: '#84cc16',
-                          pointerEvents: 'none'
-                        }} 
-                      />
+                      <CheckCircle size={14} style={inputStyles.checkboxIcon} />
                     )}
                   </div>
                   <span style={{ fontWeight: '300' }}>Clean cluster before run</span>
                 </label>
-                
-                <label style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  gap: '10px', 
-                  cursor: 'pointer',
-                  fontSize: '14px',
-                  color: '#e5e7eb'
-                }}>
+
+                <label style={inputStyles.checkboxLabel}>
                   <div style={{ position: 'relative' }}>
                     <input
                       type="checkbox"
                       checked={formData.cleanAfter}
                       onChange={(e) => setFormData({...formData, cleanAfter: e.target.checked})}
-                      style={{ 
-                        appearance: 'none',
-                        width: '18px', 
-                        height: '18px',
-                        backgroundColor: '#0a0a0a',
-                        border: '1px solid #1f2937',
-                        borderRadius: '3px',
-                        cursor: 'pointer',
-                        position: 'relative',
-                        outline: 'none'
-                      }}
+                      style={inputStyles.checkbox}
                     />
                     {formData.cleanAfter && (
-                      <CheckCircle 
-                        size={14} 
-                        style={{ 
-                          position: 'absolute', 
-                          top: '5px', 
-                          left: '4px', 
-                          color: '#84cc16',
-                          pointerEvents: 'none'
-                        }} 
-                      />
+                      <CheckCircle size={14} style={inputStyles.checkboxIcon} />
                     )}
                   </div>
                   <span style={{ fontWeight: '300' }}>Clean cluster after run</span>
                 </label>
-                
-                <label style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  gap: '10px', 
-                  cursor: 'pointer',
-                  fontSize: '14px',
-                  color: '#e5e7eb'
-                }}>
+
+                <label style={inputStyles.checkboxLabel}>
                   <div style={{ position: 'relative' }}>
                     <input
                       type="checkbox"
                       checked={formData.newDeployment}
                       onChange={(e) => setFormData({...formData, newDeployment: e.target.checked})}
-                      style={{ 
-                        appearance: 'none',
-                        width: '18px', 
-                        height: '18px',
-                        backgroundColor: '#0a0a0a',
-                        border: '1px solid #1f2937',
-                        borderRadius: '3px',
-                        cursor: 'pointer',
-                        position: 'relative',
-                        outline: 'none'
-                      }}
+                      style={inputStyles.checkbox}
                     />
                     {formData.newDeployment && (
-                      <CheckCircle 
-                        size={14} 
-                        style={{ 
-                          position: 'absolute', 
-                          top: '5px', 
-                          left: '4px', 
-                          color: '#84cc16',
-                          pointerEvents: 'none'
-                        }} 
-                      />
+                      <CheckCircle size={14} style={inputStyles.checkboxIcon} />
                     )}
                   </div>
                   <span style={{ fontWeight: '300' }}>New deployment</span>
