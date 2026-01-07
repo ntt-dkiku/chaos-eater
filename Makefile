@@ -2,6 +2,7 @@
 .PHONY: setup-standard set-mode-standard start-standard cluster-standard
 .PHONY: reload stop
 .PHONY: test test-cov test-watch test-file test-match build-test clean-test
+.PHONY: frontend-test frontend-test-watch frontend-test-coverage build-frontend-test clean-frontend-test
 
 
 #----------------
@@ -138,3 +139,62 @@ build-test:
 # Clean up test containers
 clean-test:
 	@$(TEST_COMPOSE) down --rmi local -v
+
+
+#-----------------
+# frontend testing
+#-----------------
+FRONTEND_TEST_COMPOSE := docker compose -f docker/docker-compose.frontend-test.yaml
+
+# Run frontend tests with coverage
+frontend-test:
+	@$(FRONTEND_TEST_COMPOSE) run --rm frontend-test
+
+# Run frontend tests in watch mode
+frontend-test-watch:
+	@$(FRONTEND_TEST_COMPOSE) run --rm frontend-test-watch
+
+# Run frontend tests with coverage report
+frontend-test-coverage:
+	@$(FRONTEND_TEST_COMPOSE) run --rm frontend-test
+	@echo "Coverage report: chaos_eater/frontend/coverage/index.html"
+
+# Build frontend test container
+build-frontend-test:
+	@$(FRONTEND_TEST_COMPOSE) build
+
+# Clean up frontend test containers
+clean-frontend-test:
+	@$(FRONTEND_TEST_COMPOSE) down --rmi local -v
+
+
+#--------------------
+# sandbox API testing (sandbox内で実行)
+#--------------------
+.PHONY: sandbox-test sandbox-test-match
+
+# Run sandbox API tests inside sandbox backend container
+# Requires: make setup-sandbox && make reload
+sandbox-test:
+ifeq ($(MODE),sandbox)
+	docker compose $(BASE_SANDBOX) exec chaos-eater bash -c "\
+		docker compose -f docker/docker-compose.yaml exec chaos-eater-backend \
+		sh -c 'uv sync --extra dev && CE_SANDBOX_TEST=1 pytest tests/test_sandbox_api.py -v'"
+else
+	@echo "Error: Sandbox API tests require sandbox mode. Run 'make setup-sandbox' first."
+	@exit 1
+endif
+
+# Run specific sandbox API test by pattern: make sandbox-test-match PATTERN=test_resume
+sandbox-test-match:
+ifndef PATTERN
+	$(error PATTERN is required. Usage: make sandbox-test-match PATTERN=test_resume)
+endif
+ifeq ($(MODE),sandbox)
+	docker compose $(BASE_SANDBOX) exec chaos-eater bash -c "\
+		docker compose -f docker/docker-compose.yaml exec chaos-eater-backend \
+		sh -c 'uv sync --extra dev && CE_SANDBOX_TEST=1 pytest tests/test_sandbox_api.py -v -k \"$(PATTERN)\"'"
+else
+	@echo "Error: Sandbox API tests require sandbox mode."
+	@exit 1
+endif

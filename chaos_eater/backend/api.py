@@ -755,14 +755,14 @@ async def run_chaos_eater_cycle(
             )
             ce_input = ChaosEaterInput(**built)
 
-        # Load checkpoint if resuming
+        # Load checkpoint if available (file existence determines if we can restore state)
         checkpoint = None
-        if resume_from and checkpoint_path and os.path.exists(checkpoint_path):
+        if checkpoint_path and os.path.exists(checkpoint_path):
             import json
             with open(checkpoint_path, 'r') as f:
                 checkpoint_data = json.load(f)
             checkpoint = ChaosEaterOutput(**checkpoint_data)
-            logger.info(f"Resuming job {job_id} from phase: {resume_from}")
+            logger.info(f"Loaded checkpoint for job {job_id}, resuming from phase: {resume_from}")
 
         # Run CE in thread pool (avoid blocking the event loop)
         from functools import partial
@@ -1097,12 +1097,12 @@ async def resume_job(
 
     if has_agent_checkpoint and resume_from_agent:
         # Agent-level checkpoint exists - use it for fine-grained resume
-        # output.json may or may not exist (e.g., paused mid-preprocess)
-        checkpoint_path = output_checkpoint_path if has_output_checkpoint else None
+        # Always set checkpoint_path; file existence is checked during loading
+        checkpoint_path = output_checkpoint_path
         logger.info(f"Agent checkpoint found, resuming from {resume_from}/{resume_from_agent}")
     elif has_agent_checkpoint and resume_from:
         # Agent checkpoint exists but no specific agent (phase completed, next phase starting)
-        checkpoint_path = output_checkpoint_path if has_output_checkpoint else None
+        checkpoint_path = output_checkpoint_path
         logger.info(f"Agent checkpoint found (phase level), resuming from {resume_from}")
     elif has_output_checkpoint:
         # Phase-level checkpoint only
@@ -1110,8 +1110,9 @@ async def resume_job(
         logger.info(f"Output checkpoint found, resuming from {resume_from}")
     elif resume_from:
         # No checkpoint files but we know where to resume (from JobInfo)
-        checkpoint_path = None
-        logger.info(f"No checkpoint files, but resuming from {resume_from} based on job state")
+        # Still set checkpoint_path so loading logic can check if file exists
+        checkpoint_path = output_checkpoint_path
+        logger.info(f"No checkpoint files yet, but resuming from {resume_from} based on job state")
     else:
         # No checkpoint found at all
         logger.warning(f"No checkpoint found, restarting from beginning")
