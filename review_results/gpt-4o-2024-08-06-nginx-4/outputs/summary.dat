@@ -1,9 +1,0 @@
-The Chaos Engineering cycle begins with understanding the user inputs, which include Kubernetes manifests for a Pod and a Service. The Pod manifest defines a single Nginx container with a restart policy of 'Never', and the Service manifest exposes this Pod on port 80. Two main resiliency issues are identified: the Pod's restart policy and the lack of redundancy due to a single Pod deployment.
-
-The hypothesis for the experiment is that the system's steady states will be maintained even when faults are injected. Two steady states are defined: the Pod should be running at least 90% of the time, and the Service should have 99.9% availability with a response status of 200.
-
-The fault scenario simulates a cyber attack using Chaos Mesh, injecting PodChaos to kill the Pod and NetworkChaos to introduce network latency. The experiment is divided into three phases: pre-validation, fault-injection, and post-validation, each with specific tasks and durations to verify the system's behavior under stress.
-
-In the first experiment attempt, the system fails to maintain the steady states during and after the fault injection. The Pod does not restart due to its 'Never' restart policy, and the Service becomes unavailable, confirming the identified issues. Recommendations include changing the Pod's restart policy and implementing a Deployment for redundancy.
-
-After modifying the system by replacing the Pod with a Deployment, the second experiment attempt is successful. All unit tests pass, indicating that the system maintains its steady states even when faults are injected, demonstrating improved resilience.
