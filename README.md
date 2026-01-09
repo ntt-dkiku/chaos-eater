@@ -253,6 +253,8 @@ Coming soon!
 #### 1.1. Run experiments
 > [!NOTE]
 > Our results are already saved in `evaluation/ase2025/results`, so you can skip this step if you only want to reproduce the tables and graphs from the paper.
+> [!WARNING]  
+> Since Claude Sonnet 3.5 and Gemini 1.5 Pro, which were used as reviewers in the ASE paper, have been retired, we replace them with Claude Sonnet 4.5 and Gemini 2.5 Pro, respectively.
 
 Run the following command to conduct the same experiments as the ASE paper:
 ```bash
@@ -267,7 +269,7 @@ By default, the settings match those used in the paper, but you can customize th
 | Option | Default | Description |
 |--------|---------|-------------|
 | `EVAL_MODEL` | `openai/gpt-4o-2024-08-06` | LLM model for ChaosEater |
-| `EVAL_SAMPLES` | `5` | Number of ChaosEater runs per sample |
+| `EVAL_RUNS` | `5` | Number of ChaosEater runs per sample |
 | `EVAL_REVIEWS` | `5` | Number of reviews per reviewer |
 | `EVAL_TEMPERATURE` | `0.0` | LLM temperature |
 | `EVAL_SEED` | `42` | Random seed for LLMs |
@@ -297,7 +299,7 @@ make eval-synth
 | Option | Default | Description |
 |--------|---------|-------------|
 | `EVAL_MODEL` | `openai/gpt-4o-2024-08-06` | LLM model for ChaosEater |
-| `EVAL_SAMPLES` | `5` | Number of ChaosEater runs per sample |
+| `EVAL_RUNS` | `5` | Number of ChaosEater runs per sample |
 | `EVAL_REVIEWS` | `5` | Number of reviews per reviewer |
 | `EVAL_TEMPERATURE` | `0.0` | LLM temperature |
 | `EVAL_SEED` | `42` | Random seed for LLMs |
