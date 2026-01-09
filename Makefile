@@ -4,6 +4,7 @@
 .PHONY: test test-cov test-watch test-file test-match build-test clean-test
 .PHONY: frontend-test frontend-test-watch frontend-test-coverage build-frontend-test clean-frontend-test
 .PHONY: open-jupyter stop-jupyter
+.PHONY: eval-ase2025 _eval-ase2025-run
 
 
 #----------------
@@ -212,3 +213,48 @@ open-jupyter:
 
 stop-jupyter:
 	docker compose -f docker/docker-compose.notebook.yaml down
+
+
+#---------------------
+# ASE2025 evaluation
+#---------------------
+EVAL_MODEL ?= openai/gpt-4o-2024-08-06
+EVAL_SAMPLES ?= 5
+EVAL_REVIEWS ?= 5
+EVAL_TEMPERATURE ?= 0.0
+EVAL_SEED ?= 42
+EVAL_PORT ?= 8000
+EVAL_OUTPUT_DIR ?= evaluation/ase2025/results
+EVAL_SYSTEMS ?= all
+EVAL_REVIEWERS ?= all
+
+# Run ASE2025 evaluation in sandbox
+# Usage: make eval-ase2025 [EVAL_MODEL=...] [EVAL_SAMPLES=...] [EVAL_REVIEWS=...]
+eval-ase2025:
+	@if docker ps --format '{{.Names}}' | grep -q '^chaos-eater-sandbox$$'; then \
+		echo "Sandbox is running. Starting evaluation..."; \
+		$(MAKE) _eval-ase2025-run; \
+	else \
+		echo "Sandbox is not running."; \
+		read -p "Start sandbox and run evaluation? [y/N] " confirm; \
+		if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
+			echo "Starting sandbox..."; \
+			$(MAKE) setup-sandbox && $(MAKE) _eval-ase2025-run; \
+		else \
+			echo "Cancelled."; \
+		fi \
+	fi
+
+_eval-ase2025-run:
+	docker compose $(BASE_SANDBOX) exec chaos-eater bash -c "\
+		docker compose -f docker/docker-compose.yaml exec chaos-eater-backend \
+		sh -c 'cd /app && PYTHONPATH=/app uv run python evaluation/ase2025/reproduce_ase2025.py \
+			--model \"$(EVAL_MODEL)\" \
+			--output_dir \"$(EVAL_OUTPUT_DIR)\" \
+			--num_samples $(EVAL_SAMPLES) \
+			--num_review_samples $(EVAL_REVIEWS) \
+			--temperature $(EVAL_TEMPERATURE) \
+			--seed $(EVAL_SEED) \
+			--port $(EVAL_PORT) \
+			--examples \"$(EVAL_SYSTEMS)\" \
+			--reviewers \"$(EVAL_REVIEWERS)\"'"

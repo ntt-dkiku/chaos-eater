@@ -40,7 +40,7 @@ EXAMPLES = {
     }
 }
 
-REVIEWERS = [
+DEFAULT_REVIEWERS = [
     "openai/gpt-4o-2024-08-06",
     "google/gemini-1.5-pro",
     "anthropic/claude-3-5-sonnet-20240620"
@@ -130,9 +130,10 @@ def run_chaoseater_phase(
     num_samples: int,
     seed: int,
     temperature: float,
-    port: int
+    port: int,
+    examples: list[str]
 ) -> None:
-    """Phase 1: Run ChaosEater on all examples."""
+    """Phase 1: Run ChaosEater on specified examples."""
     print("\n" + "=" * 60)
     print("Phase 1: Running ChaosEater")
     print("=" * 60)
@@ -155,7 +156,7 @@ def run_chaoseater_phase(
     project_name = "chaos-eater"
     os.makedirs(output_dir, exist_ok=True)
 
-    for example_name in EXAMPLES.keys():
+    for example_name in examples:
         print(f"\n--- {example_name.upper()} ---")
         ce_input = load_example_input(example_name)
 
@@ -191,7 +192,8 @@ def run_review_phase(
     output_dir: str,
     num_review_samples: int,
     temperature: float,
-    port: int
+    port: int,
+    reviewers: list[str]
 ) -> None:
     """Phase 2: Generate reviews using LLM-as-a-judge."""
     print("\n" + "=" * 60)
@@ -215,7 +217,7 @@ def run_review_phase(
 
         result = ChaosEaterOutput(**load_json(output_json_path))
 
-        for reviewer_model in REVIEWERS:
+        for reviewer_model in reviewers:
             reviewer_name = reviewer_model.split('/')[-1]
             reviews_dir = os.path.join(result_dir, "reviews")
             os.makedirs(reviews_dir, exist_ok=True)
@@ -282,16 +284,42 @@ def main():
         "--port", default=8000, type=int,
         help="Port number for vLLM server (default: 8000)"
     )
+    parser.add_argument(
+        "--examples", default="all", type=str,
+        help="Comma-separated list of examples to run (nginx,sockshop) or 'all' (default: all)"
+    )
+    parser.add_argument(
+        "--reviewers", default="all", type=str,
+        help="Comma-separated list of reviewers or 'all' (default: all)"
+    )
 
     args = parser.parse_args()
+
+    # Parse examples
+    if args.examples == "all":
+        examples_to_run = list(EXAMPLES.keys())
+    else:
+        examples_to_run = [e.strip() for e in args.examples.split(",")]
+        invalid = [e for e in examples_to_run if e not in EXAMPLES]
+        if invalid:
+            print(f"Error: Invalid example(s): {invalid}")
+            print(f"Available examples: {list(EXAMPLES.keys())}")
+            sys.exit(1)
+
+    # Parse reviewers
+    if args.reviewers == "all":
+        reviewers_to_use = DEFAULT_REVIEWERS
+    else:
+        reviewers_to_use = [r.strip() for r in args.reviewers.split(",")]
 
     print("=" * 60)
     print("ASE2025 Reproducibility Script")
     print("=" * 60)
     print(f"Model: {args.model}")
+    print(f"Examples: {', '.join(examples_to_run)}")
     print(f"Samples per example: {args.num_samples}")
     print(f"Reviews per reviewer: {args.num_review_samples}")
-    print(f"Reviewers: {', '.join([r.split('/')[-1] for r in REVIEWERS])}")
+    print(f"Reviewers: {', '.join([r.split('/')[-1] for r in reviewers_to_use])}")
     print(f"Output directory: {args.output_dir}")
     print("=" * 60)
 
@@ -317,7 +345,8 @@ def main():
             num_samples=args.num_samples,
             seed=args.seed,
             temperature=args.temperature,
-            port=args.port
+            port=args.port,
+            examples=examples_to_run
         )
 
     # Phase 2: Generate reviews
@@ -325,15 +354,17 @@ def main():
         output_dir=args.output_dir,
         num_review_samples=args.num_review_samples,
         temperature=args.temperature,
-        port=args.port
+        port=args.port,
+        reviewers=reviewers_to_use
     )
 
     print("\n" + "=" * 60)
     print("Done!")
     print("=" * 60)
     print(f"Results saved to: {args.output_dir}")
-    print(f"  - ChaosEater runs: {args.num_samples * 2} (nginx: {args.num_samples}, sockshop: {args.num_samples})")
-    print(f"  - Reviews per result: {len(REVIEWERS) * args.num_review_samples}")
+    examples_summary = ", ".join([f"{e}: {args.num_samples}" for e in examples_to_run])
+    print(f"  - ChaosEater runs: {args.num_samples * len(examples_to_run)} ({examples_summary})")
+    print(f"  - Reviews per result: {len(reviewers_to_use) * args.num_review_samples}")
 
 
 if __name__ == "__main__":
