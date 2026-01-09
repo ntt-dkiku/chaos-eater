@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  notebook:
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile_llm
+    volumes:
+      - ..:/app/
+      - /app/.venv  # preserve venv from image (not overwritten by host mount)
+    ports:
+      - "${JUPYTER_PORT:-8888}:${JUPYTER_PORT:-8888}"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+    working_dir: /app
+    command: >
+      sh -c "uv sync --frozen --no-dev &&
+             jupyter lab --ip=0.0.0.0 --port=${JUPYTER_PORT:-8888} --no-browser --allow-root"

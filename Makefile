@@ -3,6 +3,7 @@
 .PHONY: reload stop
 .PHONY: test test-cov test-watch test-file test-match build-test clean-test
 .PHONY: frontend-test frontend-test-watch frontend-test-coverage build-frontend-test clean-frontend-test
+.PHONY: open-notebook stop-notebook
 
 
 #----------------
@@ -198,3 +199,16 @@ else
 	@echo "Error: Sandbox API tests require sandbox mode."
 	@exit 1
 endif
+
+
+#-----------------
+# jupyter notebook
+#-----------------
+JUPYTER_PORT ?= 8888
+
+open-notebook:
+	@echo "Starting Jupyter Notebook on port $(JUPYTER_PORT)..."
+	JUPYTER_PORT=$(JUPYTER_PORT) docker compose -f docker/docker-compose.notebook.yaml up
+
+stop-notebook:
+	docker compose -f docker/docker-compose.notebook.yaml down
