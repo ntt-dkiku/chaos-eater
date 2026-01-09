@@ -10,7 +10,7 @@ import shutil
 
 from chaos_eater.utils.llms import load_llm
 from chaos_eater.utils.functions import save_json, load_json
-from chaos_eater.backend.streaming import FrontendMessageLogger
+from chaos_eater.backend.cli_logger import CLIMessageLogger
 from chaos_eater.utils.schemas import File
 from chaos_eater.utils.k8s import remove_all_resources_by_labels
 from chaos_eater.chaos_eater import ChaosEater, ChaosEaterInput, ChaosEaterOutput
@@ -152,7 +152,7 @@ def run_chaoseater_phase(
     chaoseater = ChaosEater(
         llm=llm,
         ce_tool=CETool.init(CEToolType.chaosmesh),
-        message_logger=FrontendMessageLogger(),
+        message_logger=CLIMessageLogger(),
         work_dir="sandbox",
         namespace="chaos-eater"
     )

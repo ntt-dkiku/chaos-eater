@@ -23,6 +23,7 @@ dependencies = [
     "pandas>=2.3.3",
     "pydantic==2.10.6",
     "pydot>=4.0.1",
+    "rich>=13.0.0",
     "python-multipart>=0.0.20",
     "redis>=7.1.0",
     "scipy>=1.15.3",

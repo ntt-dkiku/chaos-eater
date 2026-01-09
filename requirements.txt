@@ -19,6 +19,7 @@ kubernetes-validate
 
 # Utility
 aiofiles
+rich
 jupyter
 jupyterlab
 matplotlib
