@@ -5,7 +5,7 @@ import glob
 from chaos_eater.utils.llms import load_llm
 from chaos_eater.utils.functions import save_json, load_json
 from chaos_eater.chaos_eater import ChaosEaterOutput
-from chaos_eater.reviewing.reviwer import Reviewer
+from evaluation.reviewing.reviewer import Reviewer
 
 
 def evaluate_cecycle_by_llms(
@@ -26,7 +26,7 @@ def evaluate_cecycle_by_llms(
     # load llm and reviewer
     #-------------------------
     llm = load_llm(
-        model_name=model_name, 
+        model_name=model_name,
         temperature=temperature,
         port=port,
         seed=seed

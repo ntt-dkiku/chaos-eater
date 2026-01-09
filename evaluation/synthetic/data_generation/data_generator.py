@@ -8,9 +8,9 @@ import kubernetes_validate
 
 from .llm_agents.generate_seed_k8s_manifests import K8sAppGenerationAgent, K8sApplication
 from .llm_agents.weaken_seed_k8s_manifests import K8sAppVulnerabilityAgent, WeakK8sApplication
-from ..utils.wrappers import LLM
-from ..utils.functions import load_json, save_json, write_file, list_to_bullet_points, render_jinja_template, sanitize_filename
-from ..utils.constants import SKAFFOLD_YAML_TEMPLATE_PATH, K8S_VALIDATION_VERSION
+from chaos_eater.utils.wrappers import LLM
+from chaos_eater.utils.functions import load_json, save_json, write_file, list_to_bullet_points, render_jinja_template, sanitize_filename
+from chaos_eater.utils.constants import SKAFFOLD_YAML_TEMPLATE_PATH, K8S_VALIDATION_VERSION
 
 
 class DataGenerator:

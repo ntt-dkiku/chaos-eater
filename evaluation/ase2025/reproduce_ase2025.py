@@ -15,7 +15,7 @@ from chaos_eater.utils.schemas import File
 from chaos_eater.utils.k8s import remove_all_resources_by_labels
 from chaos_eater.chaos_eater import ChaosEater, ChaosEaterInput, ChaosEaterOutput
 from chaos_eater.ce_tools.ce_tool import CEToolType, CETool
-from chaos_eater.reviewing.reviwer import Reviewer
+from evaluation.reviewing.reviewer import Reviewer
 
 
 # Example configurations (matching GUI examples)

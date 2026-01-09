@@ -1,9 +1,9 @@
 from typing import Literal
 
-from ...chaos_eater import ChaosCycle
-from ...utils.wrappers import LLM, LLMBaseModel, LLMField
-from ...utils.llms import build_json_agent
-from ...utils.common_prompts import CHAOS_ENGINEERING_DESCRIIPTION
+from chaos_eater.chaos_eater import ChaosCycle
+from chaos_eater.utils.wrappers import LLM, LLMBaseModel, LLMField
+from chaos_eater.utils.llms import build_json_agent
+from chaos_eater.utils.common_prompts import CHAOS_ENGINEERING_DESCRIIPTION
 
 
 #--------------------

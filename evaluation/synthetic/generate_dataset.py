@@ -2,7 +2,7 @@ from typing import List
 
 from chaos_eater.utils.llms import load_llm
 from chaos_eater.utils.functions import get_timestamp
-from chaos_eater.data_generation.data_generator import DataGenerator
+from evaluation.synthetic.data_generation.data_generator import DataGenerator
 
 
 def generate_dataset(
@@ -16,10 +16,10 @@ def generate_dataset(
     resume: bool = True
 ) -> None:
     #-----------------------------
-    # load llm and data generator 
+    # load llm and data generator
     #-----------------------------
     llm = load_llm(
-        model_name=model_name, 
+        model_name=model_name,
         temperature=temperature,
         port=port,
         model_kwargs={"seed": seed}

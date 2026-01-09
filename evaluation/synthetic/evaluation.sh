@@ -12,7 +12,7 @@ num_k8s_manifests=2 # (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 #--------------------
 # generate a dataset
 #--------------------
-# python generate_dataset.py --output_dir "${dataset_dir}" \
+# python evaluation/synthetic/generate_dataset.py --output_dir "${dataset_dir}" \
 #                            --model_name "${seed_model}" \
 #                            --num_samples "${num_samples}" \
 #                            --num_k8s_manifests "${num_k8s_manifests}" \
@@ -26,7 +26,7 @@ num_k8s_manifests=2 # (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 #   model_suffix="_${model_name}"
 #   for suffix in "_weak"
 #   do
-#     python evaluate_quantitative_metrics.py --dataset_dir "${dataset_dir}${suffix}" \
+#     python evaluation/synthetic/evaluate_metrics.py --dataset_dir "${dataset_dir}${suffix}" \
 #                                             --output_dir "${result_dir}${model_suffix}${suffix}" \
 #                                             --model_name "${model}"
 #   done
@@ -43,7 +43,7 @@ do
     model_suffix="_${model_name}"
     for suffix in "_${data_types[@]}"
     do
-      python evaluate_quality_by_reviewer.py --result_dir "${result_dir}${model_suffix}${suffix}" \
+      python evaluation/reviewing/evaluate_quality.py --result_dir "${result_dir}${model_suffix}${suffix}" \
                                              --model_name "${reviewer}" \
                                              --uses_cache
     done

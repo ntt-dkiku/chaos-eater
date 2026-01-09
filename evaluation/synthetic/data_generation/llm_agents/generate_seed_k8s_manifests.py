@@ -1,7 +1,7 @@
 from typing import List
 
-from ...utils.wrappers import LLM, LLMBaseModel, LLMField
-from ...utils.llms import build_json_agent
+from chaos_eater.utils.wrappers import LLM, LLMBaseModel, LLMField
+from chaos_eater.utils.llms import build_json_agent
 
 
 SYS_GENERATE_K8S_MANIFESTS = """\

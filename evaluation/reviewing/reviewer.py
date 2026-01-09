@@ -1,6 +1,6 @@
 from .llm_agents.review_ce_cycle import CEReviewAgent, Review
-from ..chaos_eater import ChaosCycle
-from ..utils.wrappers import LLM
+from chaos_eater.chaos_eater import ChaosCycle
+from chaos_eater.utils.wrappers import LLM
 
 
 class Reviewer:

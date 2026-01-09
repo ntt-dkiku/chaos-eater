@@ -5,7 +5,7 @@ import numpy as np
 # Get project root directory (relative to this file: chaos_eater/utils/constants.py -> project root)
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-SKAFFOLD_YAML_TEMPLATE_PATH = os.path.join(_PROJECT_ROOT, "chaos_eater/data_generation/templates/skaffold_yaml_template.j2")
+SKAFFOLD_YAML_TEMPLATE_PATH = os.path.join(_PROJECT_ROOT, "chaos_eater/ce_tools/skaffold/templates/skaffold_yaml_template.j2")
 UNITTEST_BASE_PY_PATH = os.path.join(_PROJECT_ROOT, "chaos_eater/ce_tools/k8s/unittest_base.py")
 K6_POD_TEMPLATE_PATH = os.path.join(_PROJECT_ROOT, "chaos_eater/ce_tools/k6/templates/k6_pod_template.j2")
 K8S_POD_TEMPLATE_PATH = os.path.join(_PROJECT_ROOT, "chaos_eater/ce_tools/k8s/templates/k8s_pod_template.j2")

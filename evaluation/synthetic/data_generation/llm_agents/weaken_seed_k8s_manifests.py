@@ -1,8 +1,8 @@
 from typing import List
 
 from .generate_seed_k8s_manifests import K8sApplication
-from ...utils.wrappers import LLM, LLMBaseModel, LLMField
-from ...utils.llms import build_json_agent
+from chaos_eater.utils.wrappers import LLM, LLMBaseModel, LLMField
+from chaos_eater.utils.llms import build_json_agent
 
 
 SYS_WEAKEN_K8S_MANIFESTS = """\
