@@ -58,6 +58,9 @@ def load_example_input(example_name: str) -> ChaosEaterInput:
     example_path = example["path"]
     instructions = example["instructions"]
 
+    # work_dir is parent of example_path to match GUI's build_input_from_project_path structure
+    work_dir = os.path.dirname(example_path)
+
     skaffold_yaml = None
     project_files = []
 
@@ -72,20 +75,20 @@ def load_example_input(example_name: str) -> ChaosEaterInput:
                 else:
                     content = file_content.decode('utf-8')
 
-                fname = os.path.relpath(fpath, example_path)
+                fname = os.path.relpath(fpath, work_dir)
 
                 if os.path.basename(fpath) == "skaffold.yaml":
                     skaffold_yaml = File(
                         path=fpath,
                         content=content,
-                        work_dir=example_path,
+                        work_dir=work_dir,
                         fname=fname
                     )
                 else:
                     project_files.append(File(
                         path=fpath,
                         content=content,
-                        work_dir=example_path,
+                        work_dir=work_dir,
                         fname=fname
                     ))
 
