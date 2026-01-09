@@ -216,7 +216,7 @@ stop-jupyter:
 
 
 #---------------------
-# ASE2025 evaluation
+# Common Evaluation Options
 #---------------------
 EVAL_MODEL ?= openai/gpt-4o-2024-08-06
 EVAL_SAMPLES ?= 5
@@ -224,9 +224,13 @@ EVAL_REVIEWS ?= 5
 EVAL_TEMPERATURE ?= 0.0
 EVAL_SEED ?= 42
 EVAL_PORT ?= 8000
-EVAL_OUTPUT_DIR ?= evaluation/ase2025/results
-EVAL_SYSTEMS ?= all
 EVAL_REVIEWERS ?= all
+
+#---------------------
+# ASE2025 evaluation
+#---------------------
+ASE_OUTPUT_DIR ?= evaluation/ase2025/results
+ASE_SYSTEMS ?= all
 
 # Run ASE2025 evaluation in sandbox
 # Usage: make eval-ase2025 [EVAL_MODEL=...] [EVAL_SAMPLES=...] [EVAL_REVIEWS=...]
@@ -250,11 +254,90 @@ _eval-ase2025-run:
 		docker compose -f docker/docker-compose.yaml exec chaos-eater-backend \
 		sh -c 'cd /app && PYTHONPATH=/app uv run python evaluation/ase2025/reproduce_ase2025.py \
 			--model \"$(EVAL_MODEL)\" \
-			--output_dir \"$(EVAL_OUTPUT_DIR)\" \
+			--output_dir \"$(ASE_OUTPUT_DIR)\" \
 			--num_samples $(EVAL_SAMPLES) \
 			--num_review_samples $(EVAL_REVIEWS) \
 			--temperature $(EVAL_TEMPERATURE) \
 			--seed $(EVAL_SEED) \
 			--port $(EVAL_PORT) \
-			--examples \"$(EVAL_SYSTEMS)\" \
+			--examples \"$(ASE_SYSTEMS)\" \
 			--reviewers \"$(EVAL_REVIEWERS)\"'"
+
+
+#---------------------
+# Synthetic Evaluation
+#---------------------
+SYNTH_DATA_DIR ?= evaluation/synthetic/data
+SYNTH_OUTPUT_DIR ?= evaluation/synthetic/results
+SYNTH_NUM_SAMPLES ?= 5
+SYNTH_MANIFESTS ?= 1 2 3
+SYNTH_DATA_TYPE ?= weak
+SYNTH_EXP_TIME ?= 1
+
+.PHONY: eval-synth _eval-synth-run
+
+# Run synthetic data evaluation in sandbox
+# Usage: make eval-synth [EVAL_MODEL=...] [SYNTH_NUM_SAMPLES=...] [SYNTH_MANIFESTS=...] ...
+eval-synth:
+	@if docker ps --format '{{.Names}}' | grep -q '^chaos-eater-sandbox$$'; then \
+		echo "Sandbox is running. Starting synthetic evaluation..."; \
+		$(MAKE) _eval-synth-run; \
+	else \
+		echo "Sandbox is not running."; \
+		read -p "Start sandbox and run evaluation? [y/N] " confirm; \
+		if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
+			echo "Starting sandbox..."; \
+			$(MAKE) setup-sandbox && $(MAKE) _eval-synth-run; \
+		else \
+			echo "Cancelled."; \
+		fi \
+	fi
+
+_eval-synth-run:
+	docker compose $(BASE_SANDBOX) exec chaos-eater bash -c "\
+		docker compose -f docker/docker-compose.yaml exec chaos-eater-backend \
+		sh -c 'cd /app && PYTHONPATH=/app uv run python evaluation/synthetic/reproduce_synthetic.py \
+			--model \"$(EVAL_MODEL)\" \
+			--data_dir \"$(SYNTH_DATA_DIR)\" \
+			--output_dir \"$(SYNTH_OUTPUT_DIR)\" \
+			--num_data_samples $(SYNTH_NUM_SAMPLES) \
+			--num_samples $(EVAL_SAMPLES) \
+			--num_review_samples $(EVAL_REVIEWS) \
+			--num_manifests $(SYNTH_MANIFESTS) \
+			--data_type \"$(SYNTH_DATA_TYPE)\" \
+			--temperature $(EVAL_TEMPERATURE) \
+			--seed $(EVAL_SEED) \
+			--port $(EVAL_PORT) \
+			--experiment_time_limit $(SYNTH_EXP_TIME) \
+			--reviewers \"$(EVAL_REVIEWERS)\"'"
+
+.PHONY: gen-synth-data _gen-synth-data-run
+
+# Generate synthetic data only (no ChaosEater execution or review)
+# Usage: make gen-synth-data [EVAL_MODEL=...] [SYNTH_NUM_SAMPLES=...] [SYNTH_MANIFESTS=...] ...
+gen-synth-data:
+	@if docker ps --format '{{.Names}}' | grep -q '^chaos-eater-sandbox$$'; then \
+		echo "Sandbox is running. Starting data generation..."; \
+		$(MAKE) _gen-synth-data-run; \
+	else \
+		echo "Sandbox is not running."; \
+		read -p "Start sandbox and generate data? [y/N] " confirm; \
+		if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
+			echo "Starting sandbox..."; \
+			$(MAKE) setup-sandbox && $(MAKE) _gen-synth-data-run; \
+		else \
+			echo "Cancelled."; \
+		fi \
+	fi
+
+_gen-synth-data-run:
+	docker compose $(BASE_SANDBOX) exec chaos-eater bash -c "\
+		docker compose -f docker/docker-compose.yaml exec chaos-eater-backend \
+		sh -c 'cd /app && PYTHONPATH=/app uv run python evaluation/synthetic/generate_dataset.py \
+			-o \"$(SYNTH_DATA_DIR)\" \
+			--model_name \"$(EVAL_MODEL)\" \
+			--num_samples $(SYNTH_NUM_SAMPLES) \
+			--num_k8s_manifests_list $(SYNTH_MANIFESTS) \
+			--temperature $(EVAL_TEMPERATURE) \
+			--seed $(EVAL_SEED) \
+			--port $(EVAL_PORT)'"
