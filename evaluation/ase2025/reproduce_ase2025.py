@@ -43,8 +43,10 @@ EXAMPLES = {
 
 DEFAULT_REVIEWERS = [
     "openai/gpt-4o-2024-08-06",
-    "google/gemini-1.5-pro",
-    "anthropic/claude-3-5-sonnet-20240620"
+    # "google/gemini-1.5-pro",  # retired
+    "google/gemini-2.5-pro",
+    # "anthropic/claude-3-5-sonnet-20240620",  # retired
+    "anthropic/claude-sonnet-4-5-20250929"
 ]
 
 
