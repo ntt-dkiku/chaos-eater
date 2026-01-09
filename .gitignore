@@ -6,3 +6,4 @@ old/
 .chaoseater-mode
 .python-version
 nohup.out
+.coverage

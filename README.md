@@ -245,28 +245,84 @@ The cost and time for this CE cycle were approximately 0.84 USD and 25 minutes, 
 Coming soon!
 </details>
 
-## 📊 Evaluation (WIP)
+## 📊 Evaluation
+> [!WARNING]
+> Due to the nondeterministic nature of commercial LLMs, datasets and evaluation results may vary between runs, even when a seed value is set.
+
+### 1. ASE Paper Evaluation
+#### 1.1. Run experiments
+> [!NOTE]
+> Our results are already saved in `evaluation/ase2025/results`, so you can skip this step if you only want to reproduce the tables and graphs from the paper.
 > [!WARNING]  
-> Note that, due to the nature of the LLMs used, the generated datasets and evaluation results cannot be fully reproduced consistently, even when a seed value is set.
-### 0. Data Generataion
-Generate a dataset of synthesis k8s manifests by running [generate_datasets.py](./generate_datasets.py) in the container.
+> Since Claude Sonnet 3.5 and Gemini 1.5 Pro, which were used as reviewers in the ASE paper, have been retired, we replace them with Claude Sonnet 4.5 and Gemini 2.5 Pro, respectively.
+
+Run the following command to conduct the same experiments as the ASE paper:
+```bash
+make eval-ase2025
 ```
-python generate_datasets.py
+<details>
+<summary>
+<b>Options</b>
+</summary>
+
+By default, the settings match those used in the paper, but you can customize them using the following options:
+| Option | Default | Description |
+|--------|---------|-------------|
+| `EVAL_MODEL` | `openai/gpt-4o-2024-08-06` | LLM model for ChaosEater |
+| `EVAL_RUNS` | `5` | Number of ChaosEater runs per sample |
+| `EVAL_REVIEWS` | `5` | Number of reviews per reviewer |
+| `EVAL_TEMPERATURE` | `0.0` | LLM temperature |
+| `EVAL_SEED` | `42` | Random seed for LLMs |
+| `EVAL_REVIEWERS` | `all` | Comma-separated reviewers or `all` |
+| `EVAL_OUTPUT_DIR` | `evaluation/ase2025/results` | Output directory for all evaluations |
+| `EVAL_SYSTEMS` | `all` | Systems to evaluate (`nginx`, `sockshop`, or `all`) |
+</details>
+
+#### 1.2. Reproduce the Tables and Graphs
+After the experiments are complete, open Jupyter Lab with:
+```bash
+make open-jupyter
 ```
-### 1. Evaluation
-Evaluate ChaosEater on the dataset. Run [evaluate_quantitative_metrics.py](./evaluate_quantitative_metrics.py) and [evaluate_quality_by_reviewer.py](./evaluate_quality_by_reviewer.py) for quantitative and qualitative evaluations, respectively.
+Then navigate to `evaluation/ase2025/analyze_evaluation_result.ipynb` to reproduce the tables and graphs.
+
+### 2. Synthetic Data Evaluation (WIP)
+#### 2.1. Gnerate datasets and run experiments
+Evaluate ChaosEater on synthetically generated K8s manifests:
+```bash
+make eval-synth
 ```
-python evaluate_quantitative_metrics.py
-python evaluate_quality_by_reviewer.py
+<details>
+<summary>
+<b>Options</b>
+</summary>
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `EVAL_MODEL` | `openai/gpt-4o-2024-08-06` | LLM model for ChaosEater |
+| `EVAL_RUNS` | `5` | Number of ChaosEater runs per sample |
+| `EVAL_REVIEWS` | `5` | Number of reviews per reviewer |
+| `EVAL_TEMPERATURE` | `0.0` | LLM temperature |
+| `EVAL_SEED` | `42` | Random seed for LLMs |
+| `EVAL_REVIEWERS` | `all` | Comma-separated reviewers or `all` |
+| `EVAL_OUTPUT_DIR` | `evaluation/synthetic/results` | Output directory for all evaluations |
+| `SYNTH_DATA_DIR` | `evaluation/synthetic/data` | Directory for synthetic data |
+| `SYNTH_NUM_SAMPLES` | `5` | Number of data samples to generate |
+| `SYNTH_MANIFESTS` | `1 2 3` | Number of K8s manifests per sample |
+| `SYNTH_DATA_TYPE` | `weak` | Dataset type (`normal` or `weak`) |
+| `SYNTH_EXP_TIME` | `1` | CE experiment time limit (minutes) |
+</details>
+
+#### EX. Generate datasets (optional) 
+To generate synthetic data only (without running ChaosEater or reviews):
+```bash
+make gen-synth-data
 ```
-### 2. Analysis
-Analyze the evaluation results on the Jupyter notebook [analyze_evaluation_result.ipynb](./analyze_evaluation_result.ipynb).
 
 ## 🐞 Bug report and questions
 If you encounter bugs or have any questions, please post [issues](https://github.com/ntt-dkiku/chaos-eater/issues) or [discussions](https://github.com/ntt-dkiku/chaos-eater/discussions) in this repo. New feature requests are also welcome.
 
 ## 📄 License
-Our code is licensed by NTT. The use of our code is limited to research purposes. See [LICENSE](./LICENSE) for details.
+Our code is licensed by NTT. The use of our code is limited to research purposes. See [LICENSE](./LICENSE.md) for details.
 
 ## 🙌 Acknowledgements
 ChaosEater is built upon numerous excellent projects. Big thank you to the following projects! (A-Z):
