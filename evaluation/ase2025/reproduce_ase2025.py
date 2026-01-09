@@ -259,8 +259,8 @@ def main():
         help="Model name for ChaosEater (default: openai/gpt-4o-2024-08-06)"
     )
     parser.add_argument(
-        "--output_dir", default="results", type=str,
-        help="Output directory for results (default: results)"
+        "--output_dir", default="evaluation/ase2025/results", type=str,
+        help="Output directory for results (default: evaluation/ase2025/results)"
     )
     parser.add_argument(
         "--num_samples", default=5, type=int,
