@@ -219,21 +219,22 @@ stop-jupyter:
 # Common Evaluation Options
 #---------------------
 EVAL_MODEL ?= openai/gpt-4o-2024-08-06
-EVAL_SAMPLES ?= 5
+EVAL_RUNS ?= 5
 EVAL_REVIEWS ?= 5
 EVAL_TEMPERATURE ?= 0.0
 EVAL_SEED ?= 42
 EVAL_PORT ?= 8000
 EVAL_REVIEWERS ?= all
+EVAL_SYSTEMS ?= all
+# EVAL_OUTPUT_DIR can be set to override the default output directory for all evaluations
 
 #---------------------
 # ASE2025 evaluation
 #---------------------
-ASE_OUTPUT_DIR ?= evaluation/ase2025/results
-ASE_SYSTEMS ?= all
+ASE_OUTPUT_DIR = $(or $(EVAL_OUTPUT_DIR),evaluation/ase2025/results)
 
 # Run ASE2025 evaluation in sandbox
-# Usage: make eval-ase2025 [EVAL_MODEL=...] [EVAL_SAMPLES=...] [EVAL_REVIEWS=...]
+# Usage: make eval-ase2025 [EVAL_MODEL=...] [EVAL_RUNS=...] [EVAL_REVIEWS=...]
 eval-ase2025:
 	@if docker ps --format '{{.Names}}' | grep -q '^chaos-eater-sandbox$$'; then \
 		echo "Sandbox is running. Starting evaluation..."; \
@@ -255,12 +256,12 @@ _eval-ase2025-run:
 		sh -c 'cd /app && PYTHONPATH=/app uv run python evaluation/ase2025/reproduce_ase2025.py \
 			--model \"$(EVAL_MODEL)\" \
 			--output_dir \"$(ASE_OUTPUT_DIR)\" \
-			--num_samples $(EVAL_SAMPLES) \
+			--num_samples $(EVAL_RUNS) \
 			--num_review_samples $(EVAL_REVIEWS) \
 			--temperature $(EVAL_TEMPERATURE) \
 			--seed $(EVAL_SEED) \
 			--port $(EVAL_PORT) \
-			--examples \"$(ASE_SYSTEMS)\" \
+			--examples \"$(EVAL_SYSTEMS)\" \
 			--reviewers \"$(EVAL_REVIEWERS)\"'"
 
 
@@ -268,7 +269,7 @@ _eval-ase2025-run:
 # Synthetic Evaluation
 #---------------------
 SYNTH_DATA_DIR ?= evaluation/synthetic/data
-SYNTH_OUTPUT_DIR ?= evaluation/synthetic/results
+SYNTH_OUTPUT_DIR = $(or $(EVAL_OUTPUT_DIR),evaluation/synthetic/results)
 SYNTH_NUM_SAMPLES ?= 5
 SYNTH_MANIFESTS ?= 1 2 3
 SYNTH_DATA_TYPE ?= weak
@@ -277,7 +278,7 @@ SYNTH_EXP_TIME ?= 1
 .PHONY: eval-synth _eval-synth-run
 
 # Run synthetic data evaluation in sandbox
-# Usage: make eval-synth [EVAL_MODEL=...] [SYNTH_NUM_SAMPLES=...] [SYNTH_MANIFESTS=...] ...
+# Usage: make eval-synth [EVAL_MODEL=...] [EVAL_RUNS=...] [SYNTH_NUM_SAMPLES=...] ...
 eval-synth:
 	@if docker ps --format '{{.Names}}' | grep -q '^chaos-eater-sandbox$$'; then \
 		echo "Sandbox is running. Starting synthetic evaluation..."; \
@@ -301,7 +302,7 @@ _eval-synth-run:
 			--data_dir \"$(SYNTH_DATA_DIR)\" \
 			--output_dir \"$(SYNTH_OUTPUT_DIR)\" \
 			--num_data_samples $(SYNTH_NUM_SAMPLES) \
-			--num_samples $(EVAL_SAMPLES) \
+			--num_samples $(EVAL_RUNS) \
 			--num_review_samples $(EVAL_REVIEWS) \
 			--num_manifests $(SYNTH_MANIFESTS) \
 			--data_type \"$(SYNTH_DATA_TYPE)\" \

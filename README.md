@@ -247,11 +247,23 @@ Coming soon!
 
 ## 📊 Evaluation
 > [!WARNING]
-> Due to the nondeterministic nature of LLMs, datasets and evaluation results may vary between runs, even when a seed value is set.
+> Due to the nondeterministic nature of commercial LLMs, datasets and evaluation results may vary between runs, even when a seed value is set.
 
-### Common Options
-The following options are shared across all evaluation commands:
+### 1. ASE Paper Evaluation
+#### 1.1. Run experiments
+> [!NOTE]
+> Our results are already saved in `evaluation/ase2025/results`, so you can skip this step if you only want to reproduce the tables and graphs from the paper.
 
+Run the following command to conduct the same experiments as the ASE paper:
+```bash
+make eval-ase2025
+```
+<details>
+<summary>
+<b>Options</b>
+</summary>
+
+By default, the settings match those used in the paper, but you can customize them using the following options:
 | Option | Default | Description |
 |--------|---------|-------------|
 | `EVAL_MODEL` | `openai/gpt-4o-2024-08-06` | LLM model for ChaosEater |
@@ -259,25 +271,10 @@ The following options are shared across all evaluation commands:
 | `EVAL_REVIEWS` | `5` | Number of reviews per reviewer |
 | `EVAL_TEMPERATURE` | `0.0` | LLM temperature |
 | `EVAL_SEED` | `42` | Random seed for LLMs |
-| `EVAL_PORT` | `8000` | vLLM server port |
 | `EVAL_REVIEWERS` | `all` | Comma-separated reviewers or `all` |
-
-### 1. ASE Paper Evaluation
-#### 1.1. Run Experiments
-> [!NOTE]
-> Our results are already saved in `evaluation/ase2025/results`, so you can skip this step if you only want to reproduce the tables and graphs from the paper.
-
-Run the following command to replicate the experiments from the ASE paper:
-```bash
-make eval-ase2025
-```
-
-**ASE2025-specific options:**
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `ASE_OUTPUT_DIR` | `evaluation/ase2025/results` | Output directory |
-| `ASE_SYSTEMS` | `all` | Systems to evaluate (`nginx`, `sockshop`, or `all`) |
+| `EVAL_OUTPUT_DIR` | `evaluation/ase2025/results` | Output directory for all evaluations |
+| `EVAL_SYSTEMS` | `all` | Systems to evaluate (`nginx`, `sockshop`, or `all`) |
+</details>
 
 #### 1.2. Reproduce the Tables and Graphs
 After the experiments are complete, open Jupyter Lab with:
@@ -286,37 +283,38 @@ make open-jupyter
 ```
 Then navigate to `evaluation/ase2025/analyze_evaluation_result.ipynb` to reproduce the tables and graphs.
 
-### 2. Synthetic Data Evaluation
+### 2. Synthetic Data Evaluation (WIP)
+#### 2.1. Gnerate datasets and run experiments
 Evaluate ChaosEater on synthetically generated K8s manifests:
 ```bash
 make eval-synth
 ```
-
-To generate synthetic data only (without running ChaosEater or reviews):
-```bash
-make gen-synth-data
-```
-
-**Synthetic-specific options:**
+<details>
+<summary>
+<b>Options</b>
+</summary>
 
 | Option | Default | Description |
 |--------|---------|-------------|
+| `EVAL_MODEL` | `openai/gpt-4o-2024-08-06` | LLM model for ChaosEater |
+| `EVAL_SAMPLES` | `5` | Number of ChaosEater runs per sample |
+| `EVAL_REVIEWS` | `5` | Number of reviews per reviewer |
+| `EVAL_TEMPERATURE` | `0.0` | LLM temperature |
+| `EVAL_SEED` | `42` | Random seed for LLMs |
+| `EVAL_REVIEWERS` | `all` | Comma-separated reviewers or `all` |
+| `EVAL_OUTPUT_DIR` | `evaluation/synthetic/results` | Output directory for all evaluations |
 | `SYNTH_DATA_DIR` | `evaluation/synthetic/data` | Directory for synthetic data |
-| `SYNTH_OUTPUT_DIR` | `evaluation/synthetic/results` | Output directory for results |
 | `SYNTH_NUM_SAMPLES` | `5` | Number of data samples to generate |
 | `SYNTH_MANIFESTS` | `1 2 3` | Number of K8s manifests per sample |
 | `SYNTH_DATA_TYPE` | `weak` | Dataset type (`normal` or `weak`) |
 | `SYNTH_EXP_TIME` | `1` | CE experiment time limit (minutes) |
+</details>
 
-**Example usage:**
+#### EX. Generate datasets (optional) 
+To generate synthetic data only (without running ChaosEater or reviews):
 ```bash
-# Quick test with minimal samples
-make eval-synth SYNTH_NUM_SAMPLES=1 EVAL_SAMPLES=1 SYNTH_MANIFESTS="1"
-
-# Full evaluation with custom settings
-make eval-synth EVAL_MODEL=openai/gpt-4o-2024-08-06 SYNTH_NUM_SAMPLES=5 EVAL_SAMPLES=3
+make gen-synth-data
 ```
-
 
 ## 🐞 Bug report and questions
 If you encounter bugs or have any questions, please post [issues](https://github.com/ntt-dkiku/chaos-eater/issues) or [discussions](https://github.com/ntt-dkiku/chaos-eater/discussions) in this repo. New feature requests are also welcome.
