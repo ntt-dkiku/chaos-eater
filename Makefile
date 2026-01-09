@@ -3,7 +3,7 @@
 .PHONY: reload stop
 .PHONY: test test-cov test-watch test-file test-match build-test clean-test
 .PHONY: frontend-test frontend-test-watch frontend-test-coverage build-frontend-test clean-frontend-test
-.PHONY: open-notebook stop-notebook
+.PHONY: open-jupyter stop-jupyter
 
 
 #----------------
@@ -206,9 +206,9 @@ endif
 #-----------------
 JUPYTER_PORT ?= 8888
 
-open-notebook:
-	@echo "Starting Jupyter Notebook on port $(JUPYTER_PORT)..."
+open-jupyter:
+	@echo "Starting Jupyter Lab on port $(JUPYTER_PORT)..."
 	JUPYTER_PORT=$(JUPYTER_PORT) docker compose -f docker/docker-compose.notebook.yaml up
 
-stop-notebook:
+stop-jupyter:
 	docker compose -f docker/docker-compose.notebook.yaml down
