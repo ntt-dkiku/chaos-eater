@@ -10,6 +10,7 @@ import shutil
 
 from chaos_eater.utils.llms import load_llm
 from chaos_eater.utils.functions import save_json, load_json
+from chaos_eater.backend.streaming import FrontendMessageLogger
 from chaos_eater.utils.schemas import File
 from chaos_eater.utils.k8s import remove_all_resources_by_labels
 from chaos_eater.chaos_eater import ChaosEater, ChaosEaterInput, ChaosEaterOutput
@@ -95,12 +96,15 @@ def load_example_input(example_name: str) -> ChaosEaterInput:
     )
 
 
+K8S_CONTEXT = "kind-chaos-eater-cluster"
+
+
 def remove_all_resources_in(namespace: str) -> None:
     """Remove all resources in a namespace."""
     import subprocess
     try:
         subprocess.run(
-            ["kubectl", "delete", "all", "--all", "-n", namespace],
+            ["kubectl", "delete", "all", "--all", "-n", namespace, "--context", K8S_CONTEXT],
             capture_output=True,
             timeout=60
         )
@@ -142,12 +146,13 @@ def run_chaoseater_phase(
         model_name=model_name,
         temperature=temperature,
         port=port,
-        model_kwargs={"seed": seed}
+        seed=seed
     )
 
     chaoseater = ChaosEater(
         llm=llm,
         ce_tool=CETool.init(CEToolType.chaosmesh),
+        message_logger=FrontendMessageLogger(),
         work_dir="sandbox",
         namespace="chaos-eater"
     )
@@ -171,14 +176,15 @@ def run_chaoseater_phase(
             print(f"[{example_name}-{i}] Starting ChaosEater run...")
 
             remove_all_resources_in("chaos-eater")
-            remove_all_resources_by_labels(label_selector=f"project={project_name}")
+            remove_all_resources_by_labels(context=K8S_CONTEXT, label_selector=f"project={project_name}")
 
             try:
                 chaoseater.run_ce_cycle(
                     input=ce_input,
                     work_dir=result_dir,
                     project_name=project_name,
-                    is_new_deployment=True
+                    is_new_deployment=True,
+                    kube_context=K8S_CONTEXT
                 )
                 print(f"[{example_name}-{i}] Completed successfully")
             except Exception as e:
