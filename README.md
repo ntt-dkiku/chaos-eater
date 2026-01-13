@@ -14,15 +14,14 @@
 <p>
   This repo is the official implementation of 
   
-  - <a href="https://arxiv.org/abs/2511.07865" target="_blank">LLM-Powered Fully Automated Chaos Engineering: Towards Enabling Anyone to Build Resilient Software Systems at Low Cost</a> (to appear in ASE 2025, NIER track)
-  - <a href="https://arxiv.org/abs/2501.11107" target="_blank">ChaosEater: Fully Automating 
-  Chaos Engineering with Large Language Models</a> (extended technical report)
+  - <a href="https://arxiv.org/abs/2511.07865" target="_blank">LLM-Powered Fully Automated Chaos Engineering: Towards Enabling Anyone to Build Resilient Software Systems at Low Cost</a> (to appear in ASE 2025 proceedings)
+  - <a href="https://arxiv.org/abs/2501.11107" target="_blank">ChaosEater: Fully Automating Chaos Engineering with Large Language Models</a> (extended technical report)
   
   ChaosEater is an LLM-based system that ***fully*** automates the Chaos Engineering (CE) cycle in Kubernetes systems.
   Systematically, a CE cycle consists of four phases: hypothesis, experiment, analysis, and improvement.
   ChaosEater pre-defines its agentic workflow according to the systematic CE cycle and assigns subdivided operations within the workflow into LLM agents.
   These LLM agents autonomously complete the CE cycle through several software engineering tasks, such as requirement definition, test planning, and debugging.
-  We hope ChaosEater will serve as a starting point for the full automation of system resilience improvement, which enables **anyone** to build resilient systems **at low cost**.
+  We hope ChaosEater will serve as a starting point for the full automation of system resilience improvement, which enables ***anyone*** to build resilient systems ***at low cost***.
   Check also the <a href="https://ntt-dkiku.github.io/chaos-eater/" target="_blank">project page</a> and the <a href="https://arxiv.org/abs/2501.11107" target="_blank">technical report</a> for more details.
 </p>
 
@@ -33,17 +32,17 @@
 
 
 ## 🚀 Quick start
-> [!NOTE]  
-> In the following, we assume that Docker has been already installed on your machine.  
-> FYI: [Official Docker installation guide](https://docs.docker.com/engine/install/ubuntu/)
+### 0. Requirement
+- Docker: [Official Docker installation guide](https://docs.docker.com/engine/install/ubuntu/)
+- Make: [Official Site](https://www.gnu.org/software/make/) (you can install it on linux with `apt install make` or on macOS with `brew install make`)
 
-### 0. Clone this repository
+### 1. Clone this repository
 Clone this repository and navigate into the project directory.
 ```
 git clone https://github.com/ntt-dkiku/chaos-eater.git && cd chaos-eater 
 ```
 
-### 1. Set your API keys in the `.env` file (optional)
+### 2. Set your API keys in the `.env` file (optional)
 Create your .env file and add your API keys.
 ```
 cp docker/.env.example docker/.env
@@ -53,7 +52,10 @@ cp docker/.env.example docker/.env
 > However, in that case, you will need to enter the keys every time you open the GUI.
 > If you prefer not to store your API keys in plain text in the .env file, this may be a better option.
 
-### 2. Launch ChaosEater
+### 3. Launch ChaosEater
+We offer two modes for building the ChaosEater app: `sandbox` and `standard` modes.
+`sandbox` mode containerizes both K8s (kind) clusters and the ChaosEater app. This allows you to easily try out ChaosEater without modifying the host environment.
+In `standard` mode, K8s (kind) clusters and the ChaosEater app's Docker container are built directly on the host.
 Launch ChaosEater with either of the following commands:   
 
 `sandbox` mode (🌟 Recommended for local users 🌟)
@@ -65,15 +67,11 @@ or
 ```
 make setup-standard
 ```
-> [!NOTE]  
-> We offer two modes for building the ChaosEater app: `sandbox` and `standard` modes.  
-> `sandbox` mode containerizes both K8s (kind) clusters and the ChaosEater app. This allows you to easily try out ChaosEater without modifying the host environment, but please use it only in a security-safe environment.  
-> In `standard` mode, K8s (kind) clusters and the ChaosEater app's Docker container are built directly on the host.
 
 > [!WARNING]    
 > `sandbox` mode uses the privileged option, so it should only be used on your local machine or a securely isolated cloud environment.
 
-### 3. Access the ChaosEater GUI from your browser
+### 4. Access the ChaosEater GUI from your browser
 Access `localhost:3000` in your browser, and you can try the ChaosEater GUI in your browser!  
 
 > [!TIP]   
@@ -251,15 +249,16 @@ Coming soon!
 
 ### 1. ASE Paper Evaluation
 #### 1.1. Run experiments
-> [!NOTE]
-> Our results are already saved in `evaluation/ase2025/results`, so you can skip this step if you only want to reproduce the tables and graphs from the paper.
-> [!WARNING]  
-> Since Claude Sonnet 3.5 and Gemini 1.5 Pro, which were used as reviewers in the ASE paper, have been retired, we replace them with Claude Sonnet 4.5 and Gemini 2.5 Pro, respectively.
-
 Run the following command to conduct the same experiments as the ASE paper:
 ```bash
 make eval-ase2025
 ```
+> [!NOTE]
+> Our results are already saved in [evaluation/ase2025/results](./evaluation/ase2025/results), so you can skip this step if you only want to reproduce the tables and graphs from the paper.
+
+> [!WARNING]  
+> Since Claude Sonnet 3.5 and Gemini 1.5 Pro, which were used as reviewers in the ASE paper, have been retired, we replace them with Claude Sonnet 4.5 and Gemini 2.5 Pro, respectively.
+
 <details>
 <summary>
 <b>Options</b>
@@ -283,7 +282,7 @@ After the experiments are complete, open Jupyter Lab with:
 ```bash
 make open-jupyter
 ```
-Then navigate to `evaluation/ase2025/analyze_evaluation_result.ipynb` to reproduce the tables and graphs.
+Then navigate to [evaluation/ase2025/analyze_evaluation_result.ipynb](./evaluation/ase2025/analyze_evaluation_result.ipynb) to reproduce the tables and graphs.
 
 ### 2. Synthetic Data Evaluation (WIP)
 #### 2.1. Gnerate datasets and run experiments
