@@ -57,6 +57,7 @@ class K8sAppAssumptionAgent:
         k8s_summaries: List[str],
         agent_logger: Optional[AgentLogger] = None
     ) -> K8sAppAssumption:
+        self.message_logger.write("#### Application of the manifests:")
         cb = agent_logger and agent_logger.get_callback(
             phase="preprocessing",
             agent_name="k8s_app"

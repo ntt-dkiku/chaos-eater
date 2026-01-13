@@ -56,11 +56,12 @@ class K8sSummaryAgent:
         k8s_yamls: List[File],
         agent_logger: Optional[AgentLogger] = None
     ) -> List[str]:
+        self.message_logger.write("#### Summary of each manifest:")
         cb = agent_logger and agent_logger.get_callback(
             phase="preprocessing",
             agent_name="k8s_summary"
         )
-        
+
         summaries = []
         for k8s_yaml in k8s_yamls:
             self.message_logger.write(f"`{k8s_yaml.fname}`")

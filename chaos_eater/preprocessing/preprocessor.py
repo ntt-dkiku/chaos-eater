@@ -278,7 +278,6 @@ class PreProcessor:
 
     def _run_k8s_summary(self, k8s_yamls: List[File], agent_logger: AgentLogger):
         """Run k8s summary agent"""
-        self.message_logger.write("#### Summary of each manifest:")
         return self.k8s_summary_agent.summarize_manifests(
             k8s_yamls=k8s_yamls,
             agent_logger=agent_logger
@@ -286,7 +285,6 @@ class PreProcessor:
 
     def _run_weakness_summary(self, k8s_yamls: List[File], agent_logger: AgentLogger):
         """Run weakness summary agent"""
-        self.message_logger.write("#### Resiliency issues/weaknesses in the manifests:")
         return self.k8s_weakness_summary_agent.summarize_weaknesses(
             k8s_yamls=k8s_yamls,
             agent_logger=agent_logger
@@ -294,7 +292,6 @@ class PreProcessor:
 
     def _run_app_assumption(self, k8s_yamls: List[File], k8s_summaries: List[str], agent_logger: AgentLogger):
         """Run app assumption agent"""
-        self.message_logger.write("#### Application of the manifests:")
         return self.k8s_app_assumption_agent.assume_app(
             k8s_yamls=k8s_yamls,
             k8s_summaries=k8s_summaries,
@@ -303,13 +300,13 @@ class PreProcessor:
 
     def _run_ce_instruct(self, ce_instructions_input: Optional[str], agent_logger: AgentLogger):
         """Run CE instruction agent"""
-        self.message_logger.write("#### Summary of your instructions for Chaos Engineering:")
         if ce_instructions_input is not None and ce_instructions_input != "":
             return self.ce_instruct_agent.summarize_ce_instructions(
                 ce_instructions_input,
                 agent_logger=agent_logger
             )
         else:
+            self.message_logger.write("#### Summary of your instructions for Chaos Engineering:")
             self.message_logger.write("No Chaos-Engineering instructions are provided.")
             return ""
     

@@ -63,6 +63,7 @@ class K8sWeaknessSummaryAgent:
         k8s_yamls: List[File],
         agent_logger: Optional[AgentLogger] = None
     ) -> str:
+        self.message_logger.write("#### Resiliency issues/weaknesses in the manifests:")
         cb = agent_logger and agent_logger.get_callback(
             phase="preprocessing",
             agent_name="k8s_weaknesses"

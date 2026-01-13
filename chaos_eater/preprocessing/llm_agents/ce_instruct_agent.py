@@ -57,6 +57,7 @@ class CEInstructAgent:
         ce_instructions: str,
         agent_logger: Optional[AgentLogger] = None
     ) -> str:
+        self.message_logger.write("#### Summary of your instructions for Chaos Engineering:")
         cb = agent_logger and agent_logger.get_callback(
             phase="preprocessing",
             agent_name="ce_instruction_summary"
