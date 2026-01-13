@@ -50,7 +50,9 @@ class FaultDefiner:
         #-------------------
         # 0. initialization
         #-------------------
-        self.message_logger.write("#### Failure definition")
+        # Only show phase header on fresh start (not on resume)
+        if not resume_from_agent:
+            self.message_logger.write("#### Failure definition")
         fault_dir = f"{work_dir}/faults"
         os.makedirs(fault_dir, exist_ok=True)
 

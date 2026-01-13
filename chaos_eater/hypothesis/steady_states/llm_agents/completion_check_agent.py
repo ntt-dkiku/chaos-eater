@@ -58,7 +58,7 @@ class SteadyStateCompletionCheckAgent:
         self,
         input_data: ProcessedData,
         predefined_steady_states: list,
-        agent_logger: Optional[AgentLogger] = None
+        agent_logger: Optional[AgentLogger] = None,
     ) -> Dict[str, str]:
         cb = agent_logger and agent_logger.get_callback(
             phase="hypothesis",

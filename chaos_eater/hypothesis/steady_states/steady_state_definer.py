@@ -1,7 +1,5 @@
 import os
-import json
 import logging
-import time
 from typing import List, Dict, Optional, Callable, Any
 
 from .llm_agents.draft_agent import SteadyStateDraftAgent
@@ -15,11 +13,9 @@ from ...utils.wrappers  import LLM, BaseModel
 from ...utils.schemas import File
 from ...utils.llms import AgentLogger
 from ...utils.functions import int_to_ordinal, MessageLogger
+from ...utils.agent_runner import AgentRunner, AgentStep
 
 logger = logging.getLogger(__name__)
-
-# Phase name for checkpoint storage
-CHECKPOINT_PHASE = "steady_state_definer"
 
 
 STEADY_STATE_OVERVIEW_TEMPLATE = """\
@@ -118,207 +114,106 @@ class SteadyStateDefiner:
         #-------------------
         # 0. initialization
         #-------------------
-        # gui settings
-        self.message_logger.write("#### Steady-state definition")
+        # Only show phase header on fresh start (not on resume)
+        if not resume_from_agent:
+            self.message_logger.write("#### Steady-state definition")
         # directory settings
         steady_state_dir = f"{work_dir}/steady_states"
-        checkpoint_path = f"{checkpoint_dir}/agent_checkpoint.json"  # Shared checkpoint file
         os.makedirs(steady_state_dir, exist_ok=True)
         os.makedirs(checkpoint_dir, exist_ok=True)
 
         # Initialize state
         steady_states = SteadyStates()
         prev_check_thought = ""
-        current_step_data = {}  # Data for current iteration (draft, inspection, etc.)
 
-        # Restore from checkpoint if resuming
+        # Parse resume_from_agent to get starting index
         start_ss_idx = 0
-        start_step = None
         if resume_from_agent:
-            checkpoint = self._load_checkpoint(checkpoint_path)
-            if checkpoint:
-                # Restore completed steady states
-                if "steady_states" in checkpoint:
-                    steady_states = SteadyStates(**checkpoint["steady_states"])
-                    logger.info(f"Restored {steady_states.count} completed steady states")
-                # Restore current step data
-                if "current_step_data" in checkpoint:
-                    current_step_data = checkpoint["current_step_data"]
-                # Parse resume agent name to get ss_idx and step
-                start_ss_idx, start_step = self._parse_agent_name(resume_from_agent)
-                prev_check_thought = checkpoint.get("prev_check_thought", "")
-                logger.info(f"Resuming from ss_idx={start_ss_idx}, step={start_step}")
-
-        # Define step order for each iteration
-        STEP_ORDER = ["draft", "inspection", "threshold", "unittest", "completion_check"]
-
-        def should_skip_step(ss_idx: int, step: str) -> bool:
-            """Check if step should be skipped based on resume point"""
-            if not resume_from_agent:
-                return False
-            if ss_idx < start_ss_idx:
-                return True
-            if ss_idx == start_ss_idx and start_step:
-                step_idx = STEP_ORDER.index(step) if step in STEP_ORDER else -1
-                start_step_idx = STEP_ORDER.index(start_step) if start_step in STEP_ORDER else 0
-                return step_idx < start_step_idx
-            return False
-
-        def run_agent(agent_name: str, run_fn, step_key: str = None):
-            """Run agent with callbacks and checkpoint saving"""
-            if on_agent_start:
-                on_agent_start(agent_name)
-            result = run_fn()
-            if on_agent_end:
-                on_agent_end(agent_name, result)
-            # Save to current step data
-            if step_key:
-                current_step_data[step_key] = self._serialize_result(result)
-            return result
-
-        def save_checkpoint(next_agent: str = None):
-            """Save checkpoint after each step to shared checkpoint file"""
-            # Load existing checkpoint or create new structure
-            full_checkpoint = self._load_full_checkpoint(checkpoint_path) or {
-                "global": {},
-                "phases": {}
-            }
-
-            # Update phase-specific data
-            full_checkpoint["phases"][CHECKPOINT_PHASE] = {
-                "completed_agents": [],  # Will be set below
-                "next_agent": next_agent,
-                "steady_states": steady_states.dict(),
-                "current_step_data": current_step_data,
-                "prev_check_thought": prev_check_thought,
-            }
-
-            # Update global state
-            full_checkpoint["global"] = {
-                "current_phase": CHECKPOINT_PHASE,
-                "last_completed_agent": next_agent,  # The one we just completed before next
-                "saved_at": time.time(),
-            }
-
-            try:
-                with open(checkpoint_path, 'w') as f:
-                    json.dump(full_checkpoint, f, indent=2, default=str)
-            except Exception as e:
-                logger.warning(f"Failed to save checkpoint: {e}")
+            start_ss_idx, _ = self._parse_agent_name(resume_from_agent)
+            logger.info(f"Resuming from ss_idx={start_ss_idx}, agent={resume_from_agent}")
 
         #-----------------------------------
         # sequentially define steady states
         #-----------------------------------
         num_retries = 0
-        ss_idx = start_ss_idx if resume_from_agent else 0
+        ss_idx = 0
 
         while steady_states.count < max_num_steady_states:
             # error handling
             assert num_retries < max_retries + max_num_steady_states, f"MAX_RETRIES_EXCEEDED: failed to define steady states within {max_retries+max_num_steady_states} tries."
             num_retries += 1
 
-            # Reset current step data for new iteration (unless resuming mid-iteration)
-            if not (resume_from_agent and ss_idx == start_ss_idx and start_step):
-                current_step_data = {}
+            # Create AgentRunner for this iteration
+            iteration_runner = AgentRunner(
+                phase=f"steady_state_{ss_idx}",
+                checkpoint_dir=checkpoint_dir,
+                on_agent_start=on_agent_start,
+                on_agent_end=on_agent_end,
+            )
 
-            #-------------------------
-            # 1. draft a steady state
-            #-------------------------
-            if should_skip_step(ss_idx, "draft"):
-                steady_state_draft = current_step_data.get("draft")
-                logger.info(f"Skipping draft_agent_{ss_idx} (restored from checkpoint)")
-            else:
-                steady_state_draft = run_agent(
-                    f"draft_agent_{ss_idx}",
-                    lambda: self.draft_agent.draft_steady_state(
-                        input_data=input_data,
-                        predefined_steady_states=steady_states,
-                        prev_check_thought=prev_check_thought,
-                        agent_logger=agent_logger
-                    ),
-                    step_key="draft"
-                )
-                save_checkpoint(f"inspection_agent_{ss_idx}")
+            # Add steps to the runner
+            iteration_runner.add_step(AgentStep(
+                name=f"draft_agent_{ss_idx}",
+                run_fn=lambda input_data=input_data, steady_states=steady_states, prev_check_thought=prev_check_thought, agent_logger=agent_logger: self._run_draft(
+                    input_data, steady_states, prev_check_thought, agent_logger
+                ),
+                output_key="draft",
+            ))
 
-            #--------------------------------------------------
-            # 2. inspect the current value of the steady state
-            #--------------------------------------------------
-            if should_skip_step(ss_idx, "inspection"):
-                inspection = self._deserialize_inspection(current_step_data.get("inspection"))
-                logger.info(f"Skipping inspection_agent_{ss_idx} (restored from checkpoint)")
-            else:
-                inspection = run_agent(
-                    f"inspection_agent_{ss_idx}",
-                    lambda: self.inspection_agent.inspect_current_state(
-                        input_data=input_data,
-                        steady_state_draft=steady_state_draft,
-                        predefined_steady_states=steady_states,
-                        kube_context=kube_context,
-                        work_dir=work_dir,
-                        max_retries=max_retries,
-                        agent_logger=agent_logger
-                    ),
-                    step_key="inspection"
-                )
-                save_checkpoint(f"threshold_agent_{ss_idx}")
+            iteration_runner.add_step(AgentStep(
+                name=f"inspection_agent_{ss_idx}",
+                run_fn=lambda draft, input_data=input_data, steady_states=steady_states, kube_context=kube_context, work_dir=work_dir, max_retries=max_retries, agent_logger=agent_logger: self._run_inspection(
+                    input_data, draft, steady_states, kube_context, work_dir, max_retries, agent_logger
+                ),
+                output_key="inspection",
+                depends_on=["draft"],
+            ))
 
-            #---------------------------------------------
-            # 3. define a threshold for the steady state
-            #---------------------------------------------
-            if should_skip_step(ss_idx, "threshold"):
-                threshold = current_step_data.get("threshold")
-                logger.info(f"Skipping threshold_agent_{ss_idx} (restored from checkpoint)")
-            else:
-                threshold = run_agent(
-                    f"threshold_agent_{ss_idx}",
-                    lambda: self.threshold_agent.define_threshold(
-                        input_data=input_data,
-                        steady_state_draft=steady_state_draft,
-                        inspection=inspection,
-                        predefined_steady_states=steady_states,
-                        agent_logger=agent_logger
-                    ),
-                    step_key="threshold"
-                )
-                save_checkpoint(f"unittest_agent_{ss_idx}")
+            iteration_runner.add_step(AgentStep(
+                name=f"threshold_agent_{ss_idx}",
+                run_fn=lambda draft, inspection, input_data=input_data, steady_states=steady_states, agent_logger=agent_logger: self._run_threshold(
+                    input_data, draft, inspection, steady_states, agent_logger
+                ),
+                output_key="threshold",
+                depends_on=["draft", "inspection"],
+            ))
 
-            #-------------------------------------------
-            # 4. write a unit test for the steady state
-            #-------------------------------------------
-            if should_skip_step(ss_idx, "unittest"):
-                unittest = self._deserialize_file(current_step_data.get("unittest"))
-                logger.info(f"Skipping unittest_agent_{ss_idx} (restored from checkpoint)")
-            else:
-                unittest = run_agent(
-                    f"unittest_agent_{ss_idx}",
-                    lambda: self.unittest_agent.write_unittest(
-                        input_data=input_data,
-                        steady_state_draft=steady_state_draft,
-                        inspection=inspection,
-                        threshold=threshold,
-                        predefined_steady_states=steady_states,
-                        kube_context=kube_context,
-                        work_dir=work_dir,
-                        max_retries=max_retries,
-                        agent_logger=agent_logger
-                    ),
-                    step_key="unittest"
-                )
+            iteration_runner.add_step(AgentStep(
+                name=f"unittest_agent_{ss_idx}",
+                run_fn=lambda draft, inspection, threshold, input_data=input_data, steady_states=steady_states, kube_context=kube_context, work_dir=work_dir, max_retries=max_retries, agent_logger=agent_logger: self._run_unittest(
+                    input_data, draft, inspection, threshold, steady_states, kube_context, work_dir, max_retries, agent_logger
+                ),
+                output_key="unittest",
+                depends_on=["draft", "inspection", "threshold"],
+            ))
 
-            #-------------------------------
-            # epilogue for the steady state
-            #-------------------------------
+            # Determine if we should resume on this iteration
+            iteration_resume_agent = None
+            if resume_from_agent and ss_idx == start_ss_idx:
+                iteration_resume_agent = resume_from_agent
+                # Clear resume_from_agent so subsequent iterations run fresh
+                resume_from_agent = None
+
+            # Run the iteration
+            results = iteration_runner.run(resume_from_agent=iteration_resume_agent)
+
+            # Deserialize results if they are dicts (from checkpoint)
+            inspection_result = results["inspection"]
+            if isinstance(inspection_result, dict):
+                inspection_result = Inspection(**inspection_result)
+            unittest_result = results["unittest"]
+            if isinstance(unittest_result, dict):
+                unittest_result = File(**unittest_result)
+
+            # Build steady state from results
             steady_states.append(SteadyState(
                 id=steady_states.count,
-                name=steady_state_draft["name"],
-                description=steady_state_draft["thought"],
-                inspection=inspection,
-                threshold=threshold,
-                unittest=unittest
+                name=results["draft"]["name"],
+                description=results["draft"]["thought"],
+                inspection=inspection_result,
+                threshold=results["threshold"],
+                unittest=unittest_result
             ))
-            # Clear current step data after completing a steady state
-            current_step_data = {}
-            save_checkpoint(f"completion_check_agent_{ss_idx}" if steady_states.count < max_num_steady_states else None)
 
             #-------------------------------
             # Check steady-state completion
@@ -327,19 +222,24 @@ class SteadyStateDefiner:
                 self.message_logger.write(f"#### The number of steady states has reached the maximum limit ({max_num_steady_states}).")
                 break
 
-            if should_skip_step(ss_idx, "completion_check"):
-                check = current_step_data.get("completion_check", {"requires_addition": True, "thought": ""})
-                logger.info(f"Skipping completion_check_agent_{ss_idx} (restored from checkpoint)")
-            else:
-                check = run_agent(
-                    f"completion_check_agent_{ss_idx}",
-                    lambda: self.completion_check_agent.check_steady_state_completion(
-                        input_data=input_data,
-                        predefined_steady_states=steady_states,
-                        agent_logger=agent_logger
-                    ),
-                    step_key="completion_check"
-                )
+            # Create a separate runner for completion check
+            check_runner = AgentRunner(
+                phase=f"steady_state_check_{ss_idx}",
+                checkpoint_dir=checkpoint_dir,
+                on_agent_start=on_agent_start,
+                on_agent_end=on_agent_end,
+            )
+
+            check_runner.add_step(AgentStep(
+                name=f"completion_check_agent_{ss_idx}",
+                run_fn=lambda input_data=input_data, steady_states=steady_states, agent_logger=agent_logger: self._run_completion_check(
+                    input_data, steady_states, agent_logger
+                ),
+                output_key="check",
+            ))
+
+            check_results = check_runner.run()
+            check = check_results["check"]
 
             prev_check_thought = check["thought"]
             if not check["requires_addition"]:
@@ -347,31 +247,104 @@ class SteadyStateDefiner:
 
             ss_idx += 1
 
-        # Final checkpoint
-        save_checkpoint(None)
         return steady_states
 
-    def _load_checkpoint(self, checkpoint_path: str) -> Optional[Dict]:
-        """Load checkpoint for this phase from shared checkpoint file"""
-        full_checkpoint = self._load_full_checkpoint(checkpoint_path)
-        if not full_checkpoint:
-            return None
-        phase_data = full_checkpoint.get("phases", {}).get(CHECKPOINT_PHASE)
-        if phase_data:
-            logger.debug(f"Loaded checkpoint for phase {CHECKPOINT_PHASE}")
-            return phase_data
-        return None
+    def _run_draft(
+        self,
+        input_data: ProcessedData,
+        predefined_steady_states: SteadyStates,
+        prev_check_thought: str,
+        agent_logger: Optional[AgentLogger]
+    ) -> Dict[str, str]:
+        """Run draft agent to propose a steady state."""
+        return self.draft_agent.draft_steady_state(
+            input_data=input_data,
+            predefined_steady_states=predefined_steady_states,
+            prev_check_thought=prev_check_thought,
+            agent_logger=agent_logger
+        )
 
-    def _load_full_checkpoint(self, checkpoint_path: str) -> Optional[Dict]:
-        """Load the full checkpoint file"""
-        if not os.path.exists(checkpoint_path):
-            return None
-        try:
-            with open(checkpoint_path, 'r') as f:
-                return json.load(f)
-        except Exception as e:
-            logger.warning(f"Failed to load checkpoint: {e}")
-            return None
+    def _run_inspection(
+        self,
+        input_data: ProcessedData,
+        draft: Dict[str, str],
+        predefined_steady_states: SteadyStates,
+        kube_context: str,
+        work_dir: str,
+        max_retries: int,
+        agent_logger: Optional[AgentLogger]
+    ) -> Inspection:
+        """Run inspection agent to inspect current state."""
+        return self.inspection_agent.inspect_current_state(
+            input_data=input_data,
+            steady_state_draft=draft,
+            predefined_steady_states=predefined_steady_states,
+            kube_context=kube_context,
+            work_dir=work_dir,
+            max_retries=max_retries,
+            agent_logger=agent_logger
+        )
+
+    def _run_threshold(
+        self,
+        input_data: ProcessedData,
+        draft: Dict[str, str],
+        inspection: Inspection,
+        predefined_steady_states: SteadyStates,
+        agent_logger: Optional[AgentLogger]
+    ) -> Dict[str, str]:
+        """Run threshold agent to define threshold."""
+        # Deserialize inspection if it's a dict (from checkpoint)
+        if isinstance(inspection, dict):
+            inspection = Inspection(**inspection)
+        return self.threshold_agent.define_threshold(
+            input_data=input_data,
+            steady_state_draft=draft,
+            inspection=inspection,
+            predefined_steady_states=predefined_steady_states,
+            agent_logger=agent_logger
+        )
+
+    def _run_unittest(
+        self,
+        input_data: ProcessedData,
+        draft: Dict[str, str],
+        inspection: Inspection,
+        threshold: Dict[str, str],
+        predefined_steady_states: SteadyStates,
+        kube_context: str,
+        work_dir: str,
+        max_retries: int,
+        agent_logger: Optional[AgentLogger]
+    ) -> File:
+        """Run unittest agent to write unit test."""
+        # Deserialize inspection if it's a dict (from checkpoint)
+        if isinstance(inspection, dict):
+            inspection = Inspection(**inspection)
+        return self.unittest_agent.write_unittest(
+            input_data=input_data,
+            steady_state_draft=draft,
+            inspection=inspection,
+            threshold=threshold,
+            predefined_steady_states=predefined_steady_states,
+            kube_context=kube_context,
+            work_dir=work_dir,
+            max_retries=max_retries,
+            agent_logger=agent_logger
+        )
+
+    def _run_completion_check(
+        self,
+        input_data: ProcessedData,
+        predefined_steady_states: SteadyStates,
+        agent_logger: Optional[AgentLogger]
+    ) -> Dict[str, Any]:
+        """Run completion check agent."""
+        return self.completion_check_agent.check_steady_state_completion(
+            input_data=input_data,
+            predefined_steady_states=predefined_steady_states,
+            agent_logger=agent_logger
+        )
 
     def _parse_agent_name(self, agent_name: str) -> tuple:
         """Parse agent name to get ss_idx and step type"""
@@ -379,36 +352,5 @@ class SteadyStateDefiner:
         parts = agent_name.rsplit("_", 1)
         if len(parts) == 2 and parts[1].isdigit():
             ss_idx = int(parts[1])
-            step_part = parts[0]
-            # Extract step type
-            step_mapping = {
-                "draft_agent": "draft",
-                "inspection_agent": "inspection",
-                "threshold_agent": "threshold",
-                "unittest_agent": "unittest",
-                "completion_check_agent": "completion_check",
-            }
-            for key, step in step_mapping.items():
-                if step_part == key:
-                    return ss_idx, step
+            return ss_idx, agent_name
         return 0, None
-
-    def _serialize_result(self, result: Any) -> Any:
-        """Serialize result for JSON storage"""
-        if hasattr(result, 'dict'):
-            return result.dict()
-        elif hasattr(result, '__dict__'):
-            return result.__dict__
-        return result
-
-    def _deserialize_inspection(self, data: Optional[Dict]) -> Optional[Inspection]:
-        """Deserialize Inspection from checkpoint data"""
-        if data is None:
-            return None
-        return Inspection(**data)
-
-    def _deserialize_file(self, data: Optional[Dict]) -> Optional[File]:
-        """Deserialize File from checkpoint data"""
-        if data is None:
-            return None
-        return File(**data)

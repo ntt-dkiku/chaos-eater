@@ -123,7 +123,6 @@ class ChaosEater:
         # Initialize or restore from checkpoint
         if checkpoint:
             ce_output = checkpoint
-            self.message_logger.write(f"##### Resuming from checkpoint at phase: {resume_from}")
         else:
             ce_output = ChaosEaterOutput(work_dir=work_dir)
 
@@ -148,11 +147,8 @@ class ChaosEater:
             # Determine if we're resuming within this phase
             preprocess_resume_agent = resume_from_agent if resume_from == "preprocess" else None
 
-            if preprocess_resume_agent:
-                # Resuming mid-phase - show resume message instead of phase header
-                self.message_logger.write(f"--- Resumed at preprocess/{preprocess_resume_agent} ---")
-            else:
-                # Normal start - show phase header
+            if not preprocess_resume_agent:
+                # Normal start - show phase header (skip on resume to avoid duplicate display)
                 self.message_logger.subheader("Phase 0: Preprocessing", divider="gray")
 
             # Trigger callback
@@ -195,8 +191,6 @@ class ChaosEater:
             for cb in callbacks:
                 if hasattr(cb, 'on_preprocess_end'):
                     cb.on_preprocess_end(data)
-        else:
-            self.message_logger.write(f"##### Skipping Phase 0: Preprocessing (resuming)")
 
         #---------------
         # 1. hypothesis
@@ -205,9 +199,8 @@ class ChaosEater:
             # Determine if we're resuming within this phase
             hypothesis_resume_agent = resume_from_agent if resume_from == "hypothesis" else None
 
-            if hypothesis_resume_agent:
-                self.message_logger.write(f"--- Resumed at hypothesis/{hypothesis_resume_agent} ---")
-            else:
+            if not hypothesis_resume_agent:
+                # Normal start - show phase header (skip on resume to avoid duplicate display)
                 self.message_logger.subheader("Phase 1: Hypothesis", divider="gray")
 
             for cb in callbacks:
@@ -233,8 +226,6 @@ class ChaosEater:
             for cb in callbacks:
                 if hasattr(cb, 'on_hypothesis_end'):
                     cb.on_hypothesis_end(hypothesis)
-        else:
-            self.message_logger.write(f"##### Skipping Phase 1: Hypothesis (resuming)")
 
         #---------------------
         # 2. Chaos Experiment
@@ -243,9 +234,8 @@ class ChaosEater:
             # Determine if we're resuming within this phase
             experiment_resume_agent = resume_from_agent if resume_from == "experiment_plan" else None
 
-            if experiment_resume_agent:
-                self.message_logger.write(f"--- Resumed at experiment_plan/{experiment_resume_agent} ---")
-            else:
+            if not experiment_resume_agent:
+                # Normal start - show phase header (skip on resume to avoid duplicate display)
                 self.message_logger.subheader("Phase 2: Chaos Experiment", divider="gray")
 
             for cb in callbacks:
@@ -269,8 +259,6 @@ class ChaosEater:
             for cb in callbacks:
                 if hasattr(cb, 'on_experiment_plan_end'):
                     cb.on_experiment_plan_end(experiment)
-        else:
-            self.message_logger.write(f"##### Skipping Phase 2: Experiment Planning (resuming)")
 
         #------------------
         # improvement loop

@@ -67,13 +67,13 @@ class ThresholdAgent:
         steady_state_draft: Dict[str, str],
         inspection: Inspection,
         predefined_steady_states: list,
-        agent_logger: Optional[AgentLogger] = None
+        agent_logger: Optional[AgentLogger] = None,
     ) -> Dict[str, str]:
         cb = agent_logger and agent_logger.get_callback(
             phase="hypothesis",
             agent_name="threshold_definition"
         )
-        
+
         self.message_logger.write("#### 🚩 Threshold\n")
         for responce in self.agent.stream({
             "user_input": input_data.to_k8s_overview_str(),
