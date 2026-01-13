@@ -187,10 +187,10 @@ export default function ChaosEaterApp() {
   const [messages, setMessages] = useState([]); // [{role: 'assistant'|'user', content: string}]
   const [jobId, setJobId] = useState(null);
   const wsRef = useRef(null);
-  // Agent boundary tracking for resume functionality
-  // Maps agent name to the message index where its output starts
-  const agentBoundariesRef = useRef<Map<string, number>>(new Map());
+  // Track current agent for tagging messages with agentId
   const currentAgentRef = useRef<string | null>(null);
+  // Skip events until resume_start is received (to ignore stale events on reconnect)
+  const skipUntilResumeStartRef = useRef<boolean>(false);
   // model list
   const models = [
     'openai/gpt-4.1',
@@ -532,13 +532,19 @@ export default function ChaosEaterApp() {
         message: `Resuming from: ${resumePoint}`
       });
 
+      // Keep existing messages (completed agents' output)
+      // Backend clears old events on resume, so only new events arrive
+      // skipUntilResumeStartRef is kept for backward compatibility
+      currentAgentRef.current = null;
+      partialStateRef.current = null;
+      skipUntilResumeStartRef.current = true;
+
       // Reconnect WebSocket for streaming
       const socket = new WebSocket(wsUrl(`/jobs/${jobId}/stream`));
       wsRef.current = socket;
 
       socket.onopen = () => {
-        // Clear partial state before new streaming (resume_start event will handle message cleanup)
-        partialStateRef.current = null;
+        // State already cleared above
       };
       socket.onmessage = (event) => {
         handleWsPayload(event.data);
@@ -588,7 +594,6 @@ export default function ChaosEaterApp() {
     setCurrentSnapshotId(null);  // Detach from current snapshot
     partialStateRef.current = null;
     messageQueueRef.current = [];
-    agentBoundariesRef.current.clear();
     currentAgentRef.current = null;
     
     // Reset form to defaults but keep API key and cluster
@@ -987,7 +992,8 @@ export default function ChaosEaterApp() {
       mode = 'delta',            // 'delta' means append, 'frame' means full replacement
       format = 'plain',          // 'plain' for text, 'code' for code blocks
       language = undefined,
-      final = false              // true if this partial is the last one for the bubble
+      final = false,             // true if this partial is the last one for the bubble
+      agentId = undefined        // agent ID for resume filtering
     } = {}
   ) {
     const type = (format === 'code') ? 'code' : 'text';
@@ -1014,12 +1020,13 @@ export default function ChaosEaterApp() {
           last.content = `${last.content || ''}${c}`;
         }
       } else {
-        // Create a new bubble
+        // Create a new bubble with agentId for resume filtering
         out.push({
           type, // 'text' | 'code'
           role,
           content: c,
-          ...(type === 'code' ? { language } : {})
+          ...(type === 'code' ? { language } : {}),
+          ...(agentId ? { agentId } : {})
         });
         partialStateRef.current = { open: true, role, type, language: (type === 'code' ? language : undefined) };
       }
@@ -1053,8 +1060,13 @@ export default function ChaosEaterApp() {
         
         if (msg?.type === 'event' && msg.event) {
           const ev = msg.event;
+
+          // Skip stale events until resume_start is received (after handleResume)
+          if (skipUntilResumeStartRef.current && ev.type !== 'resume_start') {
+            return;
+          }
+
           if (ev.type === 'partial' && ev.partial != null) {
-            // Boundary is now recorded at agent_start for consistent resume behavior
             appendAssistantPartial(setMessages, ev.partial, {
               role: ev.role || 'assistant',
               mode: ev.mode || 'delta',
@@ -1062,6 +1074,7 @@ export default function ChaosEaterApp() {
               language: ev.language,
               filename: ev.filename,
               final: !!ev.final,
+              agentId: currentAgentRef.current,
             });
             return;
           }
@@ -1070,54 +1083,42 @@ export default function ChaosEaterApp() {
             return;
           }
           if (ev.type === 'write') {
-            setMessages(m => [...m, { type: 'text', role: ev.role || 'assistant', content: ev.text || '' }]);
+            setMessages(m => [...m, { type: 'text', role: ev.role || 'assistant', content: ev.text || '', agentId: currentAgentRef.current }]);
             return;
           }
           if (ev.type === 'code') {
-            setMessages(m => [...m, { type: 'code', role: ev.role || 'assistant', content: ev.code || '', language: ev.language, filename: ev.filename }]);
+            setMessages(m => [...m, { type: 'code', role: ev.role || 'assistant', content: ev.code || '', language: ev.language, filename: ev.filename, agentId: currentAgentRef.current }]);
             return;
           }
           if (ev.type === 'subheader') {
-            setMessages(m => [...m, { type: 'subheader', role: ev.role || 'assistant', content: ev.text || '' }]);
+            setMessages(m => [...m, { type: 'subheader', role: ev.role || 'assistant', content: ev.text || '', agentId: currentAgentRef.current }]);
             return;
           }
           if (ev.type === 'iframe') {
-            setMessages(m => [...m, { type: 'iframe', role: ev.role || 'assistant', content: ev.url || '' }]);
+            setMessages(m => [...m, { type: 'iframe', role: ev.role || 'assistant', content: ev.url || '', agentId: currentAgentRef.current }]);
             return;
           }
           if (ev.type === 'tag') {
-            setMessages(m => [...m, { type: 'tag', role: ev.role || 'assistant', content: ev.text || '', color: ev.color, background: ev.background }]);
+            setMessages(m => [...m, { type: 'tag', role: ev.role || 'assistant', content: ev.text || '', color: ev.color, background: ev.background, agentId: currentAgentRef.current }]);
             return;
           }
-          // Agent boundary tracking for resume functionality
+          // Agent tracking for resume functionality (messages are tagged with agentId)
           if (ev.type === 'agent_start') {
             currentAgentRef.current = ev.agent;
-            // Record boundary at agent_start (includes subtitle in deletion on resume)
-            // This ensures consistent behavior regardless of when stop is pressed
-            setMessages(prev => {
-              agentBoundariesRef.current.set(ev.agent, prev.length);
-              return prev;
-            });
             return;
           }
           if (ev.type === 'agent_end') {
-            // Mark agent as completed and clean up boundary tracking
-            agentBoundariesRef.current.delete(ev.agent);
             currentAgentRef.current = null;
             return;
           }
           if (ev.type === 'resume_start') {
-            // Clear incomplete agent's messages on resume (includes subtitles - they will be re-output)
-            setMessages(prev => {
-              const agentToResume = ev.agent || currentAgentRef.current;
-              if (agentToResume && agentBoundariesRef.current.has(agentToResume)) {
-                const startIdx = agentBoundariesRef.current.get(agentToResume)!;
-                agentBoundariesRef.current.delete(agentToResume);
-                return prev.slice(0, startIdx);
-              }
-              return prev;
-            });
-            // Clear partial state
+            // Stop skipping stale events
+            skipUntilResumeStartRef.current = false;
+            // Remove incomplete output from the agent being resumed
+            const agentToResume = ev.agent;
+            if (agentToResume) {
+              setMessages(prev => prev.filter(msg => msg.agentId !== agentToResume));
+            }
             partialStateRef.current = null;
             currentAgentRef.current = null;
             return;
@@ -1127,13 +1128,13 @@ export default function ChaosEaterApp() {
         }
         
         if (msg.partial != null) {
-          // Boundary is now recorded at agent_start for consistent resume behavior
           appendAssistantPartial(setMessages, msg.partial, {
             role: msg.role || 'assistant',
             mode: msg.mode || 'delta',
             format: msg.format || 'plain',
             language: msg.language,
             final: !!msg.final,
+            agentId: currentAgentRef.current,
           });
           return;
         }

@@ -430,6 +430,11 @@ class JobManager:
             new = buf[start:]
             return new, len(buf)
 
+    async def clear_events(self, job_id: str) -> None:
+        """Clear all events for a job (used on resume to prevent stale events)."""
+        async with self.lock:
+            self.events[job_id] = []
+
     async def get_job(self, job_id: str) -> Optional[JobInfo]:
         return self.jobs.get(job_id)
 
@@ -774,8 +779,10 @@ async def run_chaos_eater_cycle(
             checkpoint = ChaosEaterOutput(**checkpoint_data)
             logger.info(f"Loaded checkpoint for job {job_id}, resuming from phase: {resume_from}")
 
-        # Send resume_start event if resuming (for frontend to clear incomplete agent output)
+        # Clear old events and send resume_start if resuming
+        # This ensures WebSocket reconnect only receives new events (no duplicates)
         if resume_from:
+            await job_manager.clear_events(job_id)
             await job_manager.add_event(job_id, {
                 "type": "resume_start",
                 "phase": resume_from,
