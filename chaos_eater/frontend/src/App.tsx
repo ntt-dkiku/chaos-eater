@@ -1054,14 +1054,7 @@ export default function ChaosEaterApp() {
         if (msg?.type === 'event' && msg.event) {
           const ev = msg.event;
           if (ev.type === 'partial' && ev.partial != null) {
-            // Record streaming start position on first partial for current agent
-            // This preserves subtitle messages (write events) that come before streaming
-            if (currentAgentRef.current && !agentBoundariesRef.current.has(currentAgentRef.current)) {
-              setMessages(prev => {
-                agentBoundariesRef.current.set(currentAgentRef.current!, prev.length);
-                return prev;
-              });
-            }
+            // Boundary is now recorded at agent_start for consistent resume behavior
             appendAssistantPartial(setMessages, ev.partial, {
               role: ev.role || 'assistant',
               mode: ev.mode || 'delta',
@@ -1098,9 +1091,13 @@ export default function ChaosEaterApp() {
           }
           // Agent boundary tracking for resume functionality
           if (ev.type === 'agent_start') {
-            // Mark agent as active (position will be recorded on first partial event)
-            // This allows subtitle messages (write events) to be preserved on resume
             currentAgentRef.current = ev.agent;
+            // Record boundary at agent_start (includes subtitle in deletion on resume)
+            // This ensures consistent behavior regardless of when stop is pressed
+            setMessages(prev => {
+              agentBoundariesRef.current.set(ev.agent, prev.length);
+              return prev;
+            });
             return;
           }
           if (ev.type === 'agent_end') {
@@ -1110,7 +1107,7 @@ export default function ChaosEaterApp() {
             return;
           }
           if (ev.type === 'resume_start') {
-            // Clear incomplete agent's messages on resume (preserves subtitles)
+            // Clear incomplete agent's messages on resume (includes subtitles - they will be re-output)
             setMessages(prev => {
               const agentToResume = ev.agent || currentAgentRef.current;
               if (agentToResume && agentBoundariesRef.current.has(agentToResume)) {
@@ -1130,13 +1127,7 @@ export default function ChaosEaterApp() {
         }
         
         if (msg.partial != null) {
-          // Record streaming start position on first partial for current agent
-          if (currentAgentRef.current && !agentBoundariesRef.current.has(currentAgentRef.current)) {
-            setMessages(prev => {
-              agentBoundariesRef.current.set(currentAgentRef.current!, prev.length);
-              return prev;
-            });
-          }
+          // Boundary is now recorded at agent_start for consistent resume behavior
           appendAssistantPartial(setMessages, msg.partial, {
             role: msg.role || 'assistant',
             mode: msg.mode || 'delta',
