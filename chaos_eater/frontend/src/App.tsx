@@ -189,8 +189,6 @@ export default function ChaosEaterApp() {
   const wsRef = useRef(null);
   // Track current agent for tagging messages with agentId
   const currentAgentRef = useRef<string | null>(null);
-  // Skip events until resume_start is received (to ignore stale events on reconnect)
-  const skipUntilResumeStartRef = useRef<boolean>(false);
   // model list
   const models = [
     'openai/gpt-4.1',
@@ -534,10 +532,8 @@ export default function ChaosEaterApp() {
 
       // Keep existing messages (completed agents' output)
       // Backend clears old events on resume, so only new events arrive
-      // skipUntilResumeStartRef is kept for backward compatibility
       currentAgentRef.current = null;
       partialStateRef.current = null;
-      skipUntilResumeStartRef.current = true;
 
       // Reconnect WebSocket for streaming
       const socket = new WebSocket(wsUrl(`/jobs/${jobId}/stream`));
@@ -1061,11 +1057,6 @@ export default function ChaosEaterApp() {
         if (msg?.type === 'event' && msg.event) {
           const ev = msg.event;
 
-          // Skip stale events until resume_start is received (after handleResume)
-          if (skipUntilResumeStartRef.current && ev.type !== 'resume_start') {
-            return;
-          }
-
           if (ev.type === 'partial' && ev.partial != null) {
             appendAssistantPartial(setMessages, ev.partial, {
               role: ev.role || 'assistant',
@@ -1112,8 +1103,6 @@ export default function ChaosEaterApp() {
             return;
           }
           if (ev.type === 'resume_start') {
-            // Stop skipping stale events
-            skipUntilResumeStartRef.current = false;
             // Remove incomplete output from the agent being resumed
             const agentToResume = ev.agent;
             if (agentToResume) {
