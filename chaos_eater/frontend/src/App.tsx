@@ -187,6 +187,10 @@ export default function ChaosEaterApp() {
   const [messages, setMessages] = useState([]); // [{role: 'assistant'|'user', content: string}]
   const [jobId, setJobId] = useState(null);
   const wsRef = useRef(null);
+  // Agent boundary tracking for resume functionality
+  // Maps agent name to the message index where its output starts
+  const agentBoundariesRef = useRef<Map<string, number>>(new Map());
+  const currentAgentRef = useRef<string | null>(null);
   // model list
   const models = [
     'openai/gpt-4.1',
@@ -533,7 +537,8 @@ export default function ChaosEaterApp() {
       wsRef.current = socket;
 
       socket.onopen = () => {
-        setMessages((m) => [...m, { type: 'status', role: 'assistant', content: 'Resumed. Streaming restarted…' }]);
+        // Clear partial state before new streaming (resume_start event will handle message cleanup)
+        partialStateRef.current = null;
       };
       socket.onmessage = (event) => {
         handleWsPayload(event.data);
@@ -583,6 +588,8 @@ export default function ChaosEaterApp() {
     setCurrentSnapshotId(null);  // Detach from current snapshot
     partialStateRef.current = null;
     messageQueueRef.current = [];
+    agentBoundariesRef.current.clear();
+    currentAgentRef.current = null;
     
     // Reset form to defaults but keep API key and cluster
     setFormData(prev => ({
@@ -1047,6 +1054,14 @@ export default function ChaosEaterApp() {
         if (msg?.type === 'event' && msg.event) {
           const ev = msg.event;
           if (ev.type === 'partial' && ev.partial != null) {
+            // Record streaming start position on first partial for current agent
+            // This preserves subtitle messages (write events) that come before streaming
+            if (currentAgentRef.current && !agentBoundariesRef.current.has(currentAgentRef.current)) {
+              setMessages(prev => {
+                agentBoundariesRef.current.set(currentAgentRef.current!, prev.length);
+                return prev;
+              });
+            }
             appendAssistantPartial(setMessages, ev.partial, {
               role: ev.role || 'assistant',
               mode: ev.mode || 'delta',
@@ -1081,11 +1096,47 @@ export default function ChaosEaterApp() {
             setMessages(m => [...m, { type: 'tag', role: ev.role || 'assistant', content: ev.text || '', color: ev.color, background: ev.background }]);
             return;
           }
+          // Agent boundary tracking for resume functionality
+          if (ev.type === 'agent_start') {
+            // Mark agent as active (position will be recorded on first partial event)
+            // This allows subtitle messages (write events) to be preserved on resume
+            currentAgentRef.current = ev.agent;
+            return;
+          }
+          if (ev.type === 'agent_end') {
+            // Mark agent as completed and clean up boundary tracking
+            agentBoundariesRef.current.delete(ev.agent);
+            currentAgentRef.current = null;
+            return;
+          }
+          if (ev.type === 'resume_start') {
+            // Clear incomplete agent's messages on resume (preserves subtitles)
+            setMessages(prev => {
+              const agentToResume = ev.agent || currentAgentRef.current;
+              if (agentToResume && agentBoundariesRef.current.has(agentToResume)) {
+                const startIdx = agentBoundariesRef.current.get(agentToResume)!;
+                agentBoundariesRef.current.delete(agentToResume);
+                return prev.slice(0, startIdx);
+              }
+              return prev;
+            });
+            // Clear partial state
+            partialStateRef.current = null;
+            currentAgentRef.current = null;
+            return;
+          }
           setMessages(m => [...m, { type: 'text', role: 'assistant', content: JSON.stringify(ev) }]);
           return;
         }
         
         if (msg.partial != null) {
+          // Record streaming start position on first partial for current agent
+          if (currentAgentRef.current && !agentBoundariesRef.current.has(currentAgentRef.current)) {
+            setMessages(prev => {
+              agentBoundariesRef.current.set(currentAgentRef.current!, prev.length);
+              return prev;
+            });
+          }
           appendAssistantPartial(setMessages, msg.partial, {
             role: msg.role || 'assistant',
             mode: msg.mode || 'delta',

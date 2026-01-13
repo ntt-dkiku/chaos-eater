@@ -660,10 +660,20 @@ class CancellableAPICallback(APICallback):
         """Called when an agent starts execution"""
         self._update_agent(agent_name)
         self._push(f"Agent started: {agent_name}")
+        # Send as event for frontend agent boundary tracking
+        self._push_event({
+            "type": "agent_start",
+            "agent": agent_name,
+        })
 
     def on_agent_end(self, agent_name: str, result: any = None):
         """Called when an agent completes execution"""
         self._push(f"Agent completed: {agent_name}")
+        # Send as event for frontend agent boundary tracking
+        self._push_event({
+            "type": "agent_end",
+            "agent": agent_name,
+        })
 
     def on_stream(self, channel: str, event: dict) -> None:
         """Check cancellation on every stream event"""
@@ -763,6 +773,14 @@ async def run_chaos_eater_cycle(
                 checkpoint_data = json.load(f)
             checkpoint = ChaosEaterOutput(**checkpoint_data)
             logger.info(f"Loaded checkpoint for job {job_id}, resuming from phase: {resume_from}")
+
+        # Send resume_start event if resuming (for frontend to clear incomplete agent output)
+        if resume_from:
+            await job_manager.add_event(job_id, {
+                "type": "resume_start",
+                "phase": resume_from,
+                "agent": resume_from_agent or "",
+            })
 
         # Run CE in thread pool (avoid blocking the event loop)
         from functools import partial
