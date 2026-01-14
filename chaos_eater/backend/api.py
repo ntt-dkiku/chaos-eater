@@ -736,10 +736,26 @@ class CancellableAPICallback(APICallback):
             return agent_name.startswith(pattern[:-2])
         return pattern == agent_name
 
-    def on_agent_start(self, agent_name: str) -> str:
-        """Called when an agent starts execution. Returns 'approve', 'retry', or raises CancelledError"""
+    def on_agent_start(self, agent_name: str) -> None:
+        """Called when an agent starts execution (notification only)"""
         self._update_agent(agent_name)
+        self._push(f"Agent started: {agent_name}")
+        # Send as event for frontend agent boundary tracking
+        self._push_event({
+            "type": "agent_start",
+            "agent": agent_name,
+        })
 
+    def on_agent_end(self, agent_name: str, result: any = None) -> str:
+        """Called when an agent completes. Returns 'approve', 'retry', or raises CancelledError"""
+        self._push(f"Agent completed: {agent_name}")
+        # Send as event for frontend agent boundary tracking
+        self._push_event({
+            "type": "agent_end",
+            "agent": agent_name,
+        })
+
+        # Post-approval: request approval after agent output is shown
         if self._needs_approval(agent_name):
             self._push(f"Agent {agent_name} awaiting approval...")
             # Request approval from frontend
@@ -771,24 +787,9 @@ class CancellableAPICallback(APICallback):
                 self.cancelled = True
                 raise asyncio.CancelledError(f"Paused at {agent_name}")
             # response == 'approve'
-            self._push(f"Agent {agent_name} approved")
+            self._push(f"Agent {agent_name} approved, continuing...")
 
-        self._push(f"Agent started: {agent_name}")
-        # Send as event for frontend agent boundary tracking
-        self._push_event({
-            "type": "agent_start",
-            "agent": agent_name,
-        })
         return 'approve'
-
-    def on_agent_end(self, agent_name: str, result: any = None):
-        """Called when an agent completes execution"""
-        self._push(f"Agent completed: {agent_name}")
-        # Send as event for frontend agent boundary tracking
-        self._push_event({
-            "type": "agent_end",
-            "agent": agent_name,
-        })
 
     def on_stream(self, channel: str, event: dict) -> None:
         """Check cancellation on every stream event"""

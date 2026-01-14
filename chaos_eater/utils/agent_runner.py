@@ -237,12 +237,11 @@ class AgentRunner:
                     else:
                         logger.warning(f"Dependency {dep_key} not found for {step.name}")
 
-            # Retry loop for interactive mode
+            # Retry loop for interactive mode (post-approval)
             while True:
-                # Callback: agent starting (may return 'approve', 'retry', or raise)
-                action = 'approve'
+                # Callback: agent starting (notification only)
                 if self.on_agent_start:
-                    action = self.on_agent_start(step.name) or 'approve'
+                    self.on_agent_start(step.name)
 
                 # Execute agent
                 try:
@@ -257,19 +256,20 @@ class AgentRunner:
                 # Store result
                 self.results[step.output_key] = result
 
+                # Callback: agent completed (may return 'approve', 'retry', or raise)
+                action = 'approve'
+                if self.on_agent_end:
+                    action = self.on_agent_end(step.name, result) or 'approve'
+
                 if action == 'retry':
                     logger.info(f"Retrying agent: {step.name}")
-                    # Continue loop to re-execute after approval
+                    # Continue loop to re-execute
                     continue
 
                 # approve - exit retry loop and continue to next agent
                 break
 
             self._completed_agents.append(step.name)
-
-            # Callback: agent completed
-            if self.on_agent_end:
-                self.on_agent_end(step.name, result)
 
             # Save checkpoint
             if step.checkpoint_after:
