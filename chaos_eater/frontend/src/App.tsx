@@ -2318,17 +2318,23 @@ export default function ChaosEaterApp() {
                         alignItems: 'center',
                         gap: 4,
                         padding: '6px 12px',
-                        backgroundColor: '#22c55e',
-                        color: '#000',
-                        border: 'none',
+                        backgroundColor: 'transparent',
+                        color: '#84cc16',
+                        border: '1px solid #84cc16',
                         borderRadius: 6,
                         fontSize: 13,
                         fontWeight: 500,
                         cursor: 'pointer',
-                        transition: 'background-color 0.15s',
+                        transition: 'all 0.15s',
                       }}
-                      onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#16a34a'; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#22c55e'; }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = '#84cc16';
+                        e.currentTarget.style.color = '#000';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = 'transparent';
+                        e.currentTarget.style.color = '#84cc16';
+                      }}
                       title="Approve (Enter)"
                     >
                       <CheckCircle size={16} /> Approve
@@ -2343,17 +2349,23 @@ export default function ChaosEaterApp() {
                         alignItems: 'center',
                         gap: 4,
                         padding: '6px 12px',
-                        backgroundColor: '#eab308',
-                        color: '#000',
-                        border: 'none',
+                        backgroundColor: 'transparent',
+                        color: '#d4a017',
+                        border: '1px solid #d4a017',
                         borderRadius: 6,
                         fontSize: 13,
                         fontWeight: 500,
                         cursor: 'pointer',
-                        transition: 'background-color 0.15s',
+                        transition: 'all 0.15s',
                       }}
-                      onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#ca8a04'; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#eab308'; }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = '#d4a017';
+                        e.currentTarget.style.color = '#000';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = 'transparent';
+                        e.currentTarget.style.color = '#d4a017';
+                      }}
                       title="Retry (R)"
                     >
                       <RotateCcw size={16} /> Retry
@@ -2365,17 +2377,23 @@ export default function ChaosEaterApp() {
                         alignItems: 'center',
                         gap: 4,
                         padding: '6px 12px',
-                        backgroundColor: '#ef4444',
-                        color: '#fff',
-                        border: 'none',
+                        backgroundColor: 'transparent',
+                        color: '#9ca3af',
+                        border: '1px solid #6b7280',
                         borderRadius: 6,
                         fontSize: 13,
                         fontWeight: 500,
                         cursor: 'pointer',
-                        transition: 'background-color 0.15s',
+                        transition: 'all 0.15s',
                       }}
-                      onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#dc2626'; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#ef4444'; }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = '#6b7280';
+                        e.currentTarget.style.color = '#fff';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = 'transparent';
+                        e.currentTarget.style.color = '#9ca3af';
+                      }}
                       title="Cancel (Esc)"
                     >
                       <XCircle size={16} /> Cancel
