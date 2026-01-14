@@ -39,6 +39,7 @@ import LandingLogo from './components/LandingLogo';
 import LandingMessage from './components/LandingMessage';
 import CleanClusterButton from './components/CleanClusterButton';
 import StatsPanel from './components/StatsPanel';
+import ApprovalDialog from './components/ApprovalDialog';
 
 // API modules
 import { uploadZipToBackend } from './api/uploads';
@@ -549,6 +550,22 @@ export default function ChaosEaterApp() {
           message: 'Failed to pause job. Backend may still be processing.'
         });
       }
+    }
+  };
+
+  // Send approval response to backend
+  const sendApprovalResponse = async (action: 'approve' | 'retry' | 'cancel', message?: string) => {
+    if (!jobId) return;
+    setApprovalDialog(null);
+    try {
+      await fetch(`${API_BASE}/jobs/${jobId}/approval`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, message }),
+      });
+    } catch (error) {
+      console.error('Failed to send approval response:', error);
+      setNotification({ type: 'error', message: 'Failed to send approval response' });
     }
   };
 
@@ -1152,6 +1169,27 @@ export default function ChaosEaterApp() {
             }
             partialStateRef.current = null;
             currentAgentRef.current = null;
+            return;
+          }
+          if (ev.type === 'approval_request') {
+            const agentName = ev.agent;
+            // Check if this agent needs approval based on settings
+            const needsApproval = formData.approvalAgents.some(pattern => {
+              if (pattern.endsWith('_*')) {
+                return agentName.startsWith(pattern.slice(0, -2));
+              }
+              return pattern === agentName;
+            });
+
+            if (needsApproval) {
+              setApprovalDialog({
+                visible: true,
+                agentName,
+              });
+            } else {
+              // Auto-approve agents not in the list
+              sendApprovalResponse('approve');
+            }
             return;
           }
           setMessages(m => [...m, { type: 'text', role: 'assistant', content: JSON.stringify(ev) }]);
@@ -2185,6 +2223,16 @@ export default function ChaosEaterApp() {
           </div>
         </div>
       </div>
+
+      {/* Approval Dialog for Interactive Mode */}
+      {approvalDialog && (
+        <ApprovalDialog
+          agentName={approvalDialog.agentName}
+          onApprove={(message) => sendApprovalResponse('approve', message)}
+          onRetry={(message) => sendApprovalResponse('retry', message)}
+          onCancel={() => sendApprovalResponse('cancel')}
+        />
+      )}
     </div>
   );
 }
