@@ -566,12 +566,31 @@ export default function ChaosEaterApp() {
   const sendApprovalResponse = async (action: 'approve' | 'retry' | 'cancel', message?: string) => {
     if (!jobId) return;
     setApprovalDialog(null);
+
+    // Cancel acts like pause - set paused state immediately
+    if (action === 'cancel') {
+      setRunState('paused');
+      setIsLoading(false);
+      // Close WebSocket
+      if (wsRef.current) {
+        try {
+          wsRef.current.close();
+          wsRef.current = null;
+        } catch (e) {
+          console.error('Failed to close WebSocket:', e);
+        }
+      }
+    }
+
     try {
       await fetch(`${API_BASE}/jobs/${jobId}/approval`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, message }),
       });
+      if (action === 'cancel') {
+        setNotification({ type: 'success', message: 'Job paused' });
+      }
     } catch (error) {
       console.error('Failed to send approval response:', error);
       setNotification({ type: 'error', message: 'Failed to send approval response' });

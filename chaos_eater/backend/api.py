@@ -541,16 +541,7 @@ class JobManager:
         """Pause a running job for later resume"""
         # Set PAUSED status FIRST before cancelling task
         # This ensures CancelledError handler sees PAUSED status
-        async with self.lock:
-            if job_id in self.jobs:
-                self.jobs[job_id].status = JobStatus.PAUSED
-                self.jobs[job_id].updated_at = datetime.now()
-                phase = self.jobs[job_id].current_phase or "unknown"
-                agent = self.jobs[job_id].current_agent
-                if agent:
-                    self.jobs[job_id].progress = f"Paused at {phase}/{agent}"
-                else:
-                    self.jobs[job_id].progress = f"Paused at {phase}"
+        await self.set_paused_status(job_id)
 
         # Then cancel the task
         callback = self.callbacks.get(job_id)
@@ -565,6 +556,22 @@ class JobManager:
             del self.callbacks[job_id]
 
         return True
+
+    async def set_paused_status(self, job_id: str) -> None:
+        """Set job status to PAUSED without cancelling the task.
+
+        Used by pause_job and approval dialog cancel.
+        """
+        async with self.lock:
+            if job_id in self.jobs:
+                self.jobs[job_id].status = JobStatus.PAUSED
+                self.jobs[job_id].updated_at = datetime.now()
+                phase = self.jobs[job_id].current_phase or "unknown"
+                agent = self.jobs[job_id].current_agent
+                if agent:
+                    self.jobs[job_id].progress = f"Paused at {phase}/{agent}"
+                else:
+                    self.jobs[job_id].progress = f"Paused at {phase}"
 
     async def cleanup_old_jobs(self, hours: int = 24):
         cutoff = datetime.now() - timedelta(hours=hours)
@@ -751,8 +758,18 @@ class CancellableAPICallback(APICallback):
                 self._push(f"Agent {agent_name} will retry")
                 return 'retry'
             elif response == 'cancel':
+                # Treat cancel as pause - set PAUSED status first
+                self._push(f"Pausing at {agent_name}...")
+                pause_fut = asyncio.run_coroutine_threadsafe(
+                    self.job_manager.set_paused_status(self.job_id),
+                    self.loop
+                )
+                try:
+                    pause_fut.result(timeout=5)
+                except Exception as e:
+                    logger.warning(f"Failed to set paused status: {e}")
                 self.cancelled = True
-                raise asyncio.CancelledError(f"Cancelled at {agent_name}")
+                raise asyncio.CancelledError(f"Paused at {agent_name}")
             # response == 'approve'
             self._push(f"Agent {agent_name} approved")
 
