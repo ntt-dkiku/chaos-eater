@@ -816,7 +816,10 @@ export default function ChaosEaterApp() {
       seed: formData.seed,
       max_num_steadystates: formData.maxSteadyStates,
       max_retries: formData.maxRetries,
-      namespace: 'chaos-eater'
+      namespace: 'chaos-eater',
+      // Interactive mode settings
+      execution_mode: formData.executionMode,
+      approval_agents: formData.approvalAgents,
     };
 
     try {
