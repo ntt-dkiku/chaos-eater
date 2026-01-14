@@ -19,7 +19,8 @@ import {
   X,
   Paperclip,
   PanelLeftOpen,
-  PanelLeftClose
+  PanelLeftClose,
+  ExternalLink
 } from 'lucide-react';
 import {
   ensureSession,
@@ -1409,44 +1410,69 @@ export default function ChaosEaterApp() {
           {/* Smoothly animated content */}
           <Collapse isOpen={!sidebarCollapsed.general}>
             <div id="settings-collapse" style={sidebarStyles.collapseContent}>
-              {/* Mode Selection - Top of Settings */}
+              {/* Mode Selection - Top of Settings (2 buttons) */}
               <div>
                 <label style={inputStyles.label}>Mode</label>
-                <select
-                  style={mergeStyles(inputStyles.select, { marginTop: '4px' })}
-                  value={formData.executionMode}
-                  onChange={(e) => setFormData({...formData, executionMode: e.target.value as 'full-auto' | 'interactive'})}
-                  {...focusHandlers.input}
-                >
-                  <option value="full-auto" style={{ backgroundColor: colors.bgInput }}>Full-Auto</option>
-                  <option value="interactive" style={{ backgroundColor: colors.bgInput }}>Interactive</option>
-                </select>
-              </div>
-
-              {/* Advanced Settings link (only visible in interactive mode) */}
-              {formData.executionMode === 'interactive' && (
+                <div style={{ display: 'flex', gap: spacing.xs, marginTop: spacing.xs }}>
+                  <button
+                    onClick={() => setFormData({...formData, executionMode: 'full-auto'})}
+                    style={{
+                      padding: '4px 10px',
+                      fontSize: fontSize.sm,
+                      border: '1px solid',
+                      borderRadius: borderRadius.sm,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s',
+                      backgroundColor: formData.executionMode === 'full-auto' ? colors.primary : 'transparent',
+                      borderColor: formData.executionMode === 'full-auto' ? colors.primary : colors.border,
+                      color: formData.executionMode === 'full-auto' ? colors.bgPrimary : colors.textSecondary,
+                    }}
+                  >
+                    Full-Auto
+                  </button>
+                  <button
+                    onClick={() => setFormData({...formData, executionMode: 'interactive'})}
+                    style={{
+                      padding: '4px 10px',
+                      fontSize: fontSize.sm,
+                      border: '1px solid',
+                      borderRadius: borderRadius.sm,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s',
+                      backgroundColor: formData.executionMode === 'interactive' ? colors.primary : 'transparent',
+                      borderColor: formData.executionMode === 'interactive' ? colors.primary : colors.border,
+                      color: formData.executionMode === 'interactive' ? colors.bgPrimary : colors.textSecondary,
+                    }}
+                  >
+                    Interactive
+                  </button>
+                </div>
+                {/* Advanced Settings link */}
                 <button
                   onClick={() => setAgentSettingsOpen(true)}
                   style={{
                     background: 'none',
                     border: 'none',
-                    color: colors.primary,
+                    color: colors.textSecondary,
                     fontSize: fontSize.xs,
                     cursor: 'pointer',
                     padding: 0,
-                    marginTop: spacing.xs,
-                    textDecoration: 'underline',
+                    marginTop: '4px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
                   }}
                   onMouseEnter={(e) => {
-                    e.currentTarget.style.color = colors.accentHover;
+                    e.currentTarget.style.color = colors.textPrimary;
                   }}
                   onMouseLeave={(e) => {
-                    e.currentTarget.style.color = colors.primary;
+                    e.currentTarget.style.color = colors.textSecondary;
                   }}
                 >
                   advanced settings
+                  <ExternalLink size={12} />
                 </button>
-              )}
+              </div>
 
               {/* Model Selection */}
               <div>
