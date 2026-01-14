@@ -30,3 +30,19 @@ html, body, #root {
   -moz-appearance: textfield;
   appearance: textfield; /* Works for modern Chrome/Safari as well */
 }
+
+/* Pulsing border animation for approval waiting state */
+@keyframes approval-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 1px rgba(132, 204, 22, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 2px rgba(132, 204, 22, 0.7), 0 0 16px rgba(132, 204, 22, 0.3);
+  }
+}
+
+.approval-waiting {
+  animation: approval-pulse 2s ease-in-out infinite;
+  border-color: #84cc16 !important;
+  border-radius: 8px;
+}

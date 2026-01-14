@@ -2186,11 +2186,13 @@ export default function ChaosEaterApp() {
         )}
         
         {/* Unified Chat Input Area */}
-        <div style={{
-          ...mainContentStyles.chatInputWrapper,
-          position: 'relative',
-          zIndex: approvalDialog ? 20 : 'auto',
-        }}>
+        <div
+          style={{
+            ...mainContentStyles.chatInputWrapper,
+            position: 'relative',
+            zIndex: approvalDialog ? 20 : 'auto',
+          }}
+        >
           <input
             ref={fileInputRef}
             type="file"
@@ -2226,14 +2228,15 @@ export default function ChaosEaterApp() {
           )}
           
           <div
+            className={approvalDialog ? 'approval-waiting' : undefined}
             onDragOver={handleDragOver}
             onDrop={handleDrop}
             style={composerStyles.container}
             onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = colors.accent;
+              if (!approvalDialog) e.currentTarget.style.borderColor = colors.accent;
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = colors.border;
+              if (!approvalDialog) e.currentTarget.style.borderColor = colors.border;
             }}
           >
             {/* Upper section - Text area */}
