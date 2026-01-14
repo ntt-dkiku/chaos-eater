@@ -10,6 +10,7 @@ This module provides:
 import json
 import os
 import time
+import inspect
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Callable
@@ -256,9 +257,19 @@ class AgentRunner:
 
                 # Execute agent
                 try:
-                    if retry_history:
+                    # Check if run_fn accepts retry_context
+                    accepts_retry = self._accepts_retry_context(step.run_fn)
+
+                    if retry_history and accepts_retry:
                         # Pass retry_context with history
                         result = step.run_fn(retry_context={"history": retry_history}, **kwargs)
+                    elif retry_history and not accepts_retry:
+                        # Retry requested but function doesn't support retry_context
+                        logger.warning(
+                            f"Agent {step.name} doesn't accept retry_context, "
+                            f"retry feedback will not be applied"
+                        )
+                        result = step.run_fn(**kwargs) if kwargs else step.run_fn()
                     elif kwargs:
                         result = step.run_fn(**kwargs)
                     else:
@@ -322,6 +333,14 @@ class AgentRunner:
                     self.on_checkpoint_save(step.name, self._completed_agents.copy())
 
         return self.results
+
+    def _accepts_retry_context(self, fn: Callable) -> bool:
+        """Check if a function accepts retry_context parameter."""
+        try:
+            sig = inspect.signature(fn)
+            return 'retry_context' in sig.parameters
+        except (ValueError, TypeError):
+            return False
 
     @property
     def completed_agents(self) -> List[str]:
