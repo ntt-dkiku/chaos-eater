@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Tuple
 
 from ....preprocessing.preprocessor import ProcessedData
 from ....utils.wrappers import LLM, BaseModel, Field
@@ -54,33 +54,54 @@ class SteadyStateDraftAgent:
         message_logger: MessageLogger
     ) -> None:
         self.llm = llm
-        self.agent = build_json_agent(
-            llm=llm,
-            chat_messages=[
-                ("system", SYS_DRAFT_STEADY_STATE),
-                ("human", USER_DRAFT_STEADY_STATE)
-            ],
-            pydantic_object=SteadyStateDraft,
-            is_async=False
-        )
         self.message_logger = message_logger
+        # Store base messages instead of building agent (for retry support)
+        self.base_messages: List[Tuple[str, str]] = [
+            ("system", SYS_DRAFT_STEADY_STATE),
+            ("human", USER_DRAFT_STEADY_STATE)
+        ]
+
+    def _build_messages(self, retry_context: Optional[dict] = None) -> List[Tuple[str, str]]:
+        """Build message list, including retry history if present."""
+        messages = self.base_messages.copy()
+
+        if retry_context and retry_context.get("history"):
+            for i, entry in enumerate(retry_context["history"], 1):
+                messages.append(("ai", str(entry["output"])))
+                if entry.get("feedback"):
+                    messages.append(("human", f"Feedback #{i}: {entry['feedback']}"))
+            messages.append(("human", "Please revise the output based on all the feedback above."))
+
+        return messages
 
     def draft_steady_state(
         self,
         input_data: ProcessedData,
         predefined_steady_states: list,
         prev_check_thought: str,
-        agent_logger: Optional[AgentLogger] = None
+        agent_logger: Optional[AgentLogger] = None,
+        retry_context: Optional[dict] = None
     ) -> Dict[str, str]:
         # initialization
         cb = agent_logger and agent_logger.get_callback(
             phase="hypothesis",
             agent_name="steady_state_draft"
         )
-        
+
+        # Build messages (with retry history if present)
+        messages = self._build_messages(retry_context)
+
+        # Build agent dynamically
+        agent = build_json_agent(
+            llm=self.llm,
+            chat_messages=messages,
+            pydantic_object=SteadyStateDraft,
+            is_async=False
+        )
+
         # stream the response
-        for steady_state in self.agent.stream({
-            "user_input": input_data.to_k8s_overview_str(), 
+        for steady_state in agent.stream({
+            "user_input": input_data.to_k8s_overview_str(),
             "ce_instructions": input_data.ce_instructions,
             "predefined_steady_states": predefined_steady_states.to_str(),
             "prev_check_thought": prev_check_thought},

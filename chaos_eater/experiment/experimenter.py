@@ -161,14 +161,14 @@ class Experimenter:
         # Step 1: Plan the experiment
         runner.add_step(AgentStep(
             name="experiment_plan_agent",
-            run_fn=lambda: self._run_experiment_plan(data, hypothesis, experiment_dir, agent_logger),
+            run_fn=lambda retry_context=None: self._run_experiment_plan(data, hypothesis, experiment_dir, agent_logger, retry_context),
             output_key="experiment_plan",
         ))
 
-        # Step 2: Convert to workflow
+        # Step 2: Convert to workflow (no retry_context needed for algorithmic conversion)
         runner.add_step(AgentStep(
             name="plan2workflow_converter",
-            run_fn=lambda experiment_plan: self._run_plan2workflow(experiment_plan, experiment_dir),
+            run_fn=lambda experiment_plan, retry_context=None: self._run_plan2workflow(experiment_plan, experiment_dir),
             output_key="workflow_result",
             depends_on=["experiment_plan"],
         ))
@@ -190,13 +190,15 @@ class Experimenter:
         data: ProcessedData,
         hypothesis: Hypothesis,
         experiment_dir: str,
-        agent_logger: Optional[AgentLogger]
+        agent_logger: Optional[AgentLogger],
+        retry_context: Optional[dict] = None
     ) -> dict:
         """Run experiment plan agent."""
         experiment_plan = self.experiment_plan_agent.plan(
             data=data,
             hypothesis=hypothesis,
-            agent_logger=agent_logger
+            agent_logger=agent_logger,
+            retry_context=retry_context
         )
         save_json(f"{experiment_dir}/experiment_plan.json", experiment_plan.dict())
         return experiment_plan.dict()

@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import List, Optional, Tuple
 
 from ...preprocessing.preprocessor import ProcessedData
 from ...hypothesis.hypothesizer import Hypothesis
@@ -64,6 +64,31 @@ class AnalysisAgent:
     ) -> None:
         self.llm = llm
         self.message_logger = message_logger
+        # Store base messages for retry support
+        self.base_messages_initial: List[Tuple[str, str]] = [
+            ("system", SYS_ANALYZE_RESULT),
+            ("human", USER_ANALYZE_RESULT)
+        ]
+        # Note: reanalyze message has {reconfig_history} placeholder that needs runtime substitution
+
+    def _build_messages(self, is_reanalysis: bool, reconfig_history_str: str = "", retry_context: Optional[dict] = None) -> List[Tuple[str, str]]:
+        """Build message list, including retry history if present."""
+        if is_reanalysis:
+            messages = [
+                ("system", SYS_ANALYZE_RESULT),
+                ("human", USER_REANALYZE_RESULT.replace("{reconfig_history}", reconfig_history_str))
+            ]
+        else:
+            messages = self.base_messages_initial.copy()
+
+        if retry_context and retry_context.get("history"):
+            for i, entry in enumerate(retry_context["history"], 1):
+                messages.append(("ai", str(entry["output"])))
+                if entry.get("feedback"):
+                    messages.append(("human", f"Feedback #{i}: {entry['feedback']}"))
+            messages.append(("human", "Please revise the output based on all the feedback above."))
+
+        return messages
 
     def analyze(
         self,
@@ -72,34 +97,33 @@ class AnalysisAgent:
         experiment: ChaosExperiment,
         reconfig_history,
         experiment_result: ChaosExperimentResult,
-        agent_logger: Optional[AgentLogger] = None
+        agent_logger: Optional[AgentLogger] = None,
+        retry_context: Optional[dict] = None
     ) -> str: # NOTE: not Analysis, but str
         cb = agent_logger and agent_logger.get_callback(
             phase="analysis",
             agent_name=f"analysis_{len(reconfig_history)}"
         )
 
-        if len(reconfig_history) == 0:
-            agent = build_json_agent(
-                llm=self.llm,
-                chat_messages=[("system", SYS_ANALYZE_RESULT), ("human", USER_ANALYZE_RESULT)],
-                pydantic_object=AnalysisReport,
-                is_async=False
-            )
-        else:
-            history_str = ""
+        # Build reconfig history string if needed
+        history_str = ""
+        if len(reconfig_history) > 0:
             for i, reconfig in enumerate(reconfig_history):
                 history_str += f"Reconfiguration #{i}:\n{dict_to_str(reconfig.mod_k8s_yamls)}\n\n"
-            agent = build_json_agent(
-                llm=self.llm,
-                chat_messages=[
-                    ("system", SYS_ANALYZE_RESULT),
-                    ("human", USER_REANALYZE_RESULT.replace("{reconfig_history}", history_str))
-                ],
-                pydantic_object=AnalysisReport,
-                is_async=False
-            )
 
+        # Build messages with retry context
+        messages = self._build_messages(
+            is_reanalysis=(len(reconfig_history) > 0),
+            reconfig_history_str=history_str,
+            retry_context=retry_context
+        )
+
+        agent = build_json_agent(
+            llm=self.llm,
+            chat_messages=messages,
+            pydantic_object=AnalysisReport,
+            is_async=False
+        )
 
         for token in agent.stream({
             "system_overview": input_data.to_k8s_overview_str(),

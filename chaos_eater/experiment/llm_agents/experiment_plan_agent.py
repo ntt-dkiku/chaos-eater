@@ -1,5 +1,5 @@
 from collections import Counter
-from typing import List, Optional, Literal
+from typing import List, Optional, Literal, Tuple
 
 from ...preprocessing.preprocessor import ProcessedData
 from ...hypothesis.hypothesizer import Hypothesis
@@ -144,48 +144,66 @@ class ExperimentPlanAgent:
         self.message_logger = message_logger
         self.test_dir = test_dir
         self.namespace = namespace
+        # Store base messages for retry support
+        self.base_messages_time_schedule: List[Tuple[str, str]] = [
+            ("system", SYS_DETERMINE_TIME_SCHEDULE),
+            ("human", USER_DETERMINE_TIME_SCHEDULE)
+        ]
+        self.base_messages_phase: List[Tuple[str, str]] = [
+            ("system", SYS_DETERMINE_PHASE),
+            ("human", USER_DETERMINE_PHASE)
+        ]
+        self.base_messages_summary: List[Tuple[str, str]] = [
+            ("system", SYS_SUMMARIZE_PLAN),
+            ("human", USER_SUMMARIZE_PLAN)
+        ]
+
+    def _build_messages(self, base_messages: List[Tuple[str, str]], retry_context: Optional[dict] = None) -> List[Tuple[str, str]]:
+        """Build message list, including retry history if present."""
+        messages = base_messages.copy()
+
+        if retry_context and retry_context.get("history"):
+            for i, entry in enumerate(retry_context["history"], 1):
+                messages.append(("ai", str(entry["output"])))
+                if entry.get("feedback"):
+                    messages.append(("human", f"Feedback #{i}: {entry['feedback']}"))
+            messages.append(("human", "Please revise the output based on all the feedback above."))
+
+        return messages
+
+    def _build_agents(self, retry_context: Optional[dict] = None):
+        """Build all agents, optionally with retry context."""
+        time_schedule_messages = self._build_messages(self.base_messages_time_schedule, retry_context)
+        phase_messages = self._build_messages(self.base_messages_phase, retry_context)
+        summary_messages = self._build_messages(self.base_messages_summary, retry_context)
+
         self.time_schedule_agent = build_json_agent(
-            llm=llm,
-            chat_messages=[
-                ("system", SYS_DETERMINE_TIME_SCHEDULE),
-                ("human", USER_DETERMINE_TIME_SCHEDULE)
-            ],
+            llm=self.llm,
+            chat_messages=time_schedule_messages,
             pydantic_object=TimeSchedule,
             is_async=False,
         )
         self.pre_validation_agent = build_json_agent(
-            llm=llm,
-            chat_messages=[
-                ("system", SYS_DETERMINE_PHASE),
-                ("human", USER_DETERMINE_PHASE)
-            ],
+            llm=self.llm,
+            chat_messages=phase_messages,
             pydantic_object=ValidationPlan,
             is_async=False,
         )
         self.fault_injection_agent = build_json_agent(
-            llm=llm,
-            chat_messages=[
-                ("system", SYS_DETERMINE_PHASE),
-                ("human", USER_DETERMINE_PHASE)
-            ],
+            llm=self.llm,
+            chat_messages=phase_messages,
             pydantic_object=FaultInjectionPlan,
             is_async=False,
         )
         self.post_validation_agent = build_json_agent(
-            llm=llm,
-            chat_messages=[
-                ("system", SYS_DETERMINE_PHASE),
-                ("human", USER_DETERMINE_PHASE)
-            ],
+            llm=self.llm,
+            chat_messages=phase_messages,
             pydantic_object=ValidationPlan,
             is_async=False,
         )
         self.summary_agent = build_json_agent(
-            llm=llm,
-            chat_messages=[
-                ("system", SYS_SUMMARIZE_PLAN),
-                ("human", USER_SUMMARIZE_PLAN)
-            ],
+            llm=self.llm,
+            chat_messages=summary_messages,
             pydantic_object=Summary,
             is_async=False,
         )
@@ -194,11 +212,13 @@ class ExperimentPlanAgent:
         self,
         data: ProcessedData,
         hypothesis: Hypothesis,
-        agent_logger: Optional[AgentLogger] = None
+        agent_logger: Optional[AgentLogger] = None,
+        retry_context: Optional[dict] = None
     ) -> dict:
         #-------------------
         # initialization
         #-------------------
+        self._build_agents(retry_context)
         self.message_logger.write("#### Planning a CE experiment")
 
         #----------------------

@@ -62,9 +62,9 @@ class Analyzer:
         # Step 1: Analyze the experiment result
         runner.add_step(AgentStep(
             name="analysis_agent",
-            run_fn=lambda: self._run_analysis(
+            run_fn=lambda retry_context=None: self._run_analysis(
                 input_data, hypothesis, experiment,
-                reconfig_history, experiment_result, agent_logger
+                reconfig_history, experiment_result, agent_logger, retry_context
             ),
             output_key="report",
         ))
@@ -83,7 +83,8 @@ class Analyzer:
         experiment: ChaosExperiment,
         reconfig_history,
         experiment_result: ChaosExperimentResult,
-        agent_logger: Optional[AgentLogger]
+        agent_logger: Optional[AgentLogger],
+        retry_context: Optional[dict] = None
     ) -> str:
         """Run analysis agent."""
         return self.analysis_agent.analyze(
@@ -92,5 +93,6 @@ class Analyzer:
             experiment=experiment,
             reconfig_history=reconfig_history,
             experiment_result=experiment_result,
-            agent_logger=agent_logger
+            agent_logger=agent_logger,
+            retry_context=retry_context
         )

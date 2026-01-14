@@ -2038,6 +2038,10 @@ async def ws_stats_stream(websocket: WebSocket, job_id: str, job_mgr: JobManager
                 await websocket.send_json({"type": "warning", "detail": str(e)})
                 await asyncio.sleep(1.0)
 
+    except WebSocketDisconnect:
+        # Client disconnected before or during streaming - this is normal
+        pass
+
     finally:
         try:
             await websocket.close()

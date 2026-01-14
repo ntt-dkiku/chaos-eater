@@ -69,8 +69,8 @@ class FaultDefiner:
         # Step 1: Assume fault scenario
         runner.add_step(AgentStep(
             name="fault_scenario_agent",
-            run_fn=lambda: self._run_fault_scenario(
-                data, steady_states, agent_logger
+            run_fn=lambda retry_context=None: self._run_fault_scenario(
+                data, steady_states, agent_logger, retry_context
             ),
             output_key="fault_scenario",
         ))
@@ -78,8 +78,8 @@ class FaultDefiner:
         # Step 2: Refine faults
         runner.add_step(AgentStep(
             name="fault_refiner",
-            run_fn=lambda fault_scenario: self._run_fault_refiner(
-                data, steady_states, fault_scenario, fault_dir, max_retries, agent_logger
+            run_fn=lambda fault_scenario, retry_context=None: self._run_fault_refiner(
+                data, steady_states, fault_scenario, fault_dir, max_retries, agent_logger, retry_context
             ),
             output_key="faults",
             depends_on=["fault_scenario"],
@@ -94,14 +94,16 @@ class FaultDefiner:
         self,
         data: ProcessedData,
         steady_states: SteadyStates,
-        agent_logger: Optional[AgentLogger]
+        agent_logger: Optional[AgentLogger],
+        retry_context: Optional[dict] = None
     ) -> dict:
         """Run fault scenario agent."""
         fault_scenario = self.fault_scenario_agent.assume_scenario(
             user_input=data.to_k8s_overview_str(),
             ce_instructions=data.ce_instructions,
             steady_states=steady_states,
-            agent_logger=agent_logger
+            agent_logger=agent_logger,
+            retry_context=retry_context
         )
         return fault_scenario
 
@@ -112,7 +114,8 @@ class FaultDefiner:
         fault_scenario,
         fault_dir: str,
         max_retries: int,
-        agent_logger: Optional[AgentLogger]
+        agent_logger: Optional[AgentLogger],
+        retry_context: Optional[dict] = None
     ) -> FaultScenario:
         """Run fault refiner agent."""
         faults = self.refiner.refine_faults(
@@ -122,6 +125,7 @@ class FaultDefiner:
             fault_scenario=fault_scenario,
             work_dir=fault_dir,
             max_retries=max_retries,
-            agent_logger=agent_logger
+            agent_logger=agent_logger,
+            retry_context=retry_context
         )
         return faults
