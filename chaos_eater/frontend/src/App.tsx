@@ -20,7 +20,9 @@ import {
   Paperclip,
   PanelLeftOpen,
   PanelLeftClose,
-  ExternalLink
+  ExternalLink,
+  RotateCcw,
+  XCircle,
 } from 'lucide-react';
 import {
   ensureSession,
@@ -40,8 +42,8 @@ import LandingLogo from './components/LandingLogo';
 import LandingMessage from './components/LandingMessage';
 import CleanClusterButton from './components/CleanClusterButton';
 import StatsPanel from './components/StatsPanel';
-import ApprovalDialog from './components/ApprovalDialog';
 import AgentSettingsDialog from './components/AgentSettingsDialog';
+// ApprovalDialog is now inline in MessagesPanel
 
 // API modules
 import { uploadZipToBackend } from './api/uploads';
@@ -583,11 +585,19 @@ export default function ChaosEaterApp() {
     }
 
     try {
-      await fetch(`${API_BASE}/jobs/${jobId}/approval`, {
+      console.log(`[Approval] Sending ${action} response for job ${jobId}`);
+      const res = await fetch(`${API_BASE}/jobs/${jobId}/approval`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, message }),
       });
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error(`[Approval] Server error: ${res.status} - ${errorText}`);
+        setNotification({ type: 'error', message: `Approval failed: ${errorText}` });
+        return;
+      }
+      console.log(`[Approval] ${action} response sent successfully`);
       if (action === 'cancel') {
         setNotification({ type: 'success', message: 'Job paused' });
       }
@@ -596,6 +606,33 @@ export default function ChaosEaterApp() {
       setNotification({ type: 'error', message: 'Failed to send approval response' });
     }
   };
+
+  // Keyboard shortcuts for approval (in App component)
+  useEffect(() => {
+    if (!approvalDialog) return;
+    const handler = (e: KeyboardEvent) => {
+      // Don't trigger when typing in textarea
+      if (e.target instanceof HTMLTextAreaElement) {
+        if (e.key === 'Escape') {
+          sendApprovalResponse('cancel');
+        }
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        sendApprovalResponse('approve', draftInstructions || undefined);
+        setDraftInstructions('');
+      } else if (e.key === 'r' || e.key === 'R') {
+        e.preventDefault();
+        sendApprovalResponse('retry', draftInstructions || undefined);
+        setDraftInstructions('');
+      } else if (e.key === 'Escape') {
+        sendApprovalResponse('cancel');
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [approvalDialog, draftInstructions]);
 
   // resume from paused state
   const handleResume = async () => {
@@ -1185,7 +1222,12 @@ export default function ChaosEaterApp() {
           }
           // Agent tracking for resume functionality (messages are tagged with agentId)
           if (ev.type === 'agent_start') {
-            currentAgentRef.current = ev.agent;
+            const agentName = ev.agent;
+            console.log(`[Agent] agent_start: ${agentName}`);
+            // Clear previous messages from this agent (for retry support)
+            setMessages(prev => prev.filter(msg => msg.agentId !== agentName));
+            partialStateRef.current = null;
+            currentAgentRef.current = agentName;
             return;
           }
           if (ev.type === 'agent_end') {
@@ -1204,6 +1246,7 @@ export default function ChaosEaterApp() {
           }
           if (ev.type === 'approval_request') {
             const agentName = ev.agent;
+            console.log(`[Approval] Received approval_request for agent: ${agentName}`);
             // Check if this agent needs approval based on settings
             const needsApproval = formData.approvalAgents.some(pattern => {
               if (pattern.endsWith('_*')) {
@@ -1211,8 +1254,10 @@ export default function ChaosEaterApp() {
               }
               return pattern === agentName;
             });
+            console.log(`[Approval] needsApproval=${needsApproval}, approvalAgents=`, formData.approvalAgents);
 
             if (needsApproval) {
+              console.log(`[Approval] Showing approval dialog for ${agentName}`);
               setApprovalDialog({
                 visible: true,
                 agentName,
@@ -1361,6 +1406,7 @@ export default function ChaosEaterApp() {
           width: sidebarOpen ? `${SIDEBAR_WIDTH}px` : '0px',
           minWidth: sidebarOpen ? `${SIDEBAR_WIDTH}px` : '0px',
           borderRight: sidebarOpen ? `1px solid ${colors.border}` : 'none',
+          position: 'relative',
         })}
       >
         <div style={{
@@ -2053,10 +2099,11 @@ export default function ChaosEaterApp() {
             onResume={handleResume}
             onDownload={() => {
               if (!jobId) return;
-              const path = `/jobs/${jobId}/artifact`; 
+              const path = `/jobs/${jobId}/artifact`;
               const filename = `artifact.zip`;
               handleDownload(path, filename);
             }}
+            pendingApproval={approvalDialog}
           />
         </div>
 
@@ -2157,7 +2204,9 @@ export default function ChaosEaterApp() {
               {/* Custom placeholder text positioned left aligned */}
               {!draftInstructions.trim() && (
                 <div style={mainContentStyles.placeholder}>
-                  Input instructions for your Chaos Engineering...
+                  {approvalDialog
+                    ? `Feedback for ${approvalDialog.agentName} (optional)...`
+                    : 'Input instructions for your Chaos Engineering...'}
                 </div>
               )}
               
@@ -2202,7 +2251,7 @@ export default function ChaosEaterApp() {
                 </button>
               </div>
 
-              {/* Right group: [toast][Send] */}
+              {/* Right group: [toast][buttons] */}
               <div style={composerStyles.controlGroup}>
                 {notification && (
                   <div
@@ -2216,7 +2265,83 @@ export default function ChaosEaterApp() {
                   </div>
                 )}
 
-                {runState === 'running' ? (
+                {/* Approval mode: show Approve/Retry/Cancel */}
+                {approvalDialog ? (
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button
+                      onClick={() => {
+                        sendApprovalResponse('approve', draftInstructions || undefined);
+                        setDraftInstructions('');
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        padding: '6px 12px',
+                        backgroundColor: '#22c55e',
+                        color: '#000',
+                        border: 'none',
+                        borderRadius: 6,
+                        fontSize: 13,
+                        fontWeight: 500,
+                        cursor: 'pointer',
+                        transition: 'background-color 0.15s',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#16a34a'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#22c55e'; }}
+                      title="Approve (Enter)"
+                    >
+                      <CheckCircle size={16} /> Approve
+                    </button>
+                    <button
+                      onClick={() => {
+                        sendApprovalResponse('retry', draftInstructions || undefined);
+                        setDraftInstructions('');
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        padding: '6px 12px',
+                        backgroundColor: '#eab308',
+                        color: '#000',
+                        border: 'none',
+                        borderRadius: 6,
+                        fontSize: 13,
+                        fontWeight: 500,
+                        cursor: 'pointer',
+                        transition: 'background-color 0.15s',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#ca8a04'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#eab308'; }}
+                      title="Retry (R)"
+                    >
+                      <RotateCcw size={16} /> Retry
+                    </button>
+                    <button
+                      onClick={() => sendApprovalResponse('cancel')}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        padding: '6px 12px',
+                        backgroundColor: '#ef4444',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: 6,
+                        fontSize: 13,
+                        fontWeight: 500,
+                        cursor: 'pointer',
+                        transition: 'background-color 0.15s',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#dc2626'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#ef4444'; }}
+                      title="Cancel (Esc)"
+                    >
+                      <XCircle size={16} /> Cancel
+                    </button>
+                  </div>
+                ) : runState === 'running' ? (
                   <button
                     onClick={handleStop}
                     style={actionButtonStyles.stop}
@@ -2263,15 +2388,7 @@ export default function ChaosEaterApp() {
         agentGroups={AGENT_GROUPS}
       />
 
-      {/* Approval Dialog for Interactive Mode */}
-      {approvalDialog && (
-        <ApprovalDialog
-          agentName={approvalDialog.agentName}
-          onApprove={(message) => sendApprovalResponse('approve', message)}
-          onRetry={(message) => sendApprovalResponse('retry', message)}
-          onCancel={() => sendApprovalResponse('cancel')}
-        />
-      )}
+      {/* Approval is now handled inline in MessagesPanel */}
     </div>
   );
 }

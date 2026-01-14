@@ -101,6 +101,10 @@ export interface MessagesPanelProps {
   showNextRun?: boolean;
   onResume?: () => void;
   onDownload?: () => void;
+  // For highlighting pending approval agent's messages
+  pendingApproval?: {
+    agentName: string;
+  } | null;
 }
 
 export default function MessagesPanel({
@@ -109,6 +113,7 @@ export default function MessagesPanel({
   showNextRun = false,
   onResume,
   onDownload,
+  pendingApproval,
 }: MessagesPanelProps): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -197,16 +202,27 @@ export default function MessagesPanel({
     const roleColor = m.role === 'user' ? '#84cc16' : '#e5e7eb';
     const roleBorder = m.role === 'user' ? '1px solid #374151' : 'none';
 
+    // Check if this message should be highlighted (from pending approval agent)
+    const msgAgentId = (m as { agentId?: string }).agentId;
+    const isHighlighted = pendingApproval && msgAgentId === pendingApproval.agentName;
+    const highlightStyle: React.CSSProperties = isHighlighted ? {
+      borderLeft: '3px solid #84cc16',
+      paddingLeft: '12px',
+      backgroundColor: 'rgba(132, 204, 22, 0.05)',
+      marginLeft: '-3px',
+      borderRadius: '0 8px 8px 0',
+    } : {};
+
     if (type === 'subheader') {
       return (
-        <div key={i} className={msg_styles.subheader}>
+        <div key={i} className={msg_styles.subheader} style={highlightStyle}>
           {m.content}
         </div>
       );
     }
     if (type === 'code') {
       return (
-        <div key={i} style={{ width: '100%', minWidth: 0 }}>
+        <div key={i} style={{ width: '100%', minWidth: 0, ...highlightStyle }}>
           <CodeBlock
             code={m.content}
             language={(m as { language?: string }).language}
@@ -229,7 +245,7 @@ export default function MessagesPanel({
       }
 
       return (
-        <div key={i} style={{ width: '100%', minWidth: 0, margin: '8px 0' }}>
+        <div key={i} style={{ width: '100%', minWidth: 0, margin: '8px 0', ...highlightStyle }}>
           <div
             style={{
               position: 'relative',
@@ -270,6 +286,7 @@ export default function MessagesPanel({
             backgroundColor: (m as { background?: string }).background,
             padding: '2px 6px',
             borderRadius: '4px',
+            ...highlightStyle,
           }}
         >
           {m.content}
@@ -289,6 +306,7 @@ export default function MessagesPanel({
           backgroundColor: m.role === 'user' ? '#1f1f1f' : 'transparent',
           whiteSpace: 'normal',
           wordBreak: 'break-word',
+          ...highlightStyle,
         }}
       >
         <ReactMarkdown

@@ -6,6 +6,7 @@ export interface BaseMessage {
   type?: MessageType;
   role: MessageRole;
   content: string;
+  agentId?: string;  // Which agent generated this message
 }
 
 export interface CodeMessage extends BaseMessage {
@@ -307,6 +308,10 @@ export interface MessagesPanelProps {
   showNextRun?: boolean;
   onResume?: () => void;
   onDownload?: () => void;
+  // For highlighting pending approval agent's messages
+  pendingApproval?: {
+    agentName: string;
+  } | null;
 }
 
 export interface StatsPanelProps {

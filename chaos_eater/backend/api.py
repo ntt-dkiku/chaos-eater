@@ -772,6 +772,7 @@ class CancellableAPICallback(APICallback):
 
             if response == 'retry':
                 self._push(f"Agent {agent_name} will retry")
+                logger.info(f"[Approval] Returning 'retry' for agent {agent_name}")
                 return 'retry'
             elif response == 'cancel':
                 # Treat cancel as pause - set PAUSED status first

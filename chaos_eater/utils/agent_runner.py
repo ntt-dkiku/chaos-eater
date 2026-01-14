@@ -260,6 +260,7 @@ class AgentRunner:
                 action = 'approve'
                 if self.on_agent_end:
                     action = self.on_agent_end(step.name, result) or 'approve'
+                logger.info(f"[AgentRunner] on_agent_end returned action='{action}' for {step.name}")
 
                 if action == 'retry':
                     logger.info(f"Retrying agent: {step.name}")

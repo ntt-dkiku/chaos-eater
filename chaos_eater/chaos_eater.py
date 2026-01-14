@@ -104,9 +104,14 @@ class ChaosEater:
                         cb.on_agent_start(agent_name)
 
             def on_agent_end(agent_name: str, result=None):
+                action = 'approve'
                 for cb in callbacks:
                     if hasattr(cb, 'on_agent_end'):
-                        cb.on_agent_end(agent_name, result)
+                        cb_action = cb.on_agent_end(agent_name, result)
+                        # 'retry' or 'cancel' takes precedence over 'approve'
+                        if cb_action in ('retry', 'cancel'):
+                            action = cb_action
+                return action
 
             return on_agent_start, on_agent_end
 
