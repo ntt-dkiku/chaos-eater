@@ -47,6 +47,10 @@ class K8sSummaryAgent:
             ("human", USER_SUMMARIZE_K8S)
         ]
 
+    def _escape_braces(self, text: str) -> str:
+        """Escape curly braces for LangChain template."""
+        return text.replace("{", "{{").replace("}", "}}")
+
     def _build_messages(self, retry_context: Optional[dict] = None) -> List[Tuple[str, str]]:
         """Build message list, including retry history if present."""
         messages = self.base_messages.copy()
@@ -54,9 +58,11 @@ class K8sSummaryAgent:
         if retry_context and retry_context.get("history"):
             # Add each history entry as ai output + human feedback
             for i, entry in enumerate(retry_context["history"], 1):
-                messages.append(("ai", str(entry["output"])))
+                escaped_output = self._escape_braces(str(entry["output"]))
+                messages.append(("ai", escaped_output))
                 if entry.get("feedback"):
-                    messages.append(("human", f"Feedback #{i}: {entry['feedback']}"))
+                    escaped_feedback = self._escape_braces(entry['feedback'])
+                    messages.append(("human", f"Feedback #{i}: {escaped_feedback}"))
             # Add final instruction to revise
             messages.append(("human", "Please revise the output based on all the feedback above."))
 
