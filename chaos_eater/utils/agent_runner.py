@@ -228,11 +228,7 @@ class AgentRunner:
 
         # Execute steps from start_idx
         for i, step in enumerate(self.steps[start_idx:], start=start_idx):
-            # Callback: agent starting
-            if self.on_agent_start:
-                self.on_agent_start(step.name)
-
-            # Collect dependencies
+            # Collect dependencies (outside retry loop as they don't change)
             kwargs = {}
             if step.depends_on:
                 for dep_key in step.depends_on:
@@ -241,18 +237,34 @@ class AgentRunner:
                     else:
                         logger.warning(f"Dependency {dep_key} not found for {step.name}")
 
-            # Execute agent
-            try:
-                if kwargs:
-                    result = step.run_fn(**kwargs)
-                else:
-                    result = step.run_fn()
-            except Exception as e:
-                logger.error(f"Agent {step.name} failed: {e}")
-                raise
+            # Retry loop for interactive mode
+            while True:
+                # Callback: agent starting (may return 'approve', 'retry', or raise)
+                action = 'approve'
+                if self.on_agent_start:
+                    action = self.on_agent_start(step.name) or 'approve'
 
-            # Store result
-            self.results[step.output_key] = result
+                # Execute agent
+                try:
+                    if kwargs:
+                        result = step.run_fn(**kwargs)
+                    else:
+                        result = step.run_fn()
+                except Exception as e:
+                    logger.error(f"Agent {step.name} failed: {e}")
+                    raise
+
+                # Store result
+                self.results[step.output_key] = result
+
+                if action == 'retry':
+                    logger.info(f"Retrying agent: {step.name}")
+                    # Continue loop to re-execute after approval
+                    continue
+
+                # approve - exit retry loop and continue to next agent
+                break
+
             self._completed_agents.append(step.name)
 
             # Callback: agent completed
