@@ -155,22 +155,22 @@ class PreProcessor:
         # Step 1: Summarize each k8s manifest
         runner.add_step(AgentStep(
             name="k8s_summary_agent",
-            run_fn=lambda: self._run_k8s_summary(k8s_yamls, agent_logger),
+            run_fn=lambda retry_context=None: self._run_k8s_summary(k8s_yamls, agent_logger, retry_context),
             output_key="k8s_summaries",
         ))
 
         # Step 2: Summarize weakness points
         runner.add_step(AgentStep(
             name="k8s_weakness_summary_agent",
-            run_fn=lambda: self._run_weakness_summary(k8s_yamls, agent_logger),
+            run_fn=lambda retry_context=None: self._run_weakness_summary(k8s_yamls, agent_logger, retry_context),
             output_key="k8s_weakness_summary",
         ))
 
         # Step 3: Assume application type
         runner.add_step(AgentStep(
             name="k8s_app_assumption_agent",
-            run_fn=lambda k8s_summaries: self._run_app_assumption(
-                k8s_yamls, k8s_summaries, agent_logger
+            run_fn=lambda k8s_summaries, retry_context=None: self._run_app_assumption(
+                k8s_yamls, k8s_summaries, agent_logger, retry_context
             ),
             output_key="k8s_application",
             depends_on=["k8s_summaries"],
@@ -179,7 +179,7 @@ class PreProcessor:
         # Step 4: Summarize CE instructions
         runner.add_step(AgentStep(
             name="ce_instruct_agent",
-            run_fn=lambda: self._run_ce_instruct(input.ce_instructions, agent_logger),
+            run_fn=lambda retry_context=None: self._run_ce_instruct(input.ce_instructions, agent_logger, retry_context),
             output_key="ce_instructions",
         ))
 
@@ -276,34 +276,38 @@ class PreProcessor:
             return k8s_yamls, duplicated_input
         return k8s_yamls
 
-    def _run_k8s_summary(self, k8s_yamls: List[File], agent_logger: AgentLogger):
+    def _run_k8s_summary(self, k8s_yamls: List[File], agent_logger: AgentLogger, retry_context: dict = None):
         """Run k8s summary agent"""
         return self.k8s_summary_agent.summarize_manifests(
             k8s_yamls=k8s_yamls,
-            agent_logger=agent_logger
+            agent_logger=agent_logger,
+            retry_context=retry_context
         )
 
-    def _run_weakness_summary(self, k8s_yamls: List[File], agent_logger: AgentLogger):
+    def _run_weakness_summary(self, k8s_yamls: List[File], agent_logger: AgentLogger, retry_context: dict = None):
         """Run weakness summary agent"""
         return self.k8s_weakness_summary_agent.summarize_weaknesses(
             k8s_yamls=k8s_yamls,
-            agent_logger=agent_logger
+            agent_logger=agent_logger,
+            retry_context=retry_context
         )
 
-    def _run_app_assumption(self, k8s_yamls: List[File], k8s_summaries: List[str], agent_logger: AgentLogger):
+    def _run_app_assumption(self, k8s_yamls: List[File], k8s_summaries: List[str], agent_logger: AgentLogger, retry_context: dict = None):
         """Run app assumption agent"""
         return self.k8s_app_assumption_agent.assume_app(
             k8s_yamls=k8s_yamls,
             k8s_summaries=k8s_summaries,
-            agent_logger=agent_logger
+            agent_logger=agent_logger,
+            retry_context=retry_context
         )
 
-    def _run_ce_instruct(self, ce_instructions_input: Optional[str], agent_logger: AgentLogger):
+    def _run_ce_instruct(self, ce_instructions_input: Optional[str], agent_logger: AgentLogger, retry_context: dict = None):
         """Run CE instruction agent"""
         if ce_instructions_input is not None and ce_instructions_input != "":
             return self.ce_instruct_agent.summarize_ce_instructions(
                 ce_instructions_input,
-                agent_logger=agent_logger
+                agent_logger=agent_logger,
+                retry_context=retry_context
             )
         else:
             self.message_logger.write("#### Summary of your instructions for Chaos Engineering:")

@@ -450,8 +450,12 @@ class JobManager:
         async with self.lock:
             self.events[job_id] = []
 
-    async def request_approval(self, job_id: str, agent_name: str) -> str:
-        """Request approval from frontend and wait for response."""
+    async def request_approval(self, job_id: str, agent_name: str) -> dict:
+        """Request approval from frontend and wait for response.
+
+        Returns:
+            dict with keys: action ('approve', 'retry', 'cancel'), message (optional str)
+        """
         self.approval_events[job_id] = asyncio.Event()
 
         # Update job state
@@ -469,9 +473,9 @@ class JobManager:
         # Wait for response (with timeout)
         try:
             await asyncio.wait_for(self.approval_events[job_id].wait(), timeout=3600)
-            response = self.approval_responses.pop(job_id, 'cancel')
+            response = self.approval_responses.pop(job_id, {"action": "cancel", "message": None})
         except asyncio.TimeoutError:
-            response = 'cancel'
+            response = {"action": "cancel", "message": None}
         finally:
             self.approval_events.pop(job_id, None)
             async with self.lock:
@@ -481,11 +485,14 @@ class JobManager:
 
         return response
 
-    async def respond_to_approval(self, job_id: str, action: str) -> bool:
+    async def respond_to_approval(self, job_id: str, action: str, message: str = None) -> bool:
         """Handle approval response from frontend."""
         if job_id not in self.approval_events:
             return False
-        self.approval_responses[job_id] = action
+        self.approval_responses[job_id] = {
+            "action": action,
+            "message": message
+        }
         self.approval_events[job_id].set()
         return True
 
@@ -758,8 +765,8 @@ class CancellableAPICallback(APICallback):
             "agent": agent_name,
         })
 
-    def on_agent_end(self, agent_name: str, result: any = None) -> str:
-        """Called when an agent completes. Returns 'approve', 'retry', or raises CancelledError"""
+    def on_agent_end(self, agent_name: str, result: any = None) -> dict:
+        """Called when an agent completes. Returns dict with action and message, or raises CancelledError"""
         self._push(f"Agent completed: {agent_name}")
         # Send as event for frontend agent boundary tracking
         self._push_event({
@@ -776,17 +783,20 @@ class CancellableAPICallback(APICallback):
                 self.loop
             )
             try:
-                response = fut.result(timeout=3600)  # 1 hour timeout
+                response = fut.result(timeout=3600)  # 1 hour timeout (returns dict)
             except Exception as e:
                 logger.error(f"Approval request failed: {e}")
                 self.cancelled = True
                 raise asyncio.CancelledError(f"Approval request failed for {agent_name}")
 
-            if response == 'retry':
+            action = response.get("action", "cancel")
+            message = response.get("message")
+
+            if action == 'retry':
                 self._push(f"Agent {agent_name} will retry")
                 logger.info(f"[Approval] Returning 'retry' for agent {agent_name}")
-                return 'retry'
-            elif response == 'cancel':
+                return {"action": "retry", "message": message}
+            elif action == 'cancel':
                 # Treat cancel as pause - set PAUSED status first
                 self._push(f"Pausing at {agent_name}...")
                 pause_fut = asyncio.run_coroutine_threadsafe(
@@ -799,10 +809,11 @@ class CancellableAPICallback(APICallback):
                     logger.warning(f"Failed to set paused status: {e}")
                 self.cancelled = True
                 raise asyncio.CancelledError(f"Paused at {agent_name}")
-            # response == 'approve'
+            # action == 'approve'
             self._push(f"Agent {agent_name} approved, continuing...")
+            return {"action": "approve", "message": message}
 
-        return 'approve'
+        return {"action": "approve", "message": None}
 
     def on_stream(self, channel: str, event: dict) -> None:
         """Check cancellation on every stream event"""
@@ -1226,7 +1237,7 @@ async def respond_to_approval(
     if not job.awaiting_approval:
         raise HTTPException(status_code=400, detail="Job is not awaiting approval")
 
-    success = await job_mgr.respond_to_approval(job_id, response.action)
+    success = await job_mgr.respond_to_approval(job_id, response.action, response.message)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to process approval response")
 

@@ -2256,11 +2256,21 @@ export default function ChaosEaterApp() {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
                     e.preventDefault();
-                    handleSubmit();
+                    if (approvalDialog) {
+                      sendApprovalResponse('approve', draftInstructions || undefined);
+                      setDraftInstructions('');
+                    } else {
+                      handleSubmit();
+                    }
                   }
                   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                     e.preventDefault();
-                    handleSubmit();
+                    if (approvalDialog) {
+                      sendApprovalResponse('approve', draftInstructions || undefined);
+                      setDraftInstructions('');
+                    } else {
+                      handleSubmit();
+                    }
                   }
                 }}
                 rows={1}
