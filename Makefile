@@ -1,6 +1,6 @@
 .PHONY: setup-sandbox set-mode-sandbox start-sandbox cluster-sandbox
 .PHONY: setup-standard set-mode-standard start-standard cluster-standard
-.PHONY: reload stop
+.PHONY: reload stop redis-flush
 .PHONY: test test-cov test-watch test-file test-match build-test clean-test
 .PHONY: frontend-test frontend-test-watch frontend-test-coverage build-frontend-test clean-frontend-test
 .PHONY: open-jupyter stop-jupyter
@@ -101,6 +101,17 @@ else ifeq ($(MODE),standard)
 	docker compose -f docker/docker-compose.yaml down
 	kind delete cluster --name chaos-eater-cluster
 endif
+
+# flush redis
+redis-flush:
+ifeq ($(MODE),sandbox)
+	@echo "Flushing Redis in sandbox mode..."
+	docker compose $(BASE_SANDBOX) exec chaos-eater bash -c "docker compose -f docker/docker-compose.yaml exec -T redis redis-cli FLUSHDB"
+else
+	@echo "Flushing Redis in standard mode..."
+	docker compose -f docker/docker-compose.yaml exec -T redis redis-cli FLUSHDB
+endif
+	@echo "Redis flushed successfully."
 
 
 #--------
