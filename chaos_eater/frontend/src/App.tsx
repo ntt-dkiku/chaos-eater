@@ -40,6 +40,7 @@ import LandingMessage from './components/LandingMessage';
 import CleanClusterButton from './components/CleanClusterButton';
 import StatsPanel from './components/StatsPanel';
 import ApprovalDialog from './components/ApprovalDialog';
+import AgentSettingsDialog from './components/AgentSettingsDialog';
 
 // API modules
 import { uploadZipToBackend } from './api/uploads';
@@ -99,6 +100,42 @@ import {
   mergeStyles,
 } from './styles';
 
+// Agent groups for interactive mode approval settings (moved outside component for default value)
+const AGENT_GROUPS: Record<string, Array<{ id: string; label: string }>> = {
+  preprocess: [
+    { id: 'k8s_summary_agent', label: 'K8s Summary' },
+    { id: 'k8s_weakness_summary_agent', label: 'Weakness Summary' },
+    { id: 'k8s_app_assumption_agent', label: 'App Assumption' },
+    { id: 'ce_instruct_agent', label: 'CE Instructions' },
+  ],
+  hypothesis: [
+    { id: 'steady_state_definer', label: 'Steady State Definer' },
+    { id: 'draft_agent_*', label: 'Draft Agent (per SS)' },
+    { id: 'inspection_agent_*', label: 'Inspection Agent (per SS)' },
+    { id: 'threshold_agent_*', label: 'Threshold Agent (per SS)' },
+    { id: 'unittest_agent_*', label: 'Unittest Agent (per SS)' },
+    { id: 'completion_check_agent_*', label: 'Completion Check (per SS)' },
+    { id: 'fault_definer', label: 'Fault Definer' },
+    { id: 'fault_scenario_agent', label: 'Fault Scenario' },
+    { id: 'fault_refiner', label: 'Fault Refiner' },
+  ],
+  experiment_plan: [
+    { id: 'experiment_plan_agent', label: 'Experiment Plan' },
+    { id: 'plan2workflow_converter', label: 'Plan to Workflow' },
+  ],
+  experiment: [
+    { id: 'experiment_runner', label: 'Experiment Runner' },
+  ],
+  analysis: [
+    { id: 'analysis_agent', label: 'Analysis' },
+  ],
+  postprocess: [
+    { id: 'summary_agent', label: 'Summary' },
+  ],
+};
+
+// Helper to get all agent IDs for default value
+const getAllAgentIds = (): string[] => Object.values(AGENT_GROUPS).flat().map(a => a.id);
 
 export default function ChaosEaterApp() {
   // === API constants & helpers ===
@@ -162,7 +199,7 @@ export default function ChaosEaterApp() {
     maxRetries: 3,
     // Interactive mode settings
     executionMode: 'full-auto' as 'full-auto' | 'interactive',
-    approvalAgents: [] as string[],
+    approvalAgents: getAllAgentIds(),  // Default: all agents checked
   });
   
   // file uploading
@@ -201,6 +238,8 @@ export default function ChaosEaterApp() {
     visible: boolean;
     agentName: string;
   } | null>(null);
+  // Agent settings dialog state
+  const [agentSettingsOpen, setAgentSettingsOpen] = useState(false);
   // model list
   const models = [
     'openai/gpt-4.1',
@@ -224,40 +263,6 @@ export default function ChaosEaterApp() {
       : models.includes(formData.model)
         ? formData.model
         : 'custom';
-
-  // Agent groups for interactive mode approval settings
-  const AGENT_GROUPS = {
-    preprocess: [
-      { id: 'k8s_summary_agent', label: 'K8s Summary' },
-      { id: 'k8s_weakness_summary_agent', label: 'Weakness Summary' },
-      { id: 'k8s_app_assumption_agent', label: 'App Assumption' },
-      { id: 'ce_instruct_agent', label: 'CE Instructions' },
-    ],
-    hypothesis: [
-      { id: 'steady_state_definer', label: 'Steady State Definer' },
-      { id: 'draft_agent_*', label: 'Draft Agent (per SS)' },
-      { id: 'inspection_agent_*', label: 'Inspection Agent (per SS)' },
-      { id: 'threshold_agent_*', label: 'Threshold Agent (per SS)' },
-      { id: 'unittest_agent_*', label: 'Unittest Agent (per SS)' },
-      { id: 'completion_check_agent_*', label: 'Completion Check (per SS)' },
-      { id: 'fault_definer', label: 'Fault Definer' },
-      { id: 'fault_scenario_agent', label: 'Fault Scenario' },
-      { id: 'fault_refiner', label: 'Fault Refiner' },
-    ],
-    experiment_plan: [
-      { id: 'experiment_plan_agent', label: 'Experiment Plan' },
-      { id: 'plan2workflow_converter', label: 'Plan to Workflow' },
-    ],
-    experiment: [
-      { id: 'experiment_runner', label: 'Experiment Runner' },
-    ],
-    analysis: [
-      { id: 'analysis_agent', label: 'Analysis' },
-    ],
-    postprocess: [
-      { id: 'summary_agent', label: 'Summary' },
-    ],
-  };
 
   //--------------------------------------------------------------
   // cluster management
@@ -1404,6 +1409,45 @@ export default function ChaosEaterApp() {
           {/* Smoothly animated content */}
           <Collapse isOpen={!sidebarCollapsed.general}>
             <div id="settings-collapse" style={sidebarStyles.collapseContent}>
+              {/* Mode Selection - Top of Settings */}
+              <div>
+                <label style={inputStyles.label}>Mode</label>
+                <select
+                  style={mergeStyles(inputStyles.select, { marginTop: '4px' })}
+                  value={formData.executionMode}
+                  onChange={(e) => setFormData({...formData, executionMode: e.target.value as 'full-auto' | 'interactive'})}
+                  {...focusHandlers.input}
+                >
+                  <option value="full-auto" style={{ backgroundColor: colors.bgInput }}>Full-Auto</option>
+                  <option value="interactive" style={{ backgroundColor: colors.bgInput }}>Interactive</option>
+                </select>
+              </div>
+
+              {/* Advanced Settings link (only visible in interactive mode) */}
+              {formData.executionMode === 'interactive' && (
+                <button
+                  onClick={() => setAgentSettingsOpen(true)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: colors.primary,
+                    fontSize: fontSize.xs,
+                    cursor: 'pointer',
+                    padding: 0,
+                    marginTop: spacing.xs,
+                    textDecoration: 'underline',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.color = colors.accentHover;
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.color = colors.primary;
+                  }}
+                >
+                  advanced settings
+                </button>
+              )}
+
               {/* Model Selection */}
               <div>
                 <label style={inputStyles.label}>Model</label>
@@ -1727,71 +1771,6 @@ export default function ChaosEaterApp() {
                 </label>
               </div>
 
-              {/* Execution Mode */}
-              <div style={{ marginTop: spacing.md }}>
-                <label style={utilityStyles.lightText}>Execution Mode</label>
-                <div style={{ display: 'flex', gap: spacing.sm, marginTop: spacing.xs }}>
-                  <button
-                    onClick={() => setFormData({...formData, executionMode: 'full-auto'})}
-                    style={mergeStyles(
-                      buttonStyles.secondary,
-                      formData.executionMode === 'full-auto' && {
-                        backgroundColor: colors.primary,
-                        borderColor: colors.primary,
-                        color: colors.bgPrimary,
-                      }
-                    )}
-                  >
-                    Full-Auto
-                  </button>
-                  <button
-                    onClick={() => setFormData({...formData, executionMode: 'interactive'})}
-                    style={mergeStyles(
-                      buttonStyles.secondary,
-                      formData.executionMode === 'interactive' && {
-                        backgroundColor: colors.primary,
-                        borderColor: colors.primary,
-                        color: colors.bgPrimary,
-                      }
-                    )}
-                  >
-                    Interactive
-                  </button>
-                </div>
-
-                {/* Agent approval settings (only shown in interactive mode) */}
-                {formData.executionMode === 'interactive' && (
-                  <div style={{ marginTop: spacing.sm, padding: spacing.sm, backgroundColor: colors.bgSecondary, borderRadius: borderRadius.md }}>
-                    <label style={mergeStyles(utilityStyles.lightText, { fontSize: fontSize.xs, marginBottom: spacing.xs, display: 'block' })}>
-                      Agents requiring approval:
-                    </label>
-                    {Object.entries(AGENT_GROUPS).map(([phase, agents]) => (
-                      <div key={phase} style={{ marginBottom: spacing.xs }}>
-                        <div style={{ fontSize: fontSize.xs, color: colors.textMuted, textTransform: 'capitalize', marginBottom: '2px' }}>
-                          {phase.replace('_', ' ')}
-                        </div>
-                        {agents.map(agent => (
-                          <label key={agent.id} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: fontSize.xs, cursor: 'pointer' }}>
-                            <input
-                              type="checkbox"
-                              checked={formData.approvalAgents.includes(agent.id)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setFormData({...formData, approvalAgents: [...formData.approvalAgents, agent.id]});
-                                } else {
-                                  setFormData({...formData, approvalAgents: formData.approvalAgents.filter(a => a !== agent.id)});
-                                }
-                              }}
-                              style={{ width: '12px', height: '12px' }}
-                            />
-                            <span style={{ color: colors.textSecondary }}>{agent.label}</span>
-                          </label>
-                        ))}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
             </div>
           </Collapse>
         </div>
@@ -2229,6 +2208,15 @@ export default function ChaosEaterApp() {
           </div>
         </div>
       </div>
+
+      {/* Agent Settings Dialog for Interactive Mode */}
+      <AgentSettingsDialog
+        isOpen={agentSettingsOpen}
+        onClose={() => setAgentSettingsOpen(false)}
+        approvalAgents={formData.approvalAgents}
+        onApprovalAgentsChange={(agents) => setFormData({...formData, approvalAgents: agents})}
+        agentGroups={AGENT_GROUPS}
+      />
 
       {/* Approval Dialog for Interactive Mode */}
       {approvalDialog && (
