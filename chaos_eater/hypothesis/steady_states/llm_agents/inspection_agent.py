@@ -89,6 +89,30 @@ class InspectionAgent:
         self.llm = llm
         self.namespace = namespace
         self.message_logger = message_logger
+        # Store base messages for retry support
+        self.base_messages: List[Tuple[str, str]] = [
+            ("system", SYS_DEFINE_CMD),
+            ("human", USER_DEFINE_CMD)
+        ]
+
+    def _escape_braces(self, text: str) -> str:
+        """Escape curly braces for LangChain template."""
+        return text.replace("{", "{{").replace("}", "}}")
+
+    def _build_messages(self, retry_context: Optional[dict] = None) -> List[Tuple[str, str]]:
+        """Build message list, including external retry history if present."""
+        messages = self.base_messages.copy()
+
+        if retry_context and retry_context.get("history"):
+            for i, entry in enumerate(retry_context["history"], 1):
+                escaped_output = self._escape_braces(str(entry["output"]))
+                messages.append(("ai", escaped_output))
+                if entry.get("feedback"):
+                    escaped_feedback = self._escape_braces(entry['feedback'])
+                    messages.append(("human", f"Feedback #{i}: {escaped_feedback}"))
+            messages.append(("human", "Please revise the output based on all the feedback above."))
+
+        return messages
 
     def inspect_current_state(
         self,
@@ -98,7 +122,8 @@ class InspectionAgent:
         kube_context: str,
         work_dir: str,
         max_retries: int = 3,
-        agent_logger: Optional[AgentLogger] = None
+        agent_logger: Optional[AgentLogger] = None,
+        retry_context: Optional[dict] = None
     ) -> Inspection:
         #---------------
         # intialization
@@ -114,7 +139,8 @@ class InspectionAgent:
             input_data=input_data,
             steady_state_draft=steady_state_draft,
             work_dir=work_dir,
-            agent_logger=agent_logger
+            agent_logger=agent_logger,
+            retry_context=retry_context
         )
         output_history.append(raw_output)
 
@@ -168,7 +194,8 @@ class InspectionAgent:
         mod_count: int = -1,
         output_history: List[dict] = [],
         error_history: List[str] = [],
-        agent_logger: Optional[AgentLogger] = None
+        agent_logger: Optional[AgentLogger] = None,
+        retry_context: Optional[dict] = None
     ) -> Tuple[dict, Inspection]:
         #----------------
         # initialization
@@ -181,8 +208,9 @@ class InspectionAgent:
         #---------------------------------------
         # update chat messages & build an agent
         #---------------------------------------
-        # update chat messages
-        chat_messages = [("system", SYS_DEFINE_CMD), ("human", USER_DEFINE_CMD)]
+        # Start with base messages (includes external retry context if present)
+        chat_messages = self._build_messages(retry_context)
+        # Add internal error retry history
         for output, error in zip(output_history, error_history):
             chat_messages.append(("ai", dict_to_str(output)))
             chat_messages.append(("human", USER_REWRITE_INSPECTION.replace("{error_message}", error.replace('{', '{{').replace('}', '}}'))))

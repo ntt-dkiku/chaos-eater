@@ -3,7 +3,7 @@ import time
 import uuid
 import asyncio
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Literal, Optional, Any
 from enum import Enum
 from contextlib import asynccontextmanager
 import logging
@@ -72,6 +72,10 @@ class ChaosEaterJobRequest(BaseModel):
     max_retries: int = Field(default=3, ge=0, le=10)
     namespace: str = Field(default="chaos-eater", description="K8s namespace")
 
+    # Interactive mode settings
+    execution_mode: Literal["full-auto", "interactive"] = Field(default="full-auto", description="Execution mode")
+    approval_agents: List[str] = Field(default_factory=list, description="Agent patterns requiring approval")
+
     @model_validator(mode="after")
     def _require_exactly_one(self):
         if bool(self.project_path) == bool(self.input_data):
@@ -90,6 +94,12 @@ class JobInfo(BaseModel):
     work_dir: Optional[str] = None
     current_phase: Optional[str] = None   # Track which phase the job is in for resume
     current_agent: Optional[str] = None   # Track which agent within the phase for resume
+    # Interactive mode settings (can be updated mid-run)
+    execution_mode: str = "full-auto"
+    approval_agents: List[str] = []
+    # Interactive mode approval state
+    awaiting_approval: bool = False
+    pending_agent: Optional[str] = None
 
 
 class JobResponse(BaseModel):
@@ -241,6 +251,9 @@ class JobManager:
         self.callbacks: Dict[str, CancellableAPICallback] = {}  # Keep reference to callbacks
         self.requests: Dict[str, ChaosEaterJobRequest] = {}  # Store requests for resume
         self.lock = asyncio.Lock()
+        # Interactive mode approval support
+        self.approval_events: Dict[str, asyncio.Event] = {}
+        self.approval_responses: Dict[str, str] = {}
 
     async def create_job(self, request: ChaosEaterJobRequest) -> str:
         job_id = str(uuid.uuid4())
@@ -252,7 +265,9 @@ class JobManager:
                 created_at=datetime.now(),
                 updated_at=datetime.now(),
                 progress="Job created",
-                work_dir=work_dir
+                work_dir=work_dir,
+                execution_mode=request.execution_mode,
+                approval_agents=request.approval_agents,
             )
             self.requests[job_id] = request  # Store for resume
         # Persist job info to disk for recovery after restart
@@ -435,6 +450,52 @@ class JobManager:
         async with self.lock:
             self.events[job_id] = []
 
+    async def request_approval(self, job_id: str, agent_name: str) -> dict:
+        """Request approval from frontend and wait for response.
+
+        Returns:
+            dict with keys: action ('approve', 'retry', 'cancel'), message (optional str)
+        """
+        self.approval_events[job_id] = asyncio.Event()
+
+        # Update job state
+        async with self.lock:
+            if job_id in self.jobs:
+                self.jobs[job_id].awaiting_approval = True
+                self.jobs[job_id].pending_agent = agent_name
+
+        # Send approval_request event to frontend
+        await self.add_event(job_id, {
+            "type": "approval_request",
+            "agent": agent_name,
+        })
+
+        # Wait for response (with timeout)
+        try:
+            await asyncio.wait_for(self.approval_events[job_id].wait(), timeout=3600)
+            response = self.approval_responses.pop(job_id, {"action": "cancel", "message": None})
+        except asyncio.TimeoutError:
+            response = {"action": "cancel", "message": None}
+        finally:
+            self.approval_events.pop(job_id, None)
+            async with self.lock:
+                if job_id in self.jobs:
+                    self.jobs[job_id].awaiting_approval = False
+                    self.jobs[job_id].pending_agent = None
+
+        return response
+
+    async def respond_to_approval(self, job_id: str, action: str, message: str = None) -> bool:
+        """Handle approval response from frontend."""
+        if job_id not in self.approval_events:
+            return False
+        self.approval_responses[job_id] = {
+            "action": action,
+            "message": message
+        }
+        self.approval_events[job_id].set()
+        return True
+
     async def get_job(self, job_id: str) -> Optional[JobInfo]:
         return self.jobs.get(job_id)
 
@@ -492,16 +553,7 @@ class JobManager:
         """Pause a running job for later resume"""
         # Set PAUSED status FIRST before cancelling task
         # This ensures CancelledError handler sees PAUSED status
-        async with self.lock:
-            if job_id in self.jobs:
-                self.jobs[job_id].status = JobStatus.PAUSED
-                self.jobs[job_id].updated_at = datetime.now()
-                phase = self.jobs[job_id].current_phase or "unknown"
-                agent = self.jobs[job_id].current_agent
-                if agent:
-                    self.jobs[job_id].progress = f"Paused at {phase}/{agent}"
-                else:
-                    self.jobs[job_id].progress = f"Paused at {phase}"
+        await self.set_paused_status(job_id)
 
         # Then cancel the task
         callback = self.callbacks.get(job_id)
@@ -516,6 +568,22 @@ class JobManager:
             del self.callbacks[job_id]
 
         return True
+
+    async def set_paused_status(self, job_id: str) -> None:
+        """Set job status to PAUSED without cancelling the task.
+
+        Used by pause_job and approval dialog cancel.
+        """
+        async with self.lock:
+            if job_id in self.jobs:
+                self.jobs[job_id].status = JobStatus.PAUSED
+                self.jobs[job_id].updated_at = datetime.now()
+                phase = self.jobs[job_id].current_phase or "unknown"
+                agent = self.jobs[job_id].current_agent
+                if agent:
+                    self.jobs[job_id].progress = f"Paused at {phase}/{agent}"
+                else:
+                    self.jobs[job_id].progress = f"Paused at {phase}"
 
     async def cleanup_old_jobs(self, hours: int = 24):
         cutoff = datetime.now() - timedelta(hours=hours)
@@ -636,10 +704,14 @@ class CancellableAPICallback(APICallback):
         self,
         job_manager: JobManager,
         job_id: str,
-        loop: asyncio.AbstractEventLoop
+        loop: asyncio.AbstractEventLoop,
+        execution_mode: str = "full-auto",
+        approval_agents: List[str] = None,
     ):
         super().__init__(job_manager, job_id, loop)
         self.cancelled = False
+        self.execution_mode = execution_mode
+        self.approval_agents = approval_agents or []
 
     def _update_phase(self, phase: str):
         """Update current phase in job info for resume support"""
@@ -661,8 +733,30 @@ class CancellableAPICallback(APICallback):
         except Exception as e:
             logger.warning(f"Agent update failed: {e}")
 
-    def on_agent_start(self, agent_name: str):
-        """Called when an agent starts execution"""
+    def _needs_approval(self, agent_name: str) -> bool:
+        """Check if agent needs approval based on CURRENT settings in JobInfo.
+
+        This reads from JobInfo dynamically, allowing mode changes mid-run.
+        """
+        try:
+            job = self.job_manager.jobs.get(self.job_id)
+            if not job or job.execution_mode != "interactive":
+                return False
+            for pattern in job.approval_agents:
+                if self._match_pattern(pattern, agent_name):
+                    return True
+        except Exception as e:
+            logger.warning(f"Failed to check approval settings: {e}")
+        return False
+
+    def _match_pattern(self, pattern: str, agent_name: str) -> bool:
+        """Match agent name against pattern (supports * wildcard)"""
+        if pattern.endswith('_*'):
+            return agent_name.startswith(pattern[:-2])
+        return pattern == agent_name
+
+    def on_agent_start(self, agent_name: str) -> None:
+        """Called when an agent starts execution (notification only)"""
         self._update_agent(agent_name)
         self._push(f"Agent started: {agent_name}")
         # Send as event for frontend agent boundary tracking
@@ -671,14 +765,55 @@ class CancellableAPICallback(APICallback):
             "agent": agent_name,
         })
 
-    def on_agent_end(self, agent_name: str, result: any = None):
-        """Called when an agent completes execution"""
+    def on_agent_end(self, agent_name: str, result: any = None) -> dict:
+        """Called when an agent completes. Returns dict with action and message, or raises CancelledError"""
         self._push(f"Agent completed: {agent_name}")
         # Send as event for frontend agent boundary tracking
         self._push_event({
             "type": "agent_end",
             "agent": agent_name,
         })
+
+        # Post-approval: request approval after agent output is shown
+        if self._needs_approval(agent_name):
+            self._push(f"Agent {agent_name} awaiting approval...")
+            # Request approval from frontend
+            fut = asyncio.run_coroutine_threadsafe(
+                self.job_manager.request_approval(self.job_id, agent_name),
+                self.loop
+            )
+            try:
+                response = fut.result(timeout=3600)  # 1 hour timeout (returns dict)
+            except Exception as e:
+                logger.error(f"Approval request failed: {e}")
+                self.cancelled = True
+                raise asyncio.CancelledError(f"Approval request failed for {agent_name}")
+
+            action = response.get("action", "cancel")
+            message = response.get("message")
+
+            if action == 'retry':
+                self._push(f"Agent {agent_name} will retry")
+                logger.info(f"[Approval] Returning 'retry' for agent {agent_name}")
+                return {"action": "retry", "message": message}
+            elif action == 'cancel':
+                # Treat cancel as pause - set PAUSED status first
+                self._push(f"Pausing at {agent_name}...")
+                pause_fut = asyncio.run_coroutine_threadsafe(
+                    self.job_manager.set_paused_status(self.job_id),
+                    self.loop
+                )
+                try:
+                    pause_fut.result(timeout=5)
+                except Exception as e:
+                    logger.warning(f"Failed to set paused status: {e}")
+                self.cancelled = True
+                raise asyncio.CancelledError(f"Paused at {agent_name}")
+            # action == 'approve'
+            self._push(f"Agent {agent_name} approved, continuing...")
+            return {"action": "approve", "message": message}
+
+        return {"action": "approve", "message": None}
 
     def on_stream(self, channel: str, event: dict) -> None:
         """Check cancellation on every stream event"""
@@ -749,9 +884,13 @@ async def run_chaos_eater_cycle(
         )
         job_manager.chaos_eaters[job_id] = chaos_eater
 
-        # Thread-safe callback
+        # Thread-safe callback with interactive mode support
         loop = asyncio.get_running_loop()
-        callback = CancellableAPICallback(job_manager, job_id, loop)
+        callback = CancellableAPICallback(
+            job_manager, job_id, loop,
+            execution_mode=request.execution_mode,
+            approval_agents=request.approval_agents,
+        )
 
         # Store callback reference in JobManager
         job_manager.callbacks[job_id] = callback
@@ -1077,6 +1216,64 @@ async def pause_job(job_id: str, job_mgr: JobManager = Depends(get_job_manager))
     raise HTTPException(status_code=500, detail=f"Failed to pause job {job_id}")
 
 
+class ApprovalResponse(BaseModel):
+    action: Literal['approve', 'retry', 'cancel']
+    message: Optional[str] = None  # For future use
+
+
+@app.post("/jobs/{job_id}/approval")
+async def respond_to_approval(
+    job_id: str,
+    response: ApprovalResponse,
+    job_mgr: JobManager = Depends(get_job_manager),
+):
+    """
+    Respond to an agent approval request in interactive mode.
+    """
+    job = await job_mgr.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    if not job.awaiting_approval:
+        raise HTTPException(status_code=400, detail="Job is not awaiting approval")
+
+    success = await job_mgr.respond_to_approval(job_id, response.action, response.message)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to process approval response")
+
+    return {"status": "ok", "action": response.action}
+
+
+class JobSettingsUpdate(BaseModel):
+    execution_mode: Optional[str] = None
+    approval_agents: Optional[List[str]] = None
+
+
+@app.put("/jobs/{job_id}/settings")
+async def update_job_settings(
+    job_id: str,
+    settings: JobSettingsUpdate,
+    job_mgr: JobManager = Depends(get_job_manager),
+):
+    """
+    Update job settings (mode, approval agents) for a running or paused job.
+    This allows switching between full-auto and interactive modes mid-run.
+    """
+    job = await job_mgr.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    async with job_mgr.lock:
+        if settings.execution_mode is not None:
+            job_mgr.jobs[job_id].execution_mode = settings.execution_mode
+            logger.info(f"Job {job_id} execution_mode updated to: {settings.execution_mode}")
+        if settings.approval_agents is not None:
+            job_mgr.jobs[job_id].approval_agents = settings.approval_agents
+            logger.info(f"Job {job_id} approval_agents updated to: {settings.approval_agents}")
+
+    return {"status": "ok", "job_id": job_id}
+
+
 @app.post("/jobs/{job_id}/resume")
 async def resume_job(
     job_id: str,
@@ -1109,6 +1306,11 @@ async def resume_job(
             status_code=400,
             detail=f"Original request not found for job {job_id}, cannot resume"
         )
+
+    # Sync mode settings from JobInfo to request (allows mode changes during pause)
+    request.execution_mode = job.execution_mode
+    request.approval_agents = job.approval_agents
+    logger.info(f"Resume with mode={job.execution_mode}, approval_agents={job.approval_agents}")
 
     # Check for checkpoints - agent-level or phase-level
     output_checkpoint_path = f"{job.work_dir}/outputs/output.json"
@@ -1835,6 +2037,10 @@ async def ws_stats_stream(websocket: WebSocket, job_id: str, job_mgr: JobManager
                 # Non-fatal errors (e.g., temporary file locks): report and retry later
                 await websocket.send_json({"type": "warning", "detail": str(e)})
                 await asyncio.sleep(1.0)
+
+    except WebSocketDisconnect:
+        # Client disconnected before or during streaming - this is normal
+        pass
 
     finally:
         try:

@@ -19,7 +19,10 @@ import {
   X,
   Paperclip,
   PanelLeftOpen,
-  PanelLeftClose
+  PanelLeftClose,
+  ExternalLink,
+  RotateCcw,
+  XCircle,
 } from 'lucide-react';
 import {
   ensureSession,
@@ -39,6 +42,8 @@ import LandingLogo from './components/LandingLogo';
 import LandingMessage from './components/LandingMessage';
 import CleanClusterButton from './components/CleanClusterButton';
 import StatsPanel from './components/StatsPanel';
+import AgentSettingsDialog from './components/AgentSettingsDialog';
+// ApprovalDialog is now inline in MessagesPanel
 
 // API modules
 import { uploadZipToBackend } from './api/uploads';
@@ -72,6 +77,9 @@ import { useNotification } from './hooks/useNotification';
 // Styles
 import {
   colors,
+  spacing,
+  borderRadius,
+  fontSize,
   buttonStyles,
   inputStyles,
   cardStyles,
@@ -95,6 +103,42 @@ import {
   mergeStyles,
 } from './styles';
 
+// Agent groups for interactive mode approval settings (moved outside component for default value)
+const AGENT_GROUPS: Record<string, Array<{ id: string; label: string }>> = {
+  preprocess: [
+    { id: 'k8s_summary_agent', label: 'K8s Summary' },
+    { id: 'k8s_weakness_summary_agent', label: 'Weakness Summary' },
+    { id: 'k8s_app_assumption_agent', label: 'App Assumption' },
+    { id: 'ce_instruct_agent', label: 'CE Instructions' },
+  ],
+  hypothesis: [
+    { id: 'steady_state_definer', label: 'Steady State Definer' },
+    { id: 'draft_agent_*', label: 'Draft Agent (per SS)' },
+    { id: 'inspection_agent_*', label: 'Inspection Agent (per SS)' },
+    { id: 'threshold_agent_*', label: 'Threshold Agent (per SS)' },
+    { id: 'unittest_agent_*', label: 'Unittest Agent (per SS)' },
+    { id: 'completion_check_agent_*', label: 'Completion Check (per SS)' },
+    { id: 'fault_definer', label: 'Fault Definer' },
+    { id: 'fault_scenario_agent', label: 'Fault Scenario' },
+    { id: 'fault_refiner', label: 'Fault Refiner' },
+  ],
+  experiment_plan: [
+    { id: 'experiment_plan_agent', label: 'Experiment Plan' },
+    { id: 'plan2workflow_converter', label: 'Plan to Workflow' },
+  ],
+  experiment: [
+    { id: 'experiment_runner', label: 'Experiment Runner' },
+  ],
+  analysis: [
+    { id: 'analysis_agent', label: 'Analysis' },
+  ],
+  postprocess: [
+    { id: 'summary_agent', label: 'Summary' },
+  ],
+};
+
+// Helper to get all agent IDs for default value
+const getAllAgentIds = (): string[] => Object.values(AGENT_GROUPS).flat().map(a => a.id);
 
 export default function ChaosEaterApp() {
   // === API constants & helpers ===
@@ -156,6 +200,9 @@ export default function ChaosEaterApp() {
     seed: 42,
     maxSteadyStates: 2,
     maxRetries: 3,
+    // Interactive mode settings
+    executionMode: 'full-auto' as 'full-auto' | 'interactive',
+    approvalAgents: getAllAgentIds(),  // Default: all agents checked
   });
   
   // file uploading
@@ -189,6 +236,13 @@ export default function ChaosEaterApp() {
   const wsRef = useRef(null);
   // Track current agent for tagging messages with agentId
   const currentAgentRef = useRef<string | null>(null);
+  // Approval dialog state for interactive mode
+  const [approvalDialog, setApprovalDialog] = useState<{
+    visible: boolean;
+    agentName: string;
+  } | null>(null);
+  // Agent settings dialog state
+  const [agentSettingsOpen, setAgentSettingsOpen] = useState(false);
   // model list
   const models = [
     'openai/gpt-4.1',
@@ -212,7 +266,7 @@ export default function ChaosEaterApp() {
       : models.includes(formData.model)
         ? formData.model
         : 'custom';
-  
+
   //--------------------------------------------------------------
   // cluster management
   //--------------------------------------------------------------
@@ -510,6 +564,97 @@ export default function ChaosEaterApp() {
     }
   };
 
+  // Send approval response to backend
+  const sendApprovalResponse = async (action: 'approve' | 'retry' | 'cancel', message?: string) => {
+    if (!jobId) return;
+    setApprovalDialog(null);
+
+    // Cancel acts like pause - set paused state immediately
+    if (action === 'cancel') {
+      setRunState('paused');
+      setIsLoading(false);
+      // Close WebSocket
+      if (wsRef.current) {
+        try {
+          wsRef.current.close();
+          wsRef.current = null;
+        } catch (e) {
+          console.error('Failed to close WebSocket:', e);
+        }
+      }
+    }
+
+    try {
+      console.log(`[Approval] Sending ${action} response for job ${jobId}`);
+      const res = await fetch(`${API_BASE}/jobs/${jobId}/approval`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, message }),
+      });
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error(`[Approval] Server error: ${res.status} - ${errorText}`);
+        setNotification({ type: 'error', message: `Approval failed: ${errorText}` });
+        return;
+      }
+      console.log(`[Approval] ${action} response sent successfully`);
+      if (action === 'cancel') {
+        setNotification({ type: 'success', message: 'Job paused' });
+      }
+    } catch (error) {
+      console.error('Failed to send approval response:', error);
+      setNotification({ type: 'error', message: 'Failed to send approval response' });
+    }
+  };
+
+  // Keyboard shortcuts for approval (in App component)
+  useEffect(() => {
+    if (!approvalDialog) return;
+    const handler = (e: KeyboardEvent) => {
+      // Don't trigger when typing in textarea
+      if (e.target instanceof HTMLTextAreaElement) {
+        if (e.key === 'Escape') {
+          sendApprovalResponse('cancel');
+        }
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        sendApprovalResponse('approve', draftInstructions || undefined);
+        setDraftInstructions('');
+      } else if (e.key === 'r' || e.key === 'R') {
+        e.preventDefault();
+        sendApprovalResponse('retry', draftInstructions || undefined);
+        setDraftInstructions('');
+      } else if (e.key === 'Escape') {
+        sendApprovalResponse('cancel');
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [approvalDialog, draftInstructions]);
+
+  // Sync mode settings to backend when changed mid-run
+  useEffect(() => {
+    if (!jobId || runState === 'idle' || runState === 'completed') return;
+
+    // Update job settings on the backend
+    fetch(`${API_BASE}/jobs/${jobId}/settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        execution_mode: formData.executionMode,
+        approval_agents: formData.approvalAgents,
+      }),
+    })
+      .then(res => {
+        if (res.ok) {
+          console.log(`[Settings] Updated job ${jobId} mode=${formData.executionMode}`);
+        }
+      })
+      .catch(err => console.error('Failed to update job settings:', err));
+  }, [formData.executionMode, formData.approvalAgents, jobId, runState]);
+
   // resume from paused state
   const handleResume = async () => {
     if (!jobId) {
@@ -757,7 +902,10 @@ export default function ChaosEaterApp() {
       seed: formData.seed,
       max_num_steadystates: formData.maxSteadyStates,
       max_retries: formData.maxRetries,
-      namespace: 'chaos-eater'
+      namespace: 'chaos-eater',
+      // Interactive mode settings
+      execution_mode: formData.executionMode,
+      approval_agents: formData.approvalAgents,
     };
 
     try {
@@ -1095,7 +1243,12 @@ export default function ChaosEaterApp() {
           }
           // Agent tracking for resume functionality (messages are tagged with agentId)
           if (ev.type === 'agent_start') {
-            currentAgentRef.current = ev.agent;
+            const agentName = ev.agent;
+            console.log(`[Agent] agent_start: ${agentName}`);
+            // Clear previous messages from this agent (for retry support)
+            setMessages(prev => prev.filter(msg => msg.agentId !== agentName));
+            partialStateRef.current = null;
+            currentAgentRef.current = agentName;
             return;
           }
           if (ev.type === 'agent_end') {
@@ -1110,6 +1263,30 @@ export default function ChaosEaterApp() {
             }
             partialStateRef.current = null;
             currentAgentRef.current = null;
+            return;
+          }
+          if (ev.type === 'approval_request') {
+            const agentName = ev.agent;
+            console.log(`[Approval] Received approval_request for agent: ${agentName}`);
+            // Check if this agent needs approval based on settings
+            const needsApproval = formData.approvalAgents.some(pattern => {
+              if (pattern.endsWith('_*')) {
+                return agentName.startsWith(pattern.slice(0, -2));
+              }
+              return pattern === agentName;
+            });
+            console.log(`[Approval] needsApproval=${needsApproval}, approvalAgents=`, formData.approvalAgents);
+
+            if (needsApproval) {
+              console.log(`[Approval] Showing approval dialog for ${agentName}`);
+              setApprovalDialog({
+                visible: true,
+                agentName,
+              });
+            } else {
+              // Auto-approve agents not in the list
+              sendApprovalResponse('approve');
+            }
             return;
           }
           setMessages(m => [...m, { type: 'text', role: 'assistant', content: JSON.stringify(ev) }]);
@@ -1250,6 +1427,7 @@ export default function ChaosEaterApp() {
           width: sidebarOpen ? `${SIDEBAR_WIDTH}px` : '0px',
           minWidth: sidebarOpen ? `${SIDEBAR_WIDTH}px` : '0px',
           borderRight: sidebarOpen ? `1px solid ${colors.border}` : 'none',
+          position: 'relative',
         })}
       >
         <div style={{
@@ -1318,6 +1496,70 @@ export default function ChaosEaterApp() {
           {/* Smoothly animated content */}
           <Collapse isOpen={!sidebarCollapsed.general}>
             <div id="settings-collapse" style={sidebarStyles.collapseContent}>
+              {/* Mode Selection - Top of Settings (2 buttons) */}
+              <div>
+                <label style={inputStyles.label}>Mode</label>
+                <div style={{ display: 'flex', gap: spacing.xs, marginTop: spacing.xs }}>
+                  <button
+                    onClick={() => setFormData({...formData, executionMode: 'full-auto'})}
+                    style={{
+                      padding: '4px 10px',
+                      fontSize: fontSize.sm,
+                      border: '1px solid',
+                      borderRadius: borderRadius.sm,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s',
+                      backgroundColor: formData.executionMode === 'full-auto' ? colors.primary : 'transparent',
+                      borderColor: formData.executionMode === 'full-auto' ? colors.primary : colors.border,
+                      color: formData.executionMode === 'full-auto' ? colors.bgPrimary : colors.textSecondary,
+                    }}
+                  >
+                    Full-Auto
+                  </button>
+                  <button
+                    onClick={() => setFormData({...formData, executionMode: 'interactive'})}
+                    style={{
+                      padding: '4px 10px',
+                      fontSize: fontSize.sm,
+                      border: '1px solid',
+                      borderRadius: borderRadius.sm,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s',
+                      backgroundColor: formData.executionMode === 'interactive' ? colors.primary : 'transparent',
+                      borderColor: formData.executionMode === 'interactive' ? colors.primary : colors.border,
+                      color: formData.executionMode === 'interactive' ? colors.bgPrimary : colors.textSecondary,
+                    }}
+                  >
+                    Interactive
+                  </button>
+                </div>
+                {/* Advanced Settings link */}
+                <button
+                  onClick={() => setAgentSettingsOpen(true)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: colors.textSecondary,
+                    fontSize: fontSize.xs,
+                    cursor: 'pointer',
+                    padding: 0,
+                    marginTop: '4px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.color = colors.textPrimary;
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.color = colors.textSecondary;
+                  }}
+                >
+                  advanced settings
+                  <ExternalLink size={12} />
+                </button>
+              </div>
+
               {/* Model Selection */}
               <div>
                 <label style={inputStyles.label}>Model</label>
@@ -1640,6 +1882,7 @@ export default function ChaosEaterApp() {
                   <span style={utilityStyles.lightText}>New deployment</span>
                 </label>
               </div>
+
             </div>
           </Collapse>
         </div>
@@ -1861,7 +2104,18 @@ export default function ChaosEaterApp() {
       )}
       
       {/* Main Content */}
-      <div style={mainContentStyles.container}>
+      <div style={{ ...mainContentStyles.container, position: 'relative' }}>
+        {/* Approval overlay - dims the background */}
+        {approvalDialog && (
+          <div style={{
+            position: 'absolute',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            zIndex: 10,
+            pointerEvents: 'none',
+          }} />
+        )}
+
         {/* dialog */}
         <div style={mergeStyles(mainContentStyles.dialogWrapper, {
           position: panelVisible ? 'relative' : 'absolute',
@@ -1869,6 +2123,7 @@ export default function ChaosEaterApp() {
           opacity: panelVisible ? 1 : 0,
           height: panelVisible ? 'calc(100% - 150px)' : '0',
           pointerEvents: panelVisible ? 'auto' : 'none',
+          zIndex: approvalDialog ? 20 : 'auto',
         })}>
           <MessagesPanel
             messages={messages}
@@ -1877,10 +2132,11 @@ export default function ChaosEaterApp() {
             onResume={handleResume}
             onDownload={() => {
               if (!jobId) return;
-              const path = `/jobs/${jobId}/artifact`; 
+              const path = `/jobs/${jobId}/artifact`;
               const filename = `artifact.zip`;
               handleDownload(path, filename);
             }}
+            pendingApproval={approvalDialog}
           />
         </div>
 
@@ -1930,7 +2186,13 @@ export default function ChaosEaterApp() {
         )}
         
         {/* Unified Chat Input Area */}
-        <div style={mainContentStyles.chatInputWrapper}>
+        <div
+          style={{
+            ...mainContentStyles.chatInputWrapper,
+            position: 'relative',
+            zIndex: approvalDialog ? 20 : 'auto',
+          }}
+        >
           <input
             ref={fileInputRef}
             type="file"
@@ -1966,14 +2228,15 @@ export default function ChaosEaterApp() {
           )}
           
           <div
+            className={approvalDialog ? 'approval-waiting' : undefined}
             onDragOver={handleDragOver}
             onDrop={handleDrop}
             style={composerStyles.container}
             onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = colors.accent;
+              if (!approvalDialog) e.currentTarget.style.borderColor = colors.accent;
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = colors.border;
+              if (!approvalDialog) e.currentTarget.style.borderColor = colors.border;
             }}
           >
             {/* Upper section - Text area */}
@@ -1981,7 +2244,11 @@ export default function ChaosEaterApp() {
               {/* Custom placeholder text positioned left aligned */}
               {!draftInstructions.trim() && (
                 <div style={mainContentStyles.placeholder}>
-                  Input instructions for your Chaos Engineering...
+                  {runState === 'running' && !approvalDialog
+                    ? 'Running...'
+                    : approvalDialog
+                      ? `Feedback for ${approvalDialog.agentName} (optional)...`
+                      : 'Input instructions for your Chaos Engineering...'}
                 </div>
               )}
               
@@ -1991,13 +2258,24 @@ export default function ChaosEaterApp() {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
                     e.preventDefault();
-                    handleSubmit();
+                    if (approvalDialog) {
+                      sendApprovalResponse('approve', draftInstructions || undefined);
+                      setDraftInstructions('');
+                    } else {
+                      handleSubmit();
+                    }
                   }
                   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                     e.preventDefault();
-                    handleSubmit();
+                    if (approvalDialog) {
+                      sendApprovalResponse('approve', draftInstructions || undefined);
+                      setDraftInstructions('');
+                    } else {
+                      handleSubmit();
+                    }
                   }
                 }}
+                disabled={runState === 'running' && !approvalDialog}
                 rows={1}
                 style={composerStyles.textarea}
                 onFocus={(e) => e.target.parentElement.parentElement.style.borderColor = colors.accent}
@@ -2026,7 +2304,7 @@ export default function ChaosEaterApp() {
                 </button>
               </div>
 
-              {/* Right group: [toast][Send] */}
+              {/* Right group: [toast][buttons] */}
               <div style={composerStyles.controlGroup}>
                 {notification && (
                   <div
@@ -2040,7 +2318,101 @@ export default function ChaosEaterApp() {
                   </div>
                 )}
 
-                {runState === 'running' ? (
+                {/* Approval mode: show Approve/Retry/Cancel */}
+                {approvalDialog ? (
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button
+                      onClick={() => {
+                        sendApprovalResponse('approve', draftInstructions || undefined);
+                        setDraftInstructions('');
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        padding: '6px 12px',
+                        backgroundColor: 'transparent',
+                        color: '#84cc16',
+                        border: '1px solid #84cc16',
+                        borderRadius: 6,
+                        fontSize: 13,
+                        fontWeight: 500,
+                        cursor: 'pointer',
+                        transition: 'all 0.15s',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = '#84cc16';
+                        e.currentTarget.style.color = '#000';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = 'transparent';
+                        e.currentTarget.style.color = '#84cc16';
+                      }}
+                      title="Approve (Enter)"
+                    >
+                      <CheckCircle size={16} /> Approve
+                    </button>
+                    <button
+                      onClick={() => {
+                        sendApprovalResponse('retry', draftInstructions || undefined);
+                        setDraftInstructions('');
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        padding: '6px 12px',
+                        backgroundColor: 'transparent',
+                        color: '#d4a017',
+                        border: '1px solid #d4a017',
+                        borderRadius: 6,
+                        fontSize: 13,
+                        fontWeight: 500,
+                        cursor: 'pointer',
+                        transition: 'all 0.15s',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = '#d4a017';
+                        e.currentTarget.style.color = '#000';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = 'transparent';
+                        e.currentTarget.style.color = '#d4a017';
+                      }}
+                      title="Retry (R)"
+                    >
+                      <RotateCcw size={16} /> Retry
+                    </button>
+                    <button
+                      onClick={() => sendApprovalResponse('cancel')}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        padding: '6px 12px',
+                        backgroundColor: 'transparent',
+                        color: '#9ca3af',
+                        border: '1px solid #6b7280',
+                        borderRadius: 6,
+                        fontSize: 13,
+                        fontWeight: 500,
+                        cursor: 'pointer',
+                        transition: 'all 0.15s',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = '#6b7280';
+                        e.currentTarget.style.color = '#fff';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = 'transparent';
+                        e.currentTarget.style.color = '#9ca3af';
+                      }}
+                      title="Cancel (Esc)"
+                    >
+                      <XCircle size={16} /> Cancel
+                    </button>
+                  </div>
+                ) : runState === 'running' ? (
                   <button
                     onClick={handleStop}
                     style={actionButtonStyles.stop}
@@ -2077,6 +2449,17 @@ export default function ChaosEaterApp() {
           </div>
         </div>
       </div>
+
+      {/* Agent Settings Dialog for Interactive Mode */}
+      <AgentSettingsDialog
+        isOpen={agentSettingsOpen}
+        onClose={() => setAgentSettingsOpen(false)}
+        approvalAgents={formData.approvalAgents}
+        onApprovalAgentsChange={(agents) => setFormData({...formData, approvalAgents: agents})}
+        agentGroups={AGENT_GROUPS}
+      />
+
+      {/* Approval is now handled inline in MessagesPanel */}
     </div>
   );
 }

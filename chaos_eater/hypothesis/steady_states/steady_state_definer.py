@@ -154,16 +154,16 @@ class SteadyStateDefiner:
             # Add steps to the runner
             iteration_runner.add_step(AgentStep(
                 name=f"draft_agent_{ss_idx}",
-                run_fn=lambda input_data=input_data, steady_states=steady_states, prev_check_thought=prev_check_thought, agent_logger=agent_logger: self._run_draft(
-                    input_data, steady_states, prev_check_thought, agent_logger
+                run_fn=lambda retry_context=None, input_data=input_data, steady_states=steady_states, prev_check_thought=prev_check_thought, agent_logger=agent_logger: self._run_draft(
+                    input_data, steady_states, prev_check_thought, agent_logger, retry_context
                 ),
                 output_key="draft",
             ))
 
             iteration_runner.add_step(AgentStep(
                 name=f"inspection_agent_{ss_idx}",
-                run_fn=lambda draft, input_data=input_data, steady_states=steady_states, kube_context=kube_context, work_dir=work_dir, max_retries=max_retries, agent_logger=agent_logger: self._run_inspection(
-                    input_data, draft, steady_states, kube_context, work_dir, max_retries, agent_logger
+                run_fn=lambda draft, retry_context=None, input_data=input_data, steady_states=steady_states, kube_context=kube_context, work_dir=work_dir, max_retries=max_retries, agent_logger=agent_logger: self._run_inspection(
+                    input_data, draft, steady_states, kube_context, work_dir, max_retries, agent_logger, retry_context
                 ),
                 output_key="inspection",
                 depends_on=["draft"],
@@ -171,8 +171,8 @@ class SteadyStateDefiner:
 
             iteration_runner.add_step(AgentStep(
                 name=f"threshold_agent_{ss_idx}",
-                run_fn=lambda draft, inspection, input_data=input_data, steady_states=steady_states, agent_logger=agent_logger: self._run_threshold(
-                    input_data, draft, inspection, steady_states, agent_logger
+                run_fn=lambda draft, inspection, retry_context=None, input_data=input_data, steady_states=steady_states, agent_logger=agent_logger: self._run_threshold(
+                    input_data, draft, inspection, steady_states, agent_logger, retry_context
                 ),
                 output_key="threshold",
                 depends_on=["draft", "inspection"],
@@ -180,8 +180,8 @@ class SteadyStateDefiner:
 
             iteration_runner.add_step(AgentStep(
                 name=f"unittest_agent_{ss_idx}",
-                run_fn=lambda draft, inspection, threshold, input_data=input_data, steady_states=steady_states, kube_context=kube_context, work_dir=work_dir, max_retries=max_retries, agent_logger=agent_logger: self._run_unittest(
-                    input_data, draft, inspection, threshold, steady_states, kube_context, work_dir, max_retries, agent_logger
+                run_fn=lambda draft, inspection, threshold, retry_context=None, input_data=input_data, steady_states=steady_states, kube_context=kube_context, work_dir=work_dir, max_retries=max_retries, agent_logger=agent_logger: self._run_unittest(
+                    input_data, draft, inspection, threshold, steady_states, kube_context, work_dir, max_retries, agent_logger, retry_context
                 ),
                 output_key="unittest",
                 depends_on=["draft", "inspection", "threshold"],
@@ -232,8 +232,8 @@ class SteadyStateDefiner:
 
             check_runner.add_step(AgentStep(
                 name=f"completion_check_agent_{ss_idx}",
-                run_fn=lambda input_data=input_data, steady_states=steady_states, agent_logger=agent_logger: self._run_completion_check(
-                    input_data, steady_states, agent_logger
+                run_fn=lambda retry_context=None, input_data=input_data, steady_states=steady_states, agent_logger=agent_logger: self._run_completion_check(
+                    input_data, steady_states, agent_logger, retry_context
                 ),
                 output_key="check",
             ))
@@ -254,14 +254,16 @@ class SteadyStateDefiner:
         input_data: ProcessedData,
         predefined_steady_states: SteadyStates,
         prev_check_thought: str,
-        agent_logger: Optional[AgentLogger]
+        agent_logger: Optional[AgentLogger],
+        retry_context: Optional[dict] = None
     ) -> Dict[str, str]:
         """Run draft agent to propose a steady state."""
         return self.draft_agent.draft_steady_state(
             input_data=input_data,
             predefined_steady_states=predefined_steady_states,
             prev_check_thought=prev_check_thought,
-            agent_logger=agent_logger
+            agent_logger=agent_logger,
+            retry_context=retry_context
         )
 
     def _run_inspection(
@@ -272,7 +274,8 @@ class SteadyStateDefiner:
         kube_context: str,
         work_dir: str,
         max_retries: int,
-        agent_logger: Optional[AgentLogger]
+        agent_logger: Optional[AgentLogger],
+        retry_context: Optional[dict] = None
     ) -> Inspection:
         """Run inspection agent to inspect current state."""
         return self.inspection_agent.inspect_current_state(
@@ -282,7 +285,8 @@ class SteadyStateDefiner:
             kube_context=kube_context,
             work_dir=work_dir,
             max_retries=max_retries,
-            agent_logger=agent_logger
+            agent_logger=agent_logger,
+            retry_context=retry_context
         )
 
     def _run_threshold(
@@ -291,7 +295,8 @@ class SteadyStateDefiner:
         draft: Dict[str, str],
         inspection: Inspection,
         predefined_steady_states: SteadyStates,
-        agent_logger: Optional[AgentLogger]
+        agent_logger: Optional[AgentLogger],
+        retry_context: Optional[dict] = None
     ) -> Dict[str, str]:
         """Run threshold agent to define threshold."""
         # Deserialize inspection if it's a dict (from checkpoint)
@@ -302,7 +307,8 @@ class SteadyStateDefiner:
             steady_state_draft=draft,
             inspection=inspection,
             predefined_steady_states=predefined_steady_states,
-            agent_logger=agent_logger
+            agent_logger=agent_logger,
+            retry_context=retry_context
         )
 
     def _run_unittest(
@@ -315,7 +321,8 @@ class SteadyStateDefiner:
         kube_context: str,
         work_dir: str,
         max_retries: int,
-        agent_logger: Optional[AgentLogger]
+        agent_logger: Optional[AgentLogger],
+        retry_context: Optional[dict] = None
     ) -> File:
         """Run unittest agent to write unit test."""
         # Deserialize inspection if it's a dict (from checkpoint)
@@ -330,20 +337,23 @@ class SteadyStateDefiner:
             kube_context=kube_context,
             work_dir=work_dir,
             max_retries=max_retries,
-            agent_logger=agent_logger
+            agent_logger=agent_logger,
+            retry_context=retry_context
         )
 
     def _run_completion_check(
         self,
         input_data: ProcessedData,
         predefined_steady_states: SteadyStates,
-        agent_logger: Optional[AgentLogger]
+        agent_logger: Optional[AgentLogger],
+        retry_context: Optional[dict] = None
     ) -> Dict[str, Any]:
         """Run completion check agent."""
         return self.completion_check_agent.check_steady_state_completion(
             input_data=input_data,
             predefined_steady_states=predefined_steady_states,
-            agent_logger=agent_logger
+            agent_logger=agent_logger,
+            retry_context=retry_context
         )
 
     def _parse_agent_name(self, agent_name: str) -> tuple:

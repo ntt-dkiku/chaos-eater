@@ -1,6 +1,6 @@
 import os
 import subprocess
-from typing import List, Optional, Literal, Optional
+from typing import List, Optional, Literal, Tuple
 
 from ...analysis.analyzer import Analysis
 from ...experiment.experimenter import ChaosExperiment, ChaosExperimentResult
@@ -147,6 +147,30 @@ class ReconfigurationAgent:
         self.llm = llm
         # message logger
         self.message_logger = message_logger
+        # Store base messages for retry support
+        self.base_messages: List[Tuple[str, str]] = [
+            ("system", SYS_RECONFIGURE_K8S_YAML),
+            ("human", USER_RECONFIGURE_K8S_YAML1)
+        ]
+
+    def _escape_braces(self, text: str) -> str:
+        """Escape curly braces for LangChain template."""
+        return text.replace("{", "{{").replace("}", "}}")
+
+    def _build_base_messages_with_retry(self, retry_context: Optional[dict] = None) -> List[Tuple[str, str]]:
+        """Build base message list, including external retry history if present."""
+        messages = self.base_messages.copy()
+
+        if retry_context and retry_context.get("history"):
+            for i, entry in enumerate(retry_context["history"], 1):
+                escaped_output = self._escape_braces(str(entry["output"]))
+                messages.append(("ai", escaped_output))
+                if entry.get("feedback"):
+                    escaped_feedback = self._escape_braces(entry['feedback'])
+                    messages.append(("human", f"Feedback #{i}: {escaped_feedback}"))
+            messages.append(("human", "Please revise the output based on all the feedback above."))
+
+        return messages
 
     def reconfigure(
         self,
@@ -161,7 +185,8 @@ class ReconfigurationAgent:
         kube_context: str,
         work_dir: str,
         max_retries: int = 3,
-        agent_logger: Optional[AgentLogger] = None
+        agent_logger: Optional[AgentLogger] = None,
+        retry_context: Optional[dict] = None
     ) -> dict:
         #----------------
         # initialization
@@ -180,7 +205,8 @@ class ReconfigurationAgent:
             result_history=result_history,
             analysis_history=analysis_history,
             reconfig_history=reconfig_history,
-            agent_logger=agent_logger
+            agent_logger=agent_logger,
+            retry_context=retry_context
         )
 
         #--------------------------------
@@ -312,7 +338,8 @@ class ReconfigurationAgent:
         result_history: List[ChaosExperimentResult],
         analysis_history: List[Analysis],
         reconfig_history: List[ReconfigurationResult],
-        agent_logger: Optional[AgentLogger] = None
+        agent_logger: Optional[AgentLogger] = None,
+        retry_context: Optional[dict] = None
     ) -> dict:
         #----------------
         # initialization
@@ -326,7 +353,8 @@ class ReconfigurationAgent:
         # prompt configuration
         #----------------------
         result_history0 = result_history[0]
-        chat_messages = [("system", SYS_RECONFIGURE_K8S_YAML), ("human", USER_RECONFIGURE_K8S_YAML1)]
+        # Start with base messages (includes external retry context if present)
+        chat_messages = self._build_base_messages_with_retry(retry_context)
         for i in range(len(analysis_history)-1):
             if i > 0:
                 chat_messages.append(

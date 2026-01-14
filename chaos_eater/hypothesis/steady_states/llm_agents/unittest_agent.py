@@ -1,6 +1,6 @@
 import os
 import json
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 
 from .utils import run_pod, Inspection
 from ....preprocessing.preprocessor import ProcessedData
@@ -102,6 +102,35 @@ class UnittestAgent:
     ) -> None:
         self.llm = llm
         self.message_logger = message_logger
+        # Store base messages for retry support (k8s and k6 variants)
+        self.base_messages_k8s: List[Tuple[str, str]] = [
+            ("system", SYS_WRITE_K8S_UNITTEST),
+            ("human", USER_WRITE_K8S_UNITTEST)
+        ]
+        self.base_messages_k6: List[Tuple[str, str]] = [
+            ("system", SYS_WRITE_K6_UNITTEST),
+            ("human", USER_WRITE_K6_UNITTEST)
+        ]
+
+    def _escape_braces(self, text: str) -> str:
+        """Escape curly braces for LangChain template."""
+        return text.replace("{", "{{").replace("}", "}}")
+
+    def _build_messages(self, tool_type: str, retry_context: Optional[dict] = None) -> List[Tuple[str, str]]:
+        """Build message list, including external retry history if present."""
+        base = self.base_messages_k8s if tool_type == "k8s" else self.base_messages_k6
+        messages = base.copy()
+
+        if retry_context and retry_context.get("history"):
+            for i, entry in enumerate(retry_context["history"], 1):
+                escaped_output = self._escape_braces(str(entry["output"]))
+                messages.append(("ai", escaped_output))
+                if entry.get("feedback"):
+                    escaped_feedback = self._escape_braces(entry['feedback'])
+                    messages.append(("human", f"Feedback #{i}: {escaped_feedback}"))
+            messages.append(("human", "Please revise the output based on all the feedback above."))
+
+        return messages
 
     def write_unittest(
         self,
@@ -113,7 +142,8 @@ class UnittestAgent:
         kube_context: str,
         work_dir: str,
         max_retries: int = 3,
-        agent_logger: Optional[AgentLogger] = None
+        agent_logger: Optional[AgentLogger] = None,
+        retry_context: Optional[dict] = None
     ) -> File:
         copy_file(UNITTEST_BASE_PY_PATH, f"{work_dir}/unittest_base.py")
 
@@ -134,7 +164,8 @@ class UnittestAgent:
             threshold=threshold,
             predefined_steady_states=predefined_steady_states,
             fname_prefix=fname_prefix,
-            agent_logger=agent_logger
+            agent_logger=agent_logger,
+            retry_context=retry_context
         )
 
         #---------------------------------------------------------
@@ -214,7 +245,8 @@ class UnittestAgent:
         mod_count: int = -1,
         output_history: List[Dict[str, str]] = [],
         error_history: List[str] = [],
-        agent_logger: Optional[AgentLogger] = None
+        agent_logger: Optional[AgentLogger] = None,
+        retry_context: Optional[dict] = None
     ) -> Dict[str, str]:
         cb = agent_logger and agent_logger.get_callback(
             phase="hypothesis",
@@ -224,11 +256,9 @@ class UnittestAgent:
         #----------------------
         # prompt configuration
         #----------------------
-        # update chat messages
-        if inspection.tool_type == "k8s":
-            chat_messages = [("system", SYS_WRITE_K8S_UNITTEST), ("human", USER_WRITE_K8S_UNITTEST)]
-        else:
-            chat_messages = [("system", SYS_WRITE_K6_UNITTEST), ("human", USER_WRITE_K6_UNITTEST)]
+        # Start with base messages (includes external retry context if present)
+        chat_messages = self._build_messages(inspection.tool_type, retry_context)
+        # Add internal error retry history
         for output, error in zip(output_history, error_history):
             chat_messages.append(("ai", json.dumps(output).replace('{', '{{').replace('}', '}}')))
             chat_messages.append(("human", USER_REWRITE_UNITTEST.replace("{error_message}", error.replace('{', '{{').replace('}', '}}'))))

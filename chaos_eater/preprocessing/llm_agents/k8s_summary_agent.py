@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from ...utils.wrappers import LLM, BaseModel, Field
 from ...utils.llms import build_json_agent, AgentLogger
@@ -41,20 +41,38 @@ class K8sSummaryAgent:
     ) -> None:
         self.llm = llm
         self.message_logger = message_logger
-        self.agent = build_json_agent(
-            llm=llm,
-            chat_messages=[
-                ("system", SYS_SUMMARIZE_K8S),
-                ("human", USER_SUMMARIZE_K8S)
-            ],
-            pydantic_object=K8sSummary,
-            is_async=False
-        )
+        # Store base messages instead of building agent (for retry support)
+        self.base_messages: List[Tuple[str, str]] = [
+            ("system", SYS_SUMMARIZE_K8S),
+            ("human", USER_SUMMARIZE_K8S)
+        ]
+
+    def _escape_braces(self, text: str) -> str:
+        """Escape curly braces for LangChain template."""
+        return text.replace("{", "{{").replace("}", "}}")
+
+    def _build_messages(self, retry_context: Optional[dict] = None) -> List[Tuple[str, str]]:
+        """Build message list, including retry history if present."""
+        messages = self.base_messages.copy()
+
+        if retry_context and retry_context.get("history"):
+            # Add each history entry as ai output + human feedback
+            for i, entry in enumerate(retry_context["history"], 1):
+                escaped_output = self._escape_braces(str(entry["output"]))
+                messages.append(("ai", escaped_output))
+                if entry.get("feedback"):
+                    escaped_feedback = self._escape_braces(entry['feedback'])
+                    messages.append(("human", f"Feedback #{i}: {escaped_feedback}"))
+            # Add final instruction to revise
+            messages.append(("human", "Please revise the output based on all the feedback above."))
+
+        return messages
 
     def summarize_manifests(
         self,
         k8s_yamls: List[File],
-        agent_logger: Optional[AgentLogger] = None
+        agent_logger: Optional[AgentLogger] = None,
+        retry_context: Optional[dict] = None
     ) -> List[str]:
         self.message_logger.write("#### Summary of each manifest:")
         cb = agent_logger and agent_logger.get_callback(
@@ -62,11 +80,22 @@ class K8sSummaryAgent:
             agent_name="k8s_summary"
         )
 
+        # Build messages (with retry history if present)
+        messages = self._build_messages(retry_context)
+
+        # Build agent dynamically
+        agent = build_json_agent(
+            llm=self.llm,
+            chat_messages=messages,
+            pydantic_object=K8sSummary,
+            is_async=False
+        )
+
         summaries = []
         for k8s_yaml in k8s_yamls:
             self.message_logger.write(f"`{k8s_yaml.fname}`")
-            for summary in self.agent.stream(
-                {"k8s_yaml": file_to_str(k8s_yaml)}, 
+            for summary in agent.stream(
+                {"k8s_yaml": file_to_str(k8s_yaml)},
                 {"callbacks": [cb]} if cb else {}
             ):
                 if (summary_str := summary.get("k8s_summary")) is not None:

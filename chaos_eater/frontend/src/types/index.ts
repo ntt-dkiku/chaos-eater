@@ -6,6 +6,7 @@ export interface BaseMessage {
   type?: MessageType;
   role: MessageRole;
   content: string;
+  agentId?: string;  // Which agent generated this message
 }
 
 export interface CodeMessage extends BaseMessage {
@@ -50,6 +51,9 @@ export interface FormData {
   seed: number;
   maxSteadyStates: number;
   maxRetries: number;
+  // Interactive mode settings
+  executionMode: 'full-auto' | 'interactive';
+  approvalAgents: string[];
 }
 
 export const DEFAULT_FORM_DATA: FormData = {
@@ -66,6 +70,9 @@ export const DEFAULT_FORM_DATA: FormData = {
   seed: 42,
   maxSteadyStates: 2,
   maxRetries: 3,
+  // Interactive mode settings
+  executionMode: 'full-auto',
+  approvalAgents: [],
 };
 
 // ===== Cluster Types =====
@@ -307,6 +314,10 @@ export interface MessagesPanelProps {
   showNextRun?: boolean;
   onResume?: () => void;
   onDownload?: () => void;
+  // For highlighting pending approval agent's messages
+  pendingApproval?: {
+    agentName: string;
+  } | null;
 }
 
 export interface StatsPanelProps {

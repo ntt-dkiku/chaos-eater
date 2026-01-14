@@ -43,7 +43,7 @@ class PostProcessor:
         # Step 1: Summarize the chaos cycle
         runner.add_step(AgentStep(
             name="summary_agent",
-            run_fn=lambda: self._run_summary(ce_cycle, agent_logger),
+            run_fn=lambda retry_context=None: self._run_summary(ce_cycle, agent_logger, retry_context),
             output_key="summary",
         ))
 
@@ -58,12 +58,14 @@ class PostProcessor:
     def _run_summary(
         self,
         ce_cycle: ChaosCycle,
-        agent_logger: Optional[AgentLogger]
+        agent_logger: Optional[AgentLogger],
+        retry_context: Optional[dict] = None
     ) -> str:
         """Run summary agent."""
         return self.summary_agent.summarize(
             ce_cycle,
-            agent_logger=agent_logger
+            agent_logger=agent_logger,
+            retry_context=retry_context
         )
 
     def generate_intermediate_summary(self):

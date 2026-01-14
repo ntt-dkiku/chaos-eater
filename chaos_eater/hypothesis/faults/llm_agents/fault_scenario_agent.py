@@ -1,4 +1,4 @@
-from typing import List, Dict, Literal, Optional
+from typing import List, Dict, Literal, Optional, Tuple
 
 from ...steady_states.steady_state_definer import SteadyStates
 from ....ce_tools.ce_tool_base import CEToolBase
@@ -52,27 +52,57 @@ class FaultScenarioAgent:
     ) -> None:
         self.llm = llm
         self.ce_tool = ce_tool
-        self.agent = build_json_agent(
-            llm=llm,
-            chat_messages=[("system", SYS_ASSUME_FAULT_SCENARIOS), ("human", USER_ASSUME_FAULT_SCENARIOS)],
-            pydantic_object=FaultScenario,
-            is_async=False
-        )
         self.output_emitter = output_emitter
+        # Store base messages instead of building agent (for retry support)
+        self.base_messages: List[Tuple[str, str]] = [
+            ("system", SYS_ASSUME_FAULT_SCENARIOS),
+            ("human", USER_ASSUME_FAULT_SCENARIOS)
+        ]
+
+    def _escape_braces(self, text: str) -> str:
+        """Escape curly braces for LangChain template."""
+        return text.replace("{", "{{").replace("}", "}}")
+
+    def _build_messages(self, retry_context: Optional[dict] = None) -> List[Tuple[str, str]]:
+        """Build message list, including retry history if present."""
+        messages = self.base_messages.copy()
+
+        if retry_context and retry_context.get("history"):
+            for i, entry in enumerate(retry_context["history"], 1):
+                escaped_output = self._escape_braces(str(entry["output"]))
+                messages.append(("ai", escaped_output))
+                if entry.get("feedback"):
+                    escaped_feedback = self._escape_braces(entry['feedback'])
+                    messages.append(("human", f"Feedback #{i}: {escaped_feedback}"))
+            messages.append(("human", "Please revise the output based on all the feedback above."))
+
+        return messages
 
     def assume_scenario(
         self,
         user_input: str,
         ce_instructions: str,
         steady_states: SteadyStates,
-        agent_logger: Optional[AgentLogger] = None
+        agent_logger: Optional[AgentLogger] = None,
+        retry_context: Optional[dict] = None
     ) -> Dict[str, str]:
         cb = agent_logger and agent_logger.get_callback(
             phase="hypothesis",
             agent_name="fault_scenario_assumption"
         )
-        
-        for response in self.agent.stream({
+
+        # Build messages (with retry history if present)
+        messages = self._build_messages(retry_context)
+
+        # Build agent dynamically
+        agent = build_json_agent(
+            llm=self.llm,
+            chat_messages=messages,
+            pydantic_object=FaultScenario,
+            is_async=False
+        )
+
+        for response in agent.stream({
             "user_input": user_input,
             "ce_instructions": ce_instructions,
             "steady_states": steady_states.to_overview_str(),

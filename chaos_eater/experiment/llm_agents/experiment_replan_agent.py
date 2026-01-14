@@ -1,6 +1,6 @@
 import os
 import copy
-from typing import List, Literal, Optional
+from typing import List, Literal, Optional, Tuple
 
 from .experiment_plan_agent import ChaosExperimentPlan
 from ...ce_tools.ce_tool_base import CEToolBase
@@ -115,15 +115,49 @@ class ExperimentRePlanAgent:
         self.message_logger = message_logger
         self.test_dir = test_dir
         self.namespace = namespace
+        # Store base messages for retry support
+        self.base_messages_scope: List[Tuple[str, str]] = [
+            ("system", SYS_ADJUST_SCOPE),
+            ("human", USER_ADJUST_SCOPE)
+        ]
+        self.base_messages_unittest: List[Tuple[str, str]] = [
+            ("system", SYS_ADJUST_UNITTEST),
+            ("human", USER_ADJUST_UNITTEST)
+        ]
+
+    def _escape_braces(self, text: str) -> str:
+        """Escape curly braces for LangChain template."""
+        return text.replace("{", "{{").replace("}", "}}")
+
+    def _build_messages(self, base_messages: List[Tuple[str, str]], retry_context: Optional[dict] = None) -> List[Tuple[str, str]]:
+        """Build message list, including retry history if present."""
+        messages = base_messages.copy()
+
+        if retry_context and retry_context.get("history"):
+            for i, entry in enumerate(retry_context["history"], 1):
+                escaped_output = self._escape_braces(str(entry["output"]))
+                messages.append(("ai", escaped_output))
+                if entry.get("feedback"):
+                    escaped_feedback = self._escape_braces(entry['feedback'])
+                    messages.append(("human", f"Feedback #{i}: {escaped_feedback}"))
+            messages.append(("human", "Please revise the output based on all the feedback above."))
+
+        return messages
+
+    def _build_agents(self, retry_context: Optional[dict] = None):
+        """Build all agents, optionally with retry context."""
+        scope_messages = self._build_messages(self.base_messages_scope, retry_context)
+        unittest_messages = self._build_messages(self.base_messages_unittest, retry_context)
+
         self.scope_agent = build_json_agent(
-            llm=llm,
-            chat_messages=[("system", SYS_ADJUST_SCOPE), ("human", USER_ADJUST_SCOPE)],
+            llm=self.llm,
+            chat_messages=scope_messages,
             pydantic_object=NewScope,
             is_async=False,
         )
         self.unittest_agent = build_json_agent(
-            llm=llm,
-            chat_messages=[("system", SYS_ADJUST_UNITTEST), ("human", USER_ADJUST_UNITTEST)],
+            llm=self.llm,
+            chat_messages=unittest_messages,
             pydantic_object=AdjustedUnittest,
             is_async=False,
         )
@@ -136,11 +170,13 @@ class ExperimentRePlanAgent:
         kube_context: str,
         work_dir: str,
         max_retries: int = 3,
-        agent_logger: Optional[AgentLogger] = None
+        agent_logger: Optional[AgentLogger] = None,
+        retry_context: Optional[dict] = None
     ) -> dict:
         #-----------------
         # initialization
         #-----------------
+        self._build_agents(retry_context)
         new_experiment_plan = copy.deepcopy(prev_experiment.plan)
 
         #------------------------

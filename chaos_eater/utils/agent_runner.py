@@ -10,6 +10,7 @@ This module provides:
 import json
 import os
 import time
+import inspect
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Callable
@@ -160,7 +161,7 @@ class AgentRunner:
         phase: str,
         checkpoint_dir: str,
         on_agent_start: Optional[Callable[[str], None]] = None,
-        on_agent_end: Optional[Callable[[str, Any], None]] = None,
+        on_agent_end: Optional[Callable[[str, Any], dict]] = None,
         on_checkpoint_save: Optional[Callable[[str, List[str]], None]] = None,
     ):
         self.phase = phase
@@ -171,6 +172,10 @@ class AgentRunner:
         self.steps: List[AgentStep] = []
         self.results: Dict[str, Any] = {}
         self._completed_agents: List[str] = []
+        # Retry history: maps agent name to list of {output, feedback} entries
+        self._retry_history: Dict[str, List[dict]] = {}
+        # Accumulated feedback for approve + message
+        self._accumulated_feedback: List[str] = []
 
     def add_step(self, step: AgentStep) -> 'AgentRunner':
         """Add an agent step. Returns self for chaining."""
@@ -228,11 +233,7 @@ class AgentRunner:
 
         # Execute steps from start_idx
         for i, step in enumerate(self.steps[start_idx:], start=start_idx):
-            # Callback: agent starting
-            if self.on_agent_start:
-                self.on_agent_start(step.name)
-
-            # Collect dependencies
+            # Collect dependencies (outside retry loop as they don't change)
             kwargs = {}
             if step.depends_on:
                 for dep_key in step.depends_on:
@@ -241,23 +242,84 @@ class AgentRunner:
                     else:
                         logger.warning(f"Dependency {dep_key} not found for {step.name}")
 
-            # Execute agent
-            try:
-                if kwargs:
-                    result = step.run_fn(**kwargs)
-                else:
-                    result = step.run_fn()
-            except Exception as e:
-                logger.error(f"Agent {step.name} failed: {e}")
-                raise
+            # Initialize retry history for this step
+            if step.name not in self._retry_history:
+                self._retry_history[step.name] = []
 
-            # Store result
-            self.results[step.output_key] = result
+            # Retry loop for interactive mode (post-approval)
+            while True:
+                # Callback: agent starting (notification only)
+                if self.on_agent_start:
+                    self.on_agent_start(step.name)
+
+                # Get retry history (None if empty)
+                retry_history = self._retry_history[step.name] or None
+
+                # Execute agent
+                try:
+                    # Check if run_fn accepts retry_context
+                    accepts_retry = self._accepts_retry_context(step.run_fn)
+
+                    if retry_history and accepts_retry:
+                        # Pass retry_context with history
+                        result = step.run_fn(retry_context={"history": retry_history}, **kwargs)
+                    elif retry_history and not accepts_retry:
+                        # Retry requested but function doesn't support retry_context
+                        logger.warning(
+                            f"Agent {step.name} doesn't accept retry_context, "
+                            f"retry feedback will not be applied"
+                        )
+                        result = step.run_fn(**kwargs) if kwargs else step.run_fn()
+                    elif kwargs:
+                        result = step.run_fn(**kwargs)
+                    else:
+                        result = step.run_fn()
+                except Exception as e:
+                    logger.error(f"Agent {step.name} failed: {e}")
+                    raise
+
+                # Store result
+                self.results[step.output_key] = result
+
+                # If this step produced ce_instructions, apply any previously accumulated feedback
+                if step.output_key == "ce_instructions" and self._accumulated_feedback:
+                    for feedback in self._accumulated_feedback:
+                        self.results["ce_instructions"] += f"\n- User feedback: {feedback}"
+                        logger.info(f"[AgentRunner] Applied accumulated feedback to ce_instructions")
+                    self._accumulated_feedback = []  # Clear after applying
+
+                # Callback: agent completed (returns dict with action and message)
+                response = {"action": "approve", "message": None}
+                if self.on_agent_end:
+                    response = self.on_agent_end(step.name, result) or {"action": "approve", "message": None}
+
+                action = response.get("action", "approve")
+                message = response.get("message")
+                logger.info(f"[AgentRunner] on_agent_end returned action='{action}' for {step.name}")
+
+                if action == 'retry':
+                    logger.info(f"Retrying agent: {step.name} with message: {message}")
+                    # Add to retry history
+                    self._retry_history[step.name].append({
+                        "output": result,
+                        "feedback": message
+                    })
+                    # Continue loop to re-execute
+                    continue
+
+                # approve - handle message if present
+                if action == 'approve' and message:
+                    self._accumulated_feedback.append(message)
+                    # Append to ce_instructions if it exists in results
+                    if "ce_instructions" in self.results:
+                        self.results["ce_instructions"] += f"\n- User feedback: {message}"
+                        logger.info(f"[AgentRunner] Appended feedback to ce_instructions")
+
+                # Clear retry history for this step and exit loop
+                self._retry_history[step.name] = []
+                break
+
             self._completed_agents.append(step.name)
-
-            # Callback: agent completed
-            if self.on_agent_end:
-                self.on_agent_end(step.name, result)
 
             # Save checkpoint
             if step.checkpoint_after:
@@ -271,6 +333,14 @@ class AgentRunner:
                     self.on_checkpoint_save(step.name, self._completed_agents.copy())
 
         return self.results
+
+    def _accepts_retry_context(self, fn: Callable) -> bool:
+        """Check if a function accepts retry_context parameter."""
+        try:
+            sig = inspect.signature(fn)
+            return 'retry_context' in sig.parameters
+        except (ValueError, TypeError):
+            return False
 
     @property
     def completed_agents(self) -> List[str]:

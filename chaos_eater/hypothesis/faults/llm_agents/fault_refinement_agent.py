@@ -92,6 +92,30 @@ class FaultRefiner:
         self.llm = llm
         self.ce_tool = ce_tool
         self.output_emitter = output_emitter
+        # Store base messages for retry support
+        self.base_messages: List[Tuple[str, str]] = [
+            ("system", SYS_REFINE_FAULT),
+            ("human", USER_REFINE_FAULT)
+        ]
+
+    def _escape_braces(self, text: str) -> str:
+        """Escape curly braces for LangChain template."""
+        return text.replace("{", "{{").replace("}", "}}")
+
+    def _build_messages(self, retry_context: Optional[dict] = None) -> List[Tuple[str, str]]:
+        """Build message list, including external retry history if present."""
+        messages = self.base_messages.copy()
+
+        if retry_context and retry_context.get("history"):
+            for i, entry in enumerate(retry_context["history"], 1):
+                escaped_output = self._escape_braces(str(entry["output"]))
+                messages.append(("ai", escaped_output))
+                if entry.get("feedback"):
+                    escaped_feedback = self._escape_braces(entry['feedback'])
+                    messages.append(("human", f"Feedback #{i}: {escaped_feedback}"))
+            messages.append(("human", "Please revise the output based on all the feedback above."))
+
+        return messages
 
     def refine_faults(
         self,
@@ -101,7 +125,8 @@ class FaultRefiner:
         fault_scenario: Dict[str, str],
         work_dir: str,
         max_retries: int = 3,
-        agent_logger: Optional[AgentLogger] = None
+        agent_logger: Optional[AgentLogger] = None,
+        retry_context: Optional[dict] = None
     ) -> FaultScenario:
         self.output_emitter.write("##### ⚙ Detailed fault parameters")
         faults_ = []
@@ -118,7 +143,8 @@ class FaultRefiner:
                     steady_states=steady_states.to_overview_str(),
                     fault_scenario=self.convert_fault_senario_to_str(fault_scenario),
                     fault=fault,
-                    agent_logger=agent_logger
+                    agent_logger=agent_logger,
+                    retry_context=retry_context
                 )
                 #-----------------------
                 # validate fault params
@@ -168,7 +194,8 @@ class FaultRefiner:
         fault: Dict[str, str],
         output_history: List[dict] = [],
         error_history: List[str] = [],
-        agent_logger: Optional[AgentLogger] = None
+        agent_logger: Optional[AgentLogger] = None,
+        retry_context: Optional[dict] = None
     ) -> Dict[str, Any]:
         #----------------
         # initialization
@@ -181,8 +208,9 @@ class FaultRefiner:
         #----------------------
         # prompt configuration
         #----------------------
-        # generate chat history
-        chat_messages=[("system", SYS_REFINE_FAULT), ("human", USER_REFINE_FAULT)]
+        # Start with base messages (includes external retry context if present)
+        chat_messages = self._build_messages(retry_context)
+        # Add internal error retry history
         for output, error in zip(output_history, error_history):
             chat_messages.append(("ai", json.dumps(output).replace('{', '{{').replace('}', '}}')))
             chat_messages.append(("human", USER_REWRITE_FAULT.replace("{error_message}", error.replace('{', '{{').replace('}', '}}'))))

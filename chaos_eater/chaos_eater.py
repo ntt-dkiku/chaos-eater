@@ -103,10 +103,25 @@ class ChaosEater:
                     if hasattr(cb, 'on_agent_start'):
                         cb.on_agent_start(agent_name)
 
-            def on_agent_end(agent_name: str, result=None):
+            def on_agent_end(agent_name: str, result=None) -> dict:
+                response = {"action": "approve", "message": None}
                 for cb in callbacks:
                     if hasattr(cb, 'on_agent_end'):
-                        cb.on_agent_end(agent_name, result)
+                        cb_response = cb.on_agent_end(agent_name, result)
+                        # Handle both dict and legacy string returns
+                        if isinstance(cb_response, dict):
+                            cb_action = cb_response.get("action", "approve")
+                            cb_message = cb_response.get("message")
+                        else:
+                            cb_action = cb_response
+                            cb_message = None
+                        # 'retry' or 'cancel' takes precedence over 'approve'
+                        if cb_action in ('retry', 'cancel'):
+                            response = {"action": cb_action, "message": cb_message}
+                        elif cb_action == 'approve' and cb_message:
+                            # Capture approve + message for feedback accumulation
+                            response["message"] = cb_message
+                return response
 
             return on_agent_start, on_agent_end
 
