@@ -2244,9 +2244,11 @@ export default function ChaosEaterApp() {
               {/* Custom placeholder text positioned left aligned */}
               {!draftInstructions.trim() && (
                 <div style={mainContentStyles.placeholder}>
-                  {approvalDialog
-                    ? `Feedback for ${approvalDialog.agentName} (optional)...`
-                    : 'Input instructions for your Chaos Engineering...'}
+                  {runState === 'running' && !approvalDialog
+                    ? 'Running...'
+                    : approvalDialog
+                      ? `Feedback for ${approvalDialog.agentName} (optional)...`
+                      : 'Input instructions for your Chaos Engineering...'}
                 </div>
               )}
               
@@ -2273,6 +2275,7 @@ export default function ChaosEaterApp() {
                     }
                   }
                 }}
+                disabled={runState === 'running' && !approvalDialog}
                 rows={1}
                 style={composerStyles.textarea}
                 onFocus={(e) => e.target.parentElement.parentElement.style.borderColor = colors.accent}
