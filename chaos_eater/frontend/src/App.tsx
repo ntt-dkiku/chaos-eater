@@ -2104,7 +2104,18 @@ export default function ChaosEaterApp() {
       )}
       
       {/* Main Content */}
-      <div style={mainContentStyles.container}>
+      <div style={{ ...mainContentStyles.container, position: 'relative' }}>
+        {/* Approval overlay - dims the background */}
+        {approvalDialog && (
+          <div style={{
+            position: 'absolute',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            zIndex: 10,
+            pointerEvents: 'none',
+          }} />
+        )}
+
         {/* dialog */}
         <div style={mergeStyles(mainContentStyles.dialogWrapper, {
           position: panelVisible ? 'relative' : 'absolute',
@@ -2112,6 +2123,7 @@ export default function ChaosEaterApp() {
           opacity: panelVisible ? 1 : 0,
           height: panelVisible ? 'calc(100% - 150px)' : '0',
           pointerEvents: panelVisible ? 'auto' : 'none',
+          zIndex: approvalDialog ? 20 : 'auto',
         })}>
           <MessagesPanel
             messages={messages}
@@ -2174,7 +2186,11 @@ export default function ChaosEaterApp() {
         )}
         
         {/* Unified Chat Input Area */}
-        <div style={mainContentStyles.chatInputWrapper}>
+        <div style={{
+          ...mainContentStyles.chatInputWrapper,
+          position: 'relative',
+          zIndex: approvalDialog ? 20 : 'auto',
+        }}>
           <input
             ref={fileInputRef}
             type="file"

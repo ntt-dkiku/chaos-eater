@@ -205,6 +205,12 @@ export default function MessagesPanel({
     // Check if this message should be highlighted (from pending approval agent)
     const msgAgentId = (m as { agentId?: string }).agentId;
     const isHighlighted = pendingApproval && msgAgentId === pendingApproval.agentName;
+
+    // Dim non-highlighted messages when approval is pending
+    const dimStyle: React.CSSProperties = (pendingApproval && !isHighlighted) ? {
+      opacity: 0.4,
+    } : {};
+
     const highlightStyle: React.CSSProperties = isHighlighted ? {
       borderLeft: '3px solid #84cc16',
       paddingLeft: '12px',
@@ -215,14 +221,14 @@ export default function MessagesPanel({
 
     if (type === 'subheader') {
       return (
-        <div key={i} className={msg_styles.subheader} style={highlightStyle}>
+        <div key={i} className={msg_styles.subheader} style={{ ...highlightStyle, ...dimStyle }}>
           {m.content}
         </div>
       );
     }
     if (type === 'code') {
       return (
-        <div key={i} style={{ width: '100%', minWidth: 0, ...highlightStyle }}>
+        <div key={i} style={{ width: '100%', minWidth: 0, ...highlightStyle, ...dimStyle }}>
           <CodeBlock
             code={m.content}
             language={(m as { language?: string }).language}
@@ -245,7 +251,7 @@ export default function MessagesPanel({
       }
 
       return (
-        <div key={i} style={{ width: '100%', minWidth: 0, margin: '8px 0', ...highlightStyle }}>
+        <div key={i} style={{ width: '100%', minWidth: 0, margin: '8px 0', ...highlightStyle, ...dimStyle }}>
           <div
             style={{
               position: 'relative',
@@ -287,6 +293,7 @@ export default function MessagesPanel({
             padding: '2px 6px',
             borderRadius: '4px',
             ...highlightStyle,
+            ...dimStyle,
           }}
         >
           {m.content}
@@ -307,6 +314,7 @@ export default function MessagesPanel({
           whiteSpace: 'normal',
           wordBreak: 'break-word',
           ...highlightStyle,
+          ...dimStyle,
         }}
       >
         <ReactMarkdown
