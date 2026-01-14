@@ -156,6 +156,9 @@ export default function ChaosEaterApp() {
     seed: 42,
     maxSteadyStates: 2,
     maxRetries: 3,
+    // Interactive mode settings
+    executionMode: 'full-auto' as 'full-auto' | 'interactive',
+    approvalAgents: [] as string[],
   });
   
   // file uploading
@@ -189,6 +192,11 @@ export default function ChaosEaterApp() {
   const wsRef = useRef(null);
   // Track current agent for tagging messages with agentId
   const currentAgentRef = useRef<string | null>(null);
+  // Approval dialog state for interactive mode
+  const [approvalDialog, setApprovalDialog] = useState<{
+    visible: boolean;
+    agentName: string;
+  } | null>(null);
   // model list
   const models = [
     'openai/gpt-4.1',
@@ -212,7 +220,41 @@ export default function ChaosEaterApp() {
       : models.includes(formData.model)
         ? formData.model
         : 'custom';
-  
+
+  // Agent groups for interactive mode approval settings
+  const AGENT_GROUPS = {
+    preprocess: [
+      { id: 'k8s_summary_agent', label: 'K8s Summary' },
+      { id: 'k8s_weakness_summary_agent', label: 'Weakness Summary' },
+      { id: 'k8s_app_assumption_agent', label: 'App Assumption' },
+      { id: 'ce_instruct_agent', label: 'CE Instructions' },
+    ],
+    hypothesis: [
+      { id: 'steady_state_definer', label: 'Steady State Definer' },
+      { id: 'draft_agent_*', label: 'Draft Agent (per SS)' },
+      { id: 'inspection_agent_*', label: 'Inspection Agent (per SS)' },
+      { id: 'threshold_agent_*', label: 'Threshold Agent (per SS)' },
+      { id: 'unittest_agent_*', label: 'Unittest Agent (per SS)' },
+      { id: 'completion_check_agent_*', label: 'Completion Check (per SS)' },
+      { id: 'fault_definer', label: 'Fault Definer' },
+      { id: 'fault_scenario_agent', label: 'Fault Scenario' },
+      { id: 'fault_refiner', label: 'Fault Refiner' },
+    ],
+    experiment_plan: [
+      { id: 'experiment_plan_agent', label: 'Experiment Plan' },
+      { id: 'plan2workflow_converter', label: 'Plan to Workflow' },
+    ],
+    experiment: [
+      { id: 'experiment_runner', label: 'Experiment Runner' },
+    ],
+    analysis: [
+      { id: 'analysis_agent', label: 'Analysis' },
+    ],
+    postprocess: [
+      { id: 'summary_agent', label: 'Summary' },
+    ],
+  };
+
   //--------------------------------------------------------------
   // cluster management
   //--------------------------------------------------------------
@@ -1639,6 +1681,72 @@ export default function ChaosEaterApp() {
                   </div>
                   <span style={utilityStyles.lightText}>New deployment</span>
                 </label>
+              </div>
+
+              {/* Execution Mode */}
+              <div style={{ marginTop: spacing.md }}>
+                <label style={utilityStyles.lightText}>Execution Mode</label>
+                <div style={{ display: 'flex', gap: spacing.sm, marginTop: spacing.xs }}>
+                  <button
+                    onClick={() => setFormData({...formData, executionMode: 'full-auto'})}
+                    style={mergeStyles(
+                      buttonStyles.secondary,
+                      formData.executionMode === 'full-auto' && {
+                        backgroundColor: colors.primary,
+                        borderColor: colors.primary,
+                        color: colors.bgPrimary,
+                      }
+                    )}
+                  >
+                    Full-Auto
+                  </button>
+                  <button
+                    onClick={() => setFormData({...formData, executionMode: 'interactive'})}
+                    style={mergeStyles(
+                      buttonStyles.secondary,
+                      formData.executionMode === 'interactive' && {
+                        backgroundColor: colors.primary,
+                        borderColor: colors.primary,
+                        color: colors.bgPrimary,
+                      }
+                    )}
+                  >
+                    Interactive
+                  </button>
+                </div>
+
+                {/* Agent approval settings (only shown in interactive mode) */}
+                {formData.executionMode === 'interactive' && (
+                  <div style={{ marginTop: spacing.sm, padding: spacing.sm, backgroundColor: colors.bgSecondary, borderRadius: borderRadius.md }}>
+                    <label style={mergeStyles(utilityStyles.lightText, { fontSize: fontSize.xs, marginBottom: spacing.xs, display: 'block' })}>
+                      Agents requiring approval:
+                    </label>
+                    {Object.entries(AGENT_GROUPS).map(([phase, agents]) => (
+                      <div key={phase} style={{ marginBottom: spacing.xs }}>
+                        <div style={{ fontSize: fontSize.xs, color: colors.textMuted, textTransform: 'capitalize', marginBottom: '2px' }}>
+                          {phase.replace('_', ' ')}
+                        </div>
+                        {agents.map(agent => (
+                          <label key={agent.id} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: fontSize.xs, cursor: 'pointer' }}>
+                            <input
+                              type="checkbox"
+                              checked={formData.approvalAgents.includes(agent.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setFormData({...formData, approvalAgents: [...formData.approvalAgents, agent.id]});
+                                } else {
+                                  setFormData({...formData, approvalAgents: formData.approvalAgents.filter(a => a !== agent.id)});
+                                }
+                              }}
+                              style={{ width: '12px', height: '12px' }}
+                            />
+                            <span style={{ color: colors.textSecondary }}>{agent.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </Collapse>
