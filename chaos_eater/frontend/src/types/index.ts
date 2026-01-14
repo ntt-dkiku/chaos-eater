@@ -51,6 +51,9 @@ export interface FormData {
   seed: number;
   maxSteadyStates: number;
   maxRetries: number;
+  // Interactive mode settings
+  executionMode: 'full-auto' | 'interactive';
+  approvalAgents: string[];
 }
 
 export const DEFAULT_FORM_DATA: FormData = {
@@ -67,6 +70,9 @@ export const DEFAULT_FORM_DATA: FormData = {
   seed: 42,
   maxSteadyStates: 2,
   maxRetries: 3,
+  // Interactive mode settings
+  executionMode: 'full-auto',
+  approvalAgents: [],
 };
 
 // ===== Cluster Types =====

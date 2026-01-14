@@ -94,6 +94,9 @@ class JobInfo(BaseModel):
     work_dir: Optional[str] = None
     current_phase: Optional[str] = None   # Track which phase the job is in for resume
     current_agent: Optional[str] = None   # Track which agent within the phase for resume
+    # Interactive mode settings (can be updated mid-run)
+    execution_mode: str = "full-auto"
+    approval_agents: List[str] = []
     # Interactive mode approval state
     awaiting_approval: bool = False
     pending_agent: Optional[str] = None
@@ -262,7 +265,9 @@ class JobManager:
                 created_at=datetime.now(),
                 updated_at=datetime.now(),
                 progress="Job created",
-                work_dir=work_dir
+                work_dir=work_dir,
+                execution_mode=request.execution_mode,
+                approval_agents=request.approval_agents,
             )
             self.requests[job_id] = request  # Store for resume
         # Persist job info to disk for recovery after restart
@@ -722,12 +727,19 @@ class CancellableAPICallback(APICallback):
             logger.warning(f"Agent update failed: {e}")
 
     def _needs_approval(self, agent_name: str) -> bool:
-        """Check if agent needs approval based on settings"""
-        if self.execution_mode != "interactive":
-            return False
-        for pattern in self.approval_agents:
-            if self._match_pattern(pattern, agent_name):
-                return True
+        """Check if agent needs approval based on CURRENT settings in JobInfo.
+
+        This reads from JobInfo dynamically, allowing mode changes mid-run.
+        """
+        try:
+            job = self.job_manager.jobs.get(self.job_id)
+            if not job or job.execution_mode != "interactive":
+                return False
+            for pattern in job.approval_agents:
+                if self._match_pattern(pattern, agent_name):
+                    return True
+        except Exception as e:
+            logger.warning(f"Failed to check approval settings: {e}")
         return False
 
     def _match_pattern(self, pattern: str, agent_name: str) -> bool:
@@ -1221,6 +1233,36 @@ async def respond_to_approval(
     return {"status": "ok", "action": response.action}
 
 
+class JobSettingsUpdate(BaseModel):
+    execution_mode: Optional[str] = None
+    approval_agents: Optional[List[str]] = None
+
+
+@app.put("/jobs/{job_id}/settings")
+async def update_job_settings(
+    job_id: str,
+    settings: JobSettingsUpdate,
+    job_mgr: JobManager = Depends(get_job_manager),
+):
+    """
+    Update job settings (mode, approval agents) for a running or paused job.
+    This allows switching between full-auto and interactive modes mid-run.
+    """
+    job = await job_mgr.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    async with job_mgr.lock:
+        if settings.execution_mode is not None:
+            job_mgr.jobs[job_id].execution_mode = settings.execution_mode
+            logger.info(f"Job {job_id} execution_mode updated to: {settings.execution_mode}")
+        if settings.approval_agents is not None:
+            job_mgr.jobs[job_id].approval_agents = settings.approval_agents
+            logger.info(f"Job {job_id} approval_agents updated to: {settings.approval_agents}")
+
+    return {"status": "ok", "job_id": job_id}
+
+
 @app.post("/jobs/{job_id}/resume")
 async def resume_job(
     job_id: str,
@@ -1253,6 +1295,11 @@ async def resume_job(
             status_code=400,
             detail=f"Original request not found for job {job_id}, cannot resume"
         )
+
+    # Sync mode settings from JobInfo to request (allows mode changes during pause)
+    request.execution_mode = job.execution_mode
+    request.approval_agents = job.approval_agents
+    logger.info(f"Resume with mode={job.execution_mode}, approval_agents={job.approval_agents}")
 
     # Check for checkpoints - agent-level or phase-level
     output_checkpoint_path = f"{job.work_dir}/outputs/output.json"

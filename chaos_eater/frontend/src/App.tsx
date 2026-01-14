@@ -634,6 +634,27 @@ export default function ChaosEaterApp() {
     return () => window.removeEventListener('keydown', handler);
   }, [approvalDialog, draftInstructions]);
 
+  // Sync mode settings to backend when changed mid-run
+  useEffect(() => {
+    if (!jobId || runState === 'idle' || runState === 'completed') return;
+
+    // Update job settings on the backend
+    fetch(`${API_BASE}/jobs/${jobId}/settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        execution_mode: formData.executionMode,
+        approval_agents: formData.approvalAgents,
+      }),
+    })
+      .then(res => {
+        if (res.ok) {
+          console.log(`[Settings] Updated job ${jobId} mode=${formData.executionMode}`);
+        }
+      })
+      .catch(err => console.error('Failed to update job settings:', err));
+  }, [formData.executionMode, formData.approvalAgents, jobId, runState]);
+
   // resume from paused state
   const handleResume = async () => {
     if (!jobId) {
