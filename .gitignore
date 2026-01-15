@@ -7,3 +7,10 @@ old/
 .python-version
 nohup.out
 .coverage
+
+# Evaluation results (generated, not tracked)
+evaluation/ase2025/results/*/checkpoints/
+evaluation/ase2025/results/*/logs/
+evaluation/synthetic/data/
+evaluation/synthetic/data_weak/
+evaluation/synthetic/results/
