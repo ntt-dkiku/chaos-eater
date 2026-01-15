@@ -1,0 +1,149 @@
+{
+    "output_dir": "",
+    "work_dir": "evaluation/synthetic/results/sample_1manifests_id0",
+    "run_time": {
+        "preprocess": 24.472464084625244,
+        "hypothesis": 59.82714486122131
+    },
+    "ce_cycle": {
+        "processed_data": {
+            "work_dir": "evaluation/synthetic/results/sample_1manifests_id0/inputs",
+            "input": {
+                "skaffold_yaml": {
+                    "path": "evaluation/synthetic/results/sample_1manifests_id0/inputs/SimpleNginxWebServer/skaffold.yaml",
+                    "content": "apiVersion: skaffold/v3\nkind: Config\nmetadata:\n  name: sample0\nmanifests:\n  rawYaml:\n    - nginx-deployment.yaml",
+                    "work_dir": "evaluation/synthetic/results/sample_1manifests_id0/inputs",
+                    "fname": "SimpleNginxWebServer/skaffold.yaml"
+                },
+                "files": [
+                    {
+                        "path": "evaluation/synthetic/results/sample_1manifests_id0/inputs/application_cache.json",
+                        "content": "{\n    \"title\": \"Simple Nginx Web Server\",\n    \"description\": \"This service deploys a simple Nginx web server on a Kubernetes cluster. The original deployment consists of a single pod running the Nginx container. To reduce redundancy and resilience, the Deployment resource is replaced with a Pod resource, which removes the ability to automatically manage replicas and self-heal in case of pod failure.\",\n    \"k8s_manifests\": [\n        {\n            \"id\": 0,\n            \"file_name\": \"nginx-deployment.yaml\",\n            \"content\": \"apiVersion: v1\\nkind: Pod\\nmetadata:\\n  name: nginx-pod\\n  labels:\\n    app: nginx\\nspec:\\n  containers:\\n  - name: nginx\\n    image: nginx:latest\\n    ports:\\n    - containerPort: 80\\n\"\n        }\n    ]\n}",
+                        "work_dir": "evaluation/synthetic/results/sample_1manifests_id0/inputs",
+                        "fname": "application_cache.json"
+                    },
+                    {
+                        "path": "evaluation/synthetic/results/sample_1manifests_id0/inputs/README.md",
+                        "content": "# Simple Nginx Web Server  \nThis service deploys a simple Nginx web server on a Kubernetes cluster. The original deployment consists of a single pod running the Nginx container. To reduce redundancy and resilience, the Deployment resource is replaced with a Pod resource, which removes the ability to automatically manage replicas and self-heal in case of pod failure.",
+                        "work_dir": "evaluation/synthetic/results/sample_1manifests_id0/inputs",
+                        "fname": "README.md"
+                    },
+                    {
+                        "path": "evaluation/synthetic/results/sample_1manifests_id0/inputs/SimpleNginxWebServer/nginx-deployment.yaml",
+                        "content": "apiVersion: v1\nkind: Pod\nmetadata:\n  name: nginx-pod\n  labels:\n    app: nginx\nspec:\n  containers:\n  - name: nginx\n    image: nginx:latest\n    ports:\n    - containerPort: 80\n",
+                        "work_dir": "evaluation/synthetic/results/sample_1manifests_id0/inputs",
+                        "fname": "SimpleNginxWebServer/nginx-deployment.yaml"
+                    }
+                ],
+                "ce_instructions": "The Chaos-Engineering experiment must be completed within 1 minute(s)."
+            },
+            "k8s_yamls": [
+                {
+                    "path": "evaluation/synthetic/results/sample_1manifests_id0/inputs/SimpleNginxWebServer/nginx-deployment.yaml",
+                    "content": "apiVersion: v1\nkind: Pod\nmetadata:\n  name: nginx-pod\n  labels:\n    app: nginx\nspec:\n  containers:\n  - name: nginx\n    image: nginx:latest\n    ports:\n    - containerPort: 80\n",
+                    "work_dir": "evaluation/synthetic/results/sample_1manifests_id0/inputs",
+                    "fname": "SimpleNginxWebServer/nginx-deployment.yaml"
+                }
+            ],
+            "k8s_summaries": [
+                "- This manifest defines a Kubernetes Pod.\n- The Pod is named 'nginx-pod'.\n- It includes metadata with a label 'app: nginx' to categorize the Pod.\n- The Pod specification includes a single container.\n- The container is named 'nginx' and uses the 'nginx:latest' image.\n- The container exposes port 80, which is typically used for HTTP traffic."
+            ],
+            "k8s_weakness_summary": "Issue #0: Single Pod Deployment\n\n- details: The deployment consists of a single Pod, which means there is no redundancy. If the Pod fails, the application will experience downtime until the Pod is restarted.\n- manifests having the issues: ['SimpleNginxWebServer/nginx-deployment.yaml']\n- problematic config: The manifest defines only one Pod without any replication or redundancy.\n\n",
+            "k8s_app": {
+                "thought": "The manifest file is named 'nginx-deployment.yaml' and it defines a Pod running an Nginx container. Nginx is a popular web server used to serve static content, reverse proxy, load balance, and more. The container exposes port 80, which is the default port for HTTP traffic, indicating that this setup is likely intended to serve web content. The use of the latest Nginx image further supports the assumption that this is a simple web server setup.",
+                "k8s_application": "This Kubernetes application offers a basic web server service using Nginx to serve static web content or act as a reverse proxy for HTTP traffic."
+            },
+            "ce_instructions": "- The Chaos-Engineering experiment must be completed within 1 minute(s)."
+        },
+        "hypothesis": {
+            "steady_states": {
+                "elems": [
+                    {
+                        "id": 0,
+                        "name": "nginxPodAvailability",
+                        "description": "The system consists of a single Pod defined in the manifest 'SimpleNginxWebServer/nginx-deployment.yaml'. The most immediate issue is the lack of redundancy, as there is only one Pod. If this Pod fails, the application will experience downtime. Therefore, the easiest issue to encounter is the Pod being unavailable. A measurable output for this would be the availability of the Pod itself. We can define a steady state to ensure that the Pod is running and available. This can be measured by checking the number of running Pods, which should be exactly one, as defined in the manifest.",
+                        "inspection": {
+                            "tool_type": "k8s",
+                            "duration": "5s",
+                            "script": {
+                                "path": "evaluation/synthetic/results/sample_1manifests_id0/hypothesis/k8s_nginxPodAvailability.py",
+                                "content": "import os\nimport time\nfrom kubernetes import client, config\n\n# Load Kubernetes configuration based on the environment\nif os.getenv('KUBERNETES_SERVICE_HOST'):\n    config.load_incluster_config()\nelse:\n    config.load_kube_config()\n\ndef check_pod_availability(duration):\n    v1 = client.CoreV1Api()\n    namespace = 'default'\n    pod_name = 'nginx-pod'\n    running_count = 0\n    for _ in range(duration):\n        try:\n            pod = v1.read_namespaced_pod(name=pod_name, namespace=namespace)\n            if pod.status.phase == 'Running':\n                running_count += 1\n            print(f\"Pod {pod_name} status: {pod.status.phase}\")\n        except client.exceptions.ApiException as e:\n            print(f\"Exception when calling CoreV1Api->read_namespaced_pod: {e}\")\n        time.sleep(1)\n    print(f\"Pod was running {running_count} out of {duration} seconds.\")\n\nif __name__ == '__main__':\n    import argparse\n    parser = argparse.ArgumentParser(description='Check nginx Pod availability.')\n    parser.add_argument('--duration', type=int, default=5, help='Duration to check the Pod status in seconds.')\n    args = parser.parse_args()\n    check_pod_availability(args.duration)\n",
+                                "work_dir": "evaluation/synthetic/results/sample_1manifests_id0/hypothesis",
+                                "fname": "k8s_nginxPodAvailability.py"
+                            },
+                            "result": "Pod nginx-pod status: Running\nPod nginx-pod status: Running\nPod nginx-pod status: Running\nPod nginx-pod status: Running\nPod nginx-pod status: Running\nPod was running 5 out of 5 seconds.\n"
+                        },
+                        "threshold": {
+                            "threshold": "The nginxPodAvailability should be at least 95% during any 1-minute monitoring period.",
+                            "reason": "The system consists of a single Pod running an Nginx container. The current steady state is defined by the availability of this Pod, which is critical since there is no redundancy. The current state shows that the Pod was running for the entire duration of the check (5 out of 5 seconds). Given the lack of redundancy, the threshold should ensure that the Pod remains available for the majority of the time to avoid downtime. Since the current state shows 100% availability, we can set a threshold that allows for some minor fluctuations but still ensures high availability. A reasonable threshold would be to require the Pod to be running at least 95% of the time during a monitoring period, which accounts for brief disruptions or restarts while maintaining high availability."
+                        },
+                        "unittest": {
+                            "path": "evaluation/synthetic/results/sample_1manifests_id0/hypothesis/unittest_nginxPodAvailability_mod0.py",
+                            "content": "import os\nimport time\nimport argparse\nfrom kubernetes import client, config\nfrom unittest_base import K8sAPIBase\n\nclass TestNginxPodAvailability(K8sAPIBase):\n    def __init__(self):\n        super().__init__()\n\n    def check_pod_availability(self, duration):\n        namespace = 'default'\n        pod_name = 'nginx-pod'\n        running_count = 0\n        for _ in range(duration):\n            try:\n                pod = self.v1.read_namespaced_pod(name=pod_name, namespace=namespace)\n                if pod.status.phase == 'Running':\n                    running_count += 1\n                print(f\"Pod {pod_name} status: {pod.status.phase}\")\n            except client.exceptions.ApiException as e:\n                print(f\"Exception when calling CoreV1Api->read_namespaced_pod: {e}\")\n            time.sleep(1)\n        running_percentage = (running_count / duration) * 100\n        print(f\"Pod was running {running_count} out of {duration} seconds, which is {running_percentage:.2f}%.\")\n        # Assert that the running percentage is at least 95%\n        assert running_percentage >= 95, f\"Pod availability is below threshold: {running_percentage:.2f}% < 95%\"\n\n\ndef main():\n    parser = argparse.ArgumentParser(description='Test nginx Pod availability.')\n    parser.add_argument('--duration', type=int, default=60, help='Duration to check the Pod status in seconds.')\n    args = parser.parse_args()\n    test = TestNginxPodAvailability()\n    test.check_pod_availability(args.duration)\n\nif __name__ == '__main__':\n    main()",
+                            "work_dir": "evaluation/synthetic/results/sample_1manifests_id0/hypothesis",
+                            "fname": "unittest_nginxPodAvailability_mod0.py"
+                        }
+                    }
+                ]
+            },
+            "fault": {
+                "event": "Cyber Attack",
+                "faults": [
+                    [
+                        {
+                            "name": "PodChaos",
+                            "name_id": 0,
+                            "params": {
+                                "action": "pod-kill",
+                                "mode": "one",
+                                "selector": {
+                                    "namespaces": [
+                                        "default"
+                                    ],
+                                    "labelSelectors": {
+                                        "app": "nginx"
+                                    }
+                                },
+                                "value": "1"
+                            }
+                        }
+                    ],
+                    [
+                        {
+                            "name": "NetworkChaos",
+                            "name_id": 0,
+                            "params": {
+                                "action": "delay",
+                                "direction": "to",
+                                "mode": "one",
+                                "value": "1",
+                                "selector": {
+                                    "namespaces": [
+                                        "default"
+                                    ],
+                                    "labelSelectors": {
+                                        "app": "nginx"
+                                    }
+                                },
+                                "device": "eth0",
+                                "delay": {
+                                    "latency": "100ms",
+                                    "jitter": "10ms",
+                                    "correlation": "50"
+                                }
+                            }
+                        }
+                    ]
+                ],
+                "description": "Given the system's single Pod deployment, a cyber attack targeting the availability of the web server could be highly impactful. The lack of redundancy means that any disruption to the Pod will directly affect the system's availability. To simulate a cyber attack, we can inject faults that mimic potential attack vectors. First, we can use PodChaos to simulate a direct attack on the Pod by killing it, which will test the system's ability to recover and maintain the steady state of nginxPodAvailability. Next, we can simulate a network attack using NetworkChaos to introduce latency, which will test the system's ability to handle network disruptions. These fault injections will reveal the system's vulnerabilities in terms of recovery and handling network issues, especially given the lack of redundancy."
+            }
+        },
+        "experiment": null,
+        "result_history": [],
+        "analysis_history": [],
+        "reconfig_history": [],
+        "conducts_reconfig": false,
+        "completes_reconfig": false,
+        "summary": ""
+    }
+}

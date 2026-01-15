@@ -518,6 +518,11 @@ export default function ChaosEaterApp() {
   // run ce cycle
   //------------------------------------------------------------
   const [runState, setRunState] = useState('idle');
+  // Track paused agent info for "resume with feedback" feature
+  const [pausedAgentInfo, setPausedAgentInfo] = useState<{
+    agentName: string;       // Agent that was running (or will run next for cancel)
+    hasPartialOutput: boolean;  // true = mid-stream stop (retry same agent), false = approval cancel (next agent)
+  } | null>(null);
 
   const handleStop = async () => {
     setRunState('paused');
@@ -545,6 +550,19 @@ export default function ChaosEaterApp() {
         type: 'success',
         message: `Job paused at phase: ${data.current_phase || 'unknown'}`
       });
+      // Fetch job info to get current_agent, has_partial_output, and next_agent
+      const jobInfo = await getJob(API_BASE, jobId);
+      // Always set pausedAgentInfo so Enter triggers resume, not new job
+      // - has_partial_output=true (mid-stream stop): show current_agent (will retry)
+      // - has_partial_output=false (cancel at approval): show next_agent (will continue)
+      const hasPartial = jobInfo.has_partial_output || false;
+      const displayAgent = hasPartial
+        ? (jobInfo.current_agent || `${data.current_phase || 'unknown'} phase`)
+        : (jobInfo.next_agent || jobInfo.current_agent || `${data.current_phase || 'unknown'} phase`);
+      setPausedAgentInfo({
+        agentName: displayAgent,
+        hasPartialOutput: hasPartial,
+      });
     } catch (error) {
       console.error('Pause failed:', error);
       const msg = error.message || '';
@@ -567,6 +585,9 @@ export default function ChaosEaterApp() {
   // Send approval response to backend
   const sendApprovalResponse = async (action: 'approve' | 'retry' | 'cancel', message?: string) => {
     if (!jobId) return;
+
+    // Save agent name before clearing dialog (for cancel case fallback)
+    const currentAgentName = approvalDialog?.agentName;
     setApprovalDialog(null);
 
     // Cancel acts like pause - set paused state immediately
@@ -598,8 +619,30 @@ export default function ChaosEaterApp() {
         return;
       }
       console.log(`[Approval] ${action} response sent successfully`);
+
+      // For cancel, fetch job info to get next_agent (checkpoint is saved after approval response)
       if (action === 'cancel') {
         setNotification({ type: 'success', message: 'Job paused' });
+        // Small delay to ensure checkpoint is saved by AgentRunner
+        await new Promise(resolve => setTimeout(resolve, 150));
+        try {
+          const jobInfo = await getJob(API_BASE, jobId);
+          // Cancel at approval = agent completed, show next_agent
+          const displayAgent = jobInfo.next_agent || currentAgentName || 'unknown';
+          setPausedAgentInfo({
+            agentName: displayAgent,
+            hasPartialOutput: false,
+          });
+        } catch (e) {
+          console.error('Failed to fetch job info after cancel:', e);
+          // Fallback to current agent
+          if (currentAgentName) {
+            setPausedAgentInfo({
+              agentName: currentAgentName,
+              hasPartialOutput: false,
+            });
+          }
+        }
       }
     } catch (error) {
       console.error('Failed to send approval response:', error);
@@ -655,8 +698,8 @@ export default function ChaosEaterApp() {
       .catch(err => console.error('Failed to update job settings:', err));
   }, [formData.executionMode, formData.approvalAgents, jobId, runState]);
 
-  // resume from paused state
-  const handleResume = async () => {
+  // Resume from paused state (optionally with feedback)
+  const handleResumeWithFeedback = async (feedback?: string) => {
     if (!jobId) {
       setNotification({ type: 'info', message: 'No job to resume' });
       return;
@@ -664,15 +707,20 @@ export default function ChaosEaterApp() {
 
     setIsLoading(true);
     setRunState('running');
+    setPausedAgentInfo(null);  // Clear paused agent info
 
     try {
-      const data = await resumeJob(API_BASE, jobId, formData.apiKey || undefined);
+      const data = await resumeJob(API_BASE, jobId, {
+        apiKey: formData.apiKey || undefined,
+        feedback: feedback || undefined,
+      });
       const resumePoint = data.resume_from_agent
         ? `${data.resume_from}/${data.resume_from_agent}`
         : (data.resume_from || 'beginning');
+      const feedbackNote = data.has_feedback ? ' (with feedback)' : '';
       setNotification({
         type: 'success',
-        message: `Resuming from: ${resumePoint}`
+        message: `Resuming from: ${resumePoint}${feedbackNote}`
       });
 
       // Keep existing messages (completed agents' output)
@@ -710,6 +758,9 @@ export default function ChaosEaterApp() {
     }
   };
 
+  // Convenience wrapper for resume without feedback
+  const handleResume = () => handleResumeWithFeedback();
+
   // Refresh session: start a new cycle
   const handleNewCycle = async () => {
     // Stop running job if exists
@@ -733,6 +784,7 @@ export default function ChaosEaterApp() {
     setDraftInstructions('');
     setBackendProjectPath(null);
     setCurrentSnapshotId(null);  // Detach from current snapshot
+    setPausedAgentInfo(null);  // Clear paused agent info
     partialStateRef.current = null;
     messageQueueRef.current = [];
     currentAgentRef.current = null;
@@ -2248,10 +2300,14 @@ export default function ChaosEaterApp() {
                     ? 'Running...'
                     : approvalDialog
                       ? `Feedback for ${approvalDialog.agentName} (optional)...`
-                      : 'Input instructions for your Chaos Engineering...'}
+                      : runState === 'paused' && pausedAgentInfo
+                        ? pausedAgentInfo.hasPartialOutput
+                          ? `Retry feedback for ${pausedAgentInfo.agentName} (optional, Enter to resume)...`
+                          : `Instructions for ${pausedAgentInfo.agentName} (optional, Enter to continue)...`
+                        : 'Input instructions for your Chaos Engineering...'}
                 </div>
               )}
-              
+
               <textarea
                 value={draftInstructions}
                 onChange={(e) => setDraftInstructions(e.target.value)}
@@ -2260,6 +2316,9 @@ export default function ChaosEaterApp() {
                     e.preventDefault();
                     if (approvalDialog) {
                       sendApprovalResponse('approve', draftInstructions || undefined);
+                      setDraftInstructions('');
+                    } else if (runState === 'paused' && pausedAgentInfo) {
+                      handleResumeWithFeedback(draftInstructions || undefined);
                       setDraftInstructions('');
                     } else {
                       handleSubmit();
@@ -2270,12 +2329,15 @@ export default function ChaosEaterApp() {
                     if (approvalDialog) {
                       sendApprovalResponse('approve', draftInstructions || undefined);
                       setDraftInstructions('');
+                    } else if (runState === 'paused' && pausedAgentInfo) {
+                      handleResumeWithFeedback(draftInstructions || undefined);
+                      setDraftInstructions('');
                     } else {
                       handleSubmit();
                     }
                   }
                 }}
-                disabled={runState === 'running' && !approvalDialog}
+                disabled={runState === 'running' && !approvalDialog && !pausedAgentInfo}
                 rows={1}
                 style={composerStyles.textarea}
                 onFocus={(e) => e.target.parentElement.parentElement.style.borderColor = colors.accent}
@@ -2420,6 +2482,40 @@ export default function ChaosEaterApp() {
                     title="Stop"
                   >
                     <Pause size={18} strokeWidth={2} />
+                  </button>
+                ) : runState === 'paused' && pausedAgentInfo ? (
+                  <button
+                    onClick={() => {
+                      handleResumeWithFeedback(draftInstructions || undefined);
+                      setDraftInstructions('');
+                    }}
+                    disabled={isLoading}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      padding: '6px 12px',
+                      backgroundColor: 'transparent',
+                      color: '#84cc16',
+                      border: '1px solid #84cc16',
+                      borderRadius: 6,
+                      fontSize: 13,
+                      fontWeight: 500,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = '#84cc16';
+                      e.currentTarget.style.color = '#000';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                      e.currentTarget.style.color = '#84cc16';
+                    }}
+                    title={draftInstructions.trim() ? "Resume with feedback (Enter)" : "Resume (Enter)"}
+                  >
+                    {isLoading ? <Loader size={16} className="animate-spin" /> : <Send size={16} />}
+                    {draftInstructions.trim() ? 'Resume w/ Feedback' : 'Resume'}
                   </button>
                 ) : (
                   <button

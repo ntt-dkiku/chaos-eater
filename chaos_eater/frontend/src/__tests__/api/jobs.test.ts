@@ -134,9 +134,21 @@ describe('jobs API', () => {
         json: () => Promise.resolve({}),
       });
 
-      await resumeJob('http://localhost:8000', 'job-123', 'sk-123');
+      await resumeJob('http://localhost:8000', 'job-123', { apiKey: 'sk-123' });
 
       expect(mockFetch.mock.calls[0][1].headers).toHaveProperty('x-api-key', 'sk-123');
+    });
+
+    it('should include feedback when provided', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ has_feedback: true }),
+      });
+
+      const result = await resumeJob('http://localhost:8000', 'job-123', { feedback: 'Please improve the output' });
+
+      expect(result.has_feedback).toBe(true);
+      expect(mockFetch.mock.calls[0][1].body).toContain('Please improve the output');
     });
 
     it('should throw error on failure', async () => {

@@ -75,6 +75,7 @@ class Hypothesizer:
         resume_from_agent: Optional[str] = None,
         on_agent_start: Optional[Callable[[str], None]] = None,
         on_agent_end: Optional[Callable[[str, Any], None]] = None,
+        initial_retry_context: Optional[dict] = None,
     ) -> Hypothesis:
         #----------------
         # initialization
@@ -136,7 +137,10 @@ class Hypothesizer:
         ))
 
         # Run all agents (with resume support)
-        results = runner.run(resume_from_agent=runner_resume_agent)
+        results = runner.run(
+            resume_from_agent=runner_resume_agent,
+            initial_retry_context=initial_retry_context,
+        )
 
         #-------------------
         # make a hypothesis

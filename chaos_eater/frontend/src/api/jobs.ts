@@ -33,6 +33,8 @@ export interface JobStatusResponse {
   status: string;
   current_phase?: string;
   current_agent?: string;
+  has_partial_output?: boolean;  // true if stopped mid-stream (use retry_context)
+  next_agent?: string;           // next agent to run (set when cancel at approval)
 }
 
 /**
@@ -104,8 +106,10 @@ export async function pauseJob(
 export async function resumeJob(
   apiBase: string,
   jobId: string,
-  apiKey?: string
-): Promise<{ resume_from?: string; resume_from_agent?: string }> {
+  options: { apiKey?: string; feedback?: string } = {}
+): Promise<{ resume_from?: string; resume_from_agent?: string; has_feedback?: boolean }> {
+  const { apiKey, feedback } = options;
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
@@ -114,6 +118,7 @@ export async function resumeJob(
   const res = await fetch(`${apiBase}/jobs/${encodeURIComponent(jobId)}/resume`, {
     method: 'POST',
     headers,
+    body: JSON.stringify({ feedback }),
   });
 
   if (!res.ok) {
