@@ -1435,9 +1435,15 @@ async def resume_job(
             }
             logger.info(f"Resume with retry_context (partial output + feedback)")
         else:
-            # Stopped at approval or between agents: add feedback to ce_instructions
-            initial_feedback_instructions = resume_request.feedback
-            logger.info(f"Resume with feedback added to ce_instructions (no partial output)")
+            # Cancel at approval: use retry_context with null output + feedback
+            # This adds feedback to next agent's message sequence: system → user → feedback
+            initial_retry_context = {
+                "history": [{
+                    "output": None,  # No output for cancel at approval
+                    "feedback": resume_request.feedback
+                }]
+            }
+            logger.info(f"Resume with retry_context (null output + feedback for next agent)")
 
         # Clear partial output after use
         job_mgr.clear_partial_output(job_id)

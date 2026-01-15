@@ -61,7 +61,8 @@ class CheckpointManager:
         self,
         completed_agents: List[str],
         next_agent: Optional[str],
-        data: Dict[str, Any]
+        data: Dict[str, Any],
+        pending_feedback: Optional[str] = None,
     ) -> None:
         """Save checkpoint after agent completion. Merges with existing data."""
         # Load existing checkpoint or create new structure
@@ -71,11 +72,15 @@ class CheckpointManager:
         }
 
         # Update phase-specific data
-        full_checkpoint["phases"][self.phase] = {
+        phase_data = {
             "completed_agents": completed_agents,
             "next_agent": next_agent,
             "data": self._serialize_data(data),
         }
+        # Only include pending_feedback if provided (cancel with message)
+        if pending_feedback:
+            phase_data["pending_feedback"] = pending_feedback
+        full_checkpoint["phases"][self.phase] = phase_data
 
         # Update global state
         last_agent = completed_agents[-1] if completed_agents else None
@@ -103,6 +108,29 @@ class CheckpointManager:
             logger.debug(f"Loaded checkpoint for phase {self.phase}: {phase_data.get('completed_agents', [])}")
             return phase_data
         return None
+
+    def get_pending_feedback(self) -> Optional[str]:
+        """Get pending feedback from cancel action (for next agent's retry_context)."""
+        phase_data = self.load()
+        if phase_data:
+            return phase_data.get("pending_feedback")
+        return None
+
+    def clear_pending_feedback(self) -> None:
+        """Clear pending feedback after it has been consumed."""
+        full_checkpoint = self._load_full_checkpoint()
+        if not full_checkpoint:
+            return
+
+        phase_data = full_checkpoint.get("phases", {}).get(self.phase)
+        if phase_data and "pending_feedback" in phase_data:
+            del phase_data["pending_feedback"]
+            try:
+                with open(self.checkpoint_path, 'w') as f:
+                    json.dump(full_checkpoint, f, indent=2, default=str)
+                logger.debug(f"Cleared pending_feedback for phase {self.phase}")
+            except Exception as e:
+                logger.warning(f"Failed to clear pending_feedback: {e}")
 
     def _load_full_checkpoint(self) -> Optional[Dict[str, Any]]:
         """Load the full checkpoint file."""
@@ -318,6 +346,7 @@ class AgentRunner:
                 if action == 'cancel':
                     # Cancel means agent completed but user wants to pause
                     # Save checkpoint first so resume picks up from NEXT agent
+                    # Note: cancel message is discarded; user can provide new feedback on resume
                     logger.info(f"Cancel requested after {step.name} completed, saving checkpoint")
                     self._completed_agents.append(step.name)
                     self._retry_history[step.name] = []
