@@ -1,2 +1,0 @@
-# Simple Nginx Web Server  
-This service deploys a simple Nginx web server on a Kubernetes cluster. The deployment consists of a single pod running the Nginx container. This is a basic example to demonstrate how to deploy a web server using Kubernetes.

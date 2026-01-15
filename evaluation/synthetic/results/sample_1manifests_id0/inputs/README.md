@@ -1,2 +1,0 @@
-# Simple Nginx Web Server  
-This service deploys a simple Nginx web server on a Kubernetes cluster. The original deployment consists of a single pod running the Nginx container. To reduce redundancy and resilience, the Deployment resource is replaced with a Pod resource, which removes the ability to automatically manage replicas and self-heal in case of pod failure.

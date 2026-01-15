@@ -1,7 +1,0 @@
-apiVersion: skaffold/v3
-kind: Config
-metadata:
-  name: sample0
-manifests:
-  rawYaml:
-    - nginx-deployment.yaml
