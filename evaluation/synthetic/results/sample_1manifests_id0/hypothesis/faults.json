@@ -1,0 +1,51 @@
+{
+    "event": "Cyber Attack",
+    "faults": [
+        [
+            {
+                "name": "PodChaos",
+                "name_id": 0,
+                "params": {
+                    "action": "pod-kill",
+                    "mode": "one",
+                    "selector": {
+                        "namespaces": [
+                            "default"
+                        ],
+                        "labelSelectors": {
+                            "app": "nginx"
+                        }
+                    },
+                    "value": "1"
+                }
+            }
+        ],
+        [
+            {
+                "name": "NetworkChaos",
+                "name_id": 0,
+                "params": {
+                    "action": "delay",
+                    "direction": "to",
+                    "mode": "one",
+                    "value": "1",
+                    "selector": {
+                        "namespaces": [
+                            "default"
+                        ],
+                        "labelSelectors": {
+                            "app": "nginx"
+                        }
+                    },
+                    "device": "eth0",
+                    "delay": {
+                        "latency": "100ms",
+                        "jitter": "10ms",
+                        "correlation": "50"
+                    }
+                }
+            }
+        ]
+    ],
+    "description": "Given the system's single Pod deployment, a cyber attack targeting the availability of the web server could be highly impactful. The lack of redundancy means that any disruption to the Pod will directly affect the system's availability. To simulate a cyber attack, we can inject faults that mimic potential attack vectors. First, we can use PodChaos to simulate a direct attack on the Pod by killing it, which will test the system's ability to recover and maintain the steady state of nginxPodAvailability. Next, we can simulate a network attack using NetworkChaos to introduce latency, which will test the system's ability to handle network disruptions. These fault injections will reveal the system's vulnerabilities in terms of recovery and handling network issues, especially given the lack of redundancy."
+}

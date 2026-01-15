@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: k8snginxpodavailability-pod
+spec:
+  containers:
+  - name: k8snginxpodavailability-pod-container
+    image: chaos-eater/k8sapi:1.0
+    imagePullPolicy: IfNotPresent
+    command: ["/bin/bash", "-c"]
+    args: ["python /chaos-eater/evaluation/synthetic/results/sample_1manifests_id0/hypothesis/k8s_nginxPodAvailability.py --duration 5"]
+    volumeMounts:
+      - name: pvc-volume
+        mountPath: /chaos-eater
+  restartPolicy: Never
+  volumes:
+    - name: pvc-volume
+      persistentVolumeClaim:
+        claimName: pvc

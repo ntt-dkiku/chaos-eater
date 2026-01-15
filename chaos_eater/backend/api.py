@@ -100,6 +100,10 @@ class JobInfo(BaseModel):
     # Interactive mode approval state
     awaiting_approval: bool = False
     pending_agent: Optional[str] = None
+    # Resume with feedback support
+    partial_output: Optional[str] = None  # Buffered output when stopped mid-stream
+    has_partial_output: bool = False      # True if stopped mid-stream (use retry_context)
+    next_agent: Optional[str] = None      # Next agent to run (set on cancel, read from checkpoint)
 
 
 class JobResponse(BaseModel):
@@ -551,12 +555,24 @@ class JobManager:
 
     async def pause_job(self, job_id: str) -> bool:
         """Pause a running job for later resume"""
+        # Capture partial output BEFORE setting paused status or cancelling
+        callback = self.callbacks.get(job_id)
+        partial_output = None
+        if callback:
+            partial_output = callback.get_partial_output()
+
         # Set PAUSED status FIRST before cancelling task
         # This ensures CancelledError handler sees PAUSED status
         await self.set_paused_status(job_id)
 
+        # Save partial output if exists (full-auto mid-stream stop)
+        if partial_output:
+            async with self.lock:
+                self.jobs[job_id].partial_output = partial_output
+                self.jobs[job_id].has_partial_output = True
+                logger.info(f"Saved partial output for job {job_id} ({len(partial_output)} chars)")
+
         # Then cancel the task
-        callback = self.callbacks.get(job_id)
         if callback:
             callback.cancelled = True
 
@@ -584,6 +600,33 @@ class JobManager:
                     self.jobs[job_id].progress = f"Paused at {phase}/{agent}"
                 else:
                     self.jobs[job_id].progress = f"Paused at {phase}"
+
+    def get_resume_feedback_info(self, job_id: str) -> dict:
+        """Get info needed for resume with feedback.
+
+        Returns:
+            dict with:
+            - has_partial_output: True if stopped mid-stream (use retry_context)
+            - partial_output: The buffered output (if any)
+
+        When has_partial_output=True: use retry_context with partial_output + feedback
+        When has_partial_output=False: add feedback to ce_instructions
+        """
+        job = self.jobs.get(job_id)
+        if not job:
+            return {"has_partial_output": False, "partial_output": None}
+
+        return {
+            "has_partial_output": job.has_partial_output,
+            "partial_output": job.partial_output if job.has_partial_output else None
+        }
+
+    def clear_partial_output(self, job_id: str) -> None:
+        """Clear partial output after resume (so it's not reused)."""
+        job = self.jobs.get(job_id)
+        if job:
+            job.partial_output = None
+            job.has_partial_output = False
 
     async def cleanup_old_jobs(self, hours: int = 24):
         cutoff = datetime.now() - timedelta(hours=hours)
@@ -707,11 +750,16 @@ class CancellableAPICallback(APICallback):
         loop: asyncio.AbstractEventLoop,
         execution_mode: str = "full-auto",
         approval_agents: List[str] = None,
+        initial_retry_context: Optional[dict] = None,
     ):
         super().__init__(job_manager, job_id, loop)
         self.cancelled = False
         self.execution_mode = execution_mode
         self.approval_agents = approval_agents or []
+        self.initial_retry_context = initial_retry_context
+        # Streaming output buffer for partial output capture
+        self._current_agent_output_buffer: str = ""
+        self._current_agent_name: Optional[str] = None
 
     def _update_phase(self, phase: str):
         """Update current phase in job info for resume support"""
@@ -757,6 +805,10 @@ class CancellableAPICallback(APICallback):
 
     def on_agent_start(self, agent_name: str) -> None:
         """Called when an agent starts execution (notification only)"""
+        # Reset streaming buffer for new agent
+        self._current_agent_name = agent_name
+        self._current_agent_output_buffer = ""
+
         self._update_agent(agent_name)
         self._push(f"Agent started: {agent_name}")
         # Send as event for frontend agent boundary tracking
@@ -795,9 +847,11 @@ class CancellableAPICallback(APICallback):
             if action == 'retry':
                 self._push(f"Agent {agent_name} will retry")
                 logger.info(f"[Approval] Returning 'retry' for agent {agent_name}")
+                # Don't clear buffer on retry - agent will re-execute
                 return {"action": "retry", "message": message}
             elif action == 'cancel':
                 # Treat cancel as pause - set PAUSED status first
+                # Don't raise CancelledError here - let AgentRunner save checkpoint first
                 self._push(f"Pausing at {agent_name}...")
                 pause_fut = asyncio.run_coroutine_threadsafe(
                     self.job_manager.set_paused_status(self.job_id),
@@ -808,18 +862,34 @@ class CancellableAPICallback(APICallback):
                 except Exception as e:
                     logger.warning(f"Failed to set paused status: {e}")
                 self.cancelled = True
-                raise asyncio.CancelledError(f"Paused at {agent_name}")
+                # Return cancel action - AgentRunner will save checkpoint then raise CancelledError
+                return {"action": "cancel", "message": message}
             # action == 'approve'
             self._push(f"Agent {agent_name} approved, continuing...")
+            # Clear buffer on successful completion
+            self._current_agent_output_buffer = ""
             return {"action": "approve", "message": message}
 
+        # No approval needed - clear buffer on successful completion
+        self._current_agent_output_buffer = ""
         return {"action": "approve", "message": None}
 
     def on_stream(self, channel: str, event: dict) -> None:
-        """Check cancellation on every stream event"""
+        """Check cancellation on every stream event and buffer output"""
         if self.cancelled:
             raise asyncio.CancelledError(f"Job {self.job_id} cancelled")
+        # Buffer assistant streaming content for partial output capture
+        # FrontendMessageLogger sends: channel="log", type="partial", role="assistant", partial=<chunk>
+        if channel == "log" and event.get("type") == "partial" and event.get("role") == "assistant":
+            if "partial" in event:
+                self._current_agent_output_buffer += event["partial"]
         super().on_stream(channel, event)
+
+    def get_partial_output(self) -> Optional[str]:
+        """Get buffered partial output for resume with feedback"""
+        if self._current_agent_output_buffer:
+            return self._current_agent_output_buffer
+        return None
 
     # Override phase start callbacks to track current phase
     def on_preprocess_start(self):
@@ -863,7 +933,9 @@ async def run_chaos_eater_cycle(
     ce_tool,
     resume_from: Optional[str] = None,
     resume_from_agent: Optional[str] = None,
-    checkpoint_path: Optional[str] = None
+    checkpoint_path: Optional[str] = None,
+    initial_retry_context: Optional[dict] = None,
+    initial_feedback_instructions: Optional[str] = None,
 ):
     try:
         async with job_manager.lock:
@@ -890,6 +962,7 @@ async def run_chaos_eater_cycle(
             job_manager, job_id, loop,
             execution_mode=request.execution_mode,
             approval_agents=request.approval_agents,
+            initial_retry_context=initial_retry_context,
         )
 
         # Store callback reference in JobManager
@@ -908,6 +981,12 @@ async def run_chaos_eater_cycle(
                 override_instructions=request.ce_instructions
             )
             ce_input = ChaosEaterInput(**built)
+
+        # Add feedback to ce_instructions if provided (cancel case)
+        if initial_feedback_instructions:
+            original_instructions = ce_input.ce_instructions or ""
+            ce_input.ce_instructions = f"{original_instructions}\n- User feedback: {initial_feedback_instructions}"
+            logger.info(f"Added feedback to ce_instructions for job {job_id}")
 
         # Load checkpoint if available (file existence determines if we can restore state)
         checkpoint = None
@@ -945,7 +1024,8 @@ async def run_chaos_eater_cycle(
             callbacks=[callback],
             resume_from=resume_from,
             resume_from_agent=resume_from_agent,
-            checkpoint=checkpoint
+            checkpoint=checkpoint,
+            initial_retry_context=initial_retry_context,
         )
         result: ChaosEaterOutput = await runner_loop.run_in_executor(None, run_fn)
 
@@ -1147,6 +1227,23 @@ async def get_job(job_id: str, job_mgr: JobManager = Depends(get_job_manager)):
     job = await job_mgr.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    # When paused without partial output (cancel at approval), read next_agent from checkpoint
+    # This tells frontend which agent will run next (for placeholder text)
+    if job.status == JobStatus.PAUSED and not job.has_partial_output and job.work_dir:
+        checkpoint_path = f"{job.work_dir}/checkpoints/agent_checkpoint.json"
+        if os.path.exists(checkpoint_path):
+            try:
+                import json
+                with open(checkpoint_path, 'r') as f:
+                    checkpoint_data = json.load(f)
+                phase_data = checkpoint_data.get("phases", {}).get(job.current_phase, {})
+                next_agent = phase_data.get("next_agent")
+                if next_agent:
+                    job.next_agent = next_agent
+            except Exception as e:
+                logger.warning(f"Failed to read next_agent from checkpoint: {e}")
+
     return job
 
 
@@ -1221,6 +1318,10 @@ class ApprovalResponse(BaseModel):
     message: Optional[str] = None  # For future use
 
 
+class ResumeRequest(BaseModel):
+    feedback: Optional[str] = None  # User feedback for resume
+
+
 @app.post("/jobs/{job_id}/approval")
 async def respond_to_approval(
     job_id: str,
@@ -1277,11 +1378,16 @@ async def update_job_settings(
 @app.post("/jobs/{job_id}/resume")
 async def resume_job(
     job_id: str,
+    resume_request: ResumeRequest = ResumeRequest(),
     job_mgr: JobManager = Depends(get_job_manager),
     ce_tool_inst=Depends(get_ce_tool),
 ):
     """
     Resume a paused job from its last checkpoint.
+
+    If feedback is provided:
+    - If stopped mid-stream (has_partial_output=True): use retry_context with partial output + feedback
+    - If stopped at approval (has_partial_output=False): add feedback to ce_instructions
     """
     job = await job_mgr.get_job(job_id)
     if not job:
@@ -1312,11 +1418,76 @@ async def resume_job(
     request.approval_agents = job.approval_agents
     logger.info(f"Resume with mode={job.execution_mode}, approval_agents={job.approval_agents}")
 
+    # Handle feedback for resume
+    initial_retry_context = None
+    initial_feedback_instructions = None
+    has_partial_output_for_resume = False  # Track stop type for later use
+    if resume_request.feedback:
+        logger.info(f"Resume request received with feedback: {resume_request.feedback[:100]}...")
+        feedback_info = job_mgr.get_resume_feedback_info(job_id)
+        has_partial_output_for_resume = feedback_info["has_partial_output"]  # Save before clearing
+        logger.info(f"Feedback info: has_partial_output={feedback_info['has_partial_output']}, partial_output_len={len(feedback_info.get('partial_output') or '')}")
+        if feedback_info["has_partial_output"]:
+            # Stopped mid-stream: use retry_context with partial output + feedback
+            initial_retry_context = {
+                "history": [{
+                    "output": feedback_info["partial_output"],
+                    "feedback": resume_request.feedback
+                }]
+            }
+            logger.info(f"Resume with retry_context (partial output + feedback)")
+        else:
+            # Cancel at approval: use retry_context with null output + feedback
+            # This adds feedback to next agent's message sequence: system → user → feedback
+            initial_retry_context = {
+                "history": [{
+                    "output": None,  # No output for cancel at approval
+                    "feedback": resume_request.feedback
+                }]
+            }
+            logger.info(f"Resume with retry_context (null output + feedback for next agent)")
+
+        # Clear partial output after use
+        job_mgr.clear_partial_output(job_id)
+    else:
+        logger.info(f"Resume request received without feedback")
+
     # Check for checkpoints - agent-level or phase-level
     output_checkpoint_path = f"{job.work_dir}/outputs/output.json"
     agent_checkpoint_path = f"{job.work_dir}/checkpoints/agent_checkpoint.json"
     resume_from = job.current_phase
-    resume_from_agent = job.current_agent  # Agent-level resume
+
+    # Determine resume_from_agent based on stop type:
+    # - has_partial_output=True (mid-stream stop): resume from current_agent (retry with feedback)
+    # - has_partial_output=False (cancel at approval): agent completed, resume from NEXT agent
+    # Note: Use saved has_partial_output_for_resume instead of calling get_resume_feedback_info()
+    # again, because clear_partial_output() was already called above
+    if has_partial_output_for_resume:
+        # Mid-stream stop: resume from current agent
+        resume_from_agent = job.current_agent
+        logger.info(f"Mid-stream stop detected, will resume from {resume_from_agent}")
+    else:
+        # Cancel at approval: agent output completed, skip to next agent
+        # Read checkpoint to find next_agent
+        resume_from_agent = None
+        if os.path.exists(agent_checkpoint_path):
+            try:
+                import json
+                with open(agent_checkpoint_path, 'r') as f:
+                    checkpoint_data = json.load(f)
+                # Find next_agent from the current phase's checkpoint
+                phase_data = checkpoint_data.get("phases", {}).get(resume_from, {})
+                next_agent = phase_data.get("next_agent")
+                if next_agent:
+                    resume_from_agent = next_agent
+                    logger.info(f"Cancel at approval detected, will resume from next agent: {next_agent}")
+                else:
+                    # Phase completed, next phase will start
+                    logger.info(f"Cancel at approval detected, phase {resume_from} completed, next phase will start")
+            except Exception as e:
+                logger.warning(f"Failed to read checkpoint for next_agent: {e}")
+        if not resume_from_agent:
+            logger.info(f"Cancel at approval detected, will resume from beginning of phase {resume_from}")
 
     # Determine which checkpoint to use
     has_agent_checkpoint = os.path.exists(agent_checkpoint_path)
@@ -1376,7 +1547,9 @@ async def resume_job(
             ce_tool=ce_tool_inst,
             resume_from=resume_from,
             resume_from_agent=resume_from_agent,
-            checkpoint_path=checkpoint_path
+            checkpoint_path=checkpoint_path,
+            initial_retry_context=initial_retry_context,
+            initial_feedback_instructions=initial_feedback_instructions,
         )
     )
     job_mgr.tasks[job_id] = task
@@ -1385,7 +1558,8 @@ async def resume_job(
         "message": f"Job {job_id} resuming from {resume_from or 'beginning'}" + (f"/{resume_from_agent}" if resume_from_agent else ""),
         "status": JobStatus.RUNNING,
         "resume_from": resume_from,
-        "resume_from_agent": resume_from_agent
+        "resume_from_agent": resume_from_agent,
+        "has_feedback": resume_request.feedback is not None,
     }
 
 

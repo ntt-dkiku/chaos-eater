@@ -142,6 +142,7 @@ class Experimenter:
         resume_from_agent: Optional[str] = None,
         on_agent_start: Optional[Callable[[str], None]] = None,
         on_agent_end: Optional[Callable[[str, Any], None]] = None,
+        initial_retry_context: Optional[dict] = None,
     ) -> ChaosExperiment:
         # prepare a working directory
         experiment_dir = f"{work_dir}/experiment"
@@ -174,7 +175,10 @@ class Experimenter:
         ))
 
         # Run all agents (with resume support)
-        results = runner.run(resume_from_agent=resume_from_agent)
+        results = runner.run(
+            resume_from_agent=resume_from_agent,
+            initial_retry_context=initial_retry_context,
+        )
 
         # Build chaos experiment from results
         chaos_experiment = ChaosExperiment(
@@ -267,6 +271,7 @@ class Experimenter:
         on_agent_start: Optional[Callable[[str], None]] = None,
         on_agent_end: Optional[Callable[[str, Any], None]] = None,
         resume_from_agent: Optional[str] = None,
+        initial_retry_context: Optional[dict] = None,
     ) -> ChaosExperimentResult:
         if namespace is None:
             namespace = self.namespace
@@ -293,7 +298,10 @@ class Experimenter:
         ))
 
         # Run all agents (with resume support)
-        results = runner.run(resume_from_agent=resume_from_agent)
+        results = runner.run(
+            resume_from_agent=resume_from_agent,
+            initial_retry_context=initial_retry_context,
+        )
 
         return results["experiment_result"]
 

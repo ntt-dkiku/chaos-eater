@@ -99,6 +99,7 @@ class PreProcessor:
         resume_from_agent: str = None,
         on_agent_start: Callable[[str], None] = None,
         on_agent_end: Callable[[str, Any], None] = None,
+        initial_retry_context: dict = None,
     ) -> ProcessedData:
         preprocess_dir = f"{work_dir}/inputs"
         checkpoint_dir = f"{work_dir}/checkpoints"
@@ -191,6 +192,7 @@ class PreProcessor:
         results = runner.run(
             resume_from_agent=resume_from_agent,
             initial_data=initial_data,
+            initial_retry_context=initial_retry_context,
         )
 
         #----------

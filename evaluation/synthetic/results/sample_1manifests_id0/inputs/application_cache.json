@@ -1,0 +1,11 @@
+{
+    "title": "Simple Nginx Web Server",
+    "description": "This service deploys a simple Nginx web server on a Kubernetes cluster. The original deployment consists of a single pod running the Nginx container. To reduce redundancy and resilience, the Deployment resource is replaced with a Pod resource, which removes the ability to automatically manage replicas and self-heal in case of pod failure.",
+    "k8s_manifests": [
+        {
+            "id": 0,
+            "file_name": "nginx-deployment.yaml",
+            "content": "apiVersion: v1\nkind: Pod\nmetadata:\n  name: nginx-pod\n  labels:\n    app: nginx\nspec:\n  containers:\n  - name: nginx\n    image: nginx:latest\n    ports:\n    - containerPort: 80\n"
+        }
+    ]
+}

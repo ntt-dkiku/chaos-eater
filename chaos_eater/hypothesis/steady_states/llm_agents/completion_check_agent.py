@@ -63,9 +63,11 @@ class SteadyStateCompletionCheckAgent:
 
         if retry_context and retry_context.get("history"):
             for i, entry in enumerate(retry_context["history"], 1):
-                # Escape curly braces to prevent LangChain template interpretation
-                escaped_output = self._escape_braces(str(entry["output"]))
-                messages.append(("ai", escaped_output))
+                # Only add AI message if output exists (skip for null output from cancel)
+                if entry.get("output"):
+                    # Escape curly braces to prevent LangChain template interpretation
+                    escaped_output = self._escape_braces(str(entry["output"]))
+                    messages.append(("ai", escaped_output))
                 if entry.get("feedback"):
                     escaped_feedback = self._escape_braces(entry['feedback'])
                     messages.append(("human", f"Feedback #{i}: {escaped_feedback}"))

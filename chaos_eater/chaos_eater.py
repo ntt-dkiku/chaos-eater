@@ -2,7 +2,7 @@ import os
 import time
 import json
 import subprocess
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 from .preprocessing.preprocessor import PreProcessor, ChaosEaterInput
 from .hypothesis.hypothesizer import Hypothesizer
@@ -80,7 +80,8 @@ class ChaosEater:
         callbacks: List[ChaosEaterCallback] = [],
         resume_from: str = None,
         resume_from_agent: str = None,  # Agent-level resume
-        checkpoint: 'ChaosEaterOutput' = None
+        checkpoint: 'ChaosEaterOutput' = None,
+        initial_retry_context: Optional[dict] = None,  # For resume with feedback
     ) -> ChaosEaterOutput:
         # Define phase order for resume logic
         PHASE_ORDER = ["preprocess", "hypothesis", "experiment_plan", "experiment", "analysis", "improvement", "postprocess"]
@@ -188,6 +189,8 @@ class ChaosEater:
                     )
 
             start_time = time.time()
+            # Pass initial_retry_context only when resuming in this phase
+            phase_retry_context = initial_retry_context if resume_from == "preprocess" else None
             data = self.preprocessor.process(
                 input=input,
                 kube_context=kube_context,
@@ -198,6 +201,7 @@ class ChaosEater:
                 resume_from_agent=preprocess_resume_agent,
                 on_agent_start=on_agent_start,
                 on_agent_end=on_agent_end,
+                initial_retry_context=phase_retry_context,
             )
             ce_output.run_time["preprocess"] = time.time() - start_time
             ce_output.ce_cycle.processed_data = data
@@ -223,6 +227,7 @@ class ChaosEater:
                     cb.on_hypothesis_start()
 
             start_time = time.time()
+            phase_retry_context = initial_retry_context if resume_from == "hypothesis" else None
             hypothesis = self.hypothesizer.hypothesize(
                 data=data,
                 kube_context=kube_context,
@@ -233,6 +238,7 @@ class ChaosEater:
                 resume_from_agent=hypothesis_resume_agent,
                 on_agent_start=on_agent_start,
                 on_agent_end=on_agent_end,
+                initial_retry_context=phase_retry_context,
             )
             ce_output.run_time["hypothesis"] = time.time() - start_time
             ce_output.ce_cycle.hypothesis = hypothesis
@@ -258,6 +264,7 @@ class ChaosEater:
                     cb.on_experiment_plan_start()
 
             start_time = time.time()
+            phase_retry_context = initial_retry_context if resume_from == "experiment_plan" else None
             experiment = self.experimenter.plan_experiment(
                 data=data,
                 hypothesis=hypothesis,
@@ -266,6 +273,7 @@ class ChaosEater:
                 resume_from_agent=experiment_resume_agent,
                 on_agent_start=on_agent_start,
                 on_agent_end=on_agent_end,
+                initial_retry_context=phase_retry_context,
             )
             ce_output.run_time["experiment_plan"] = time.time() - start_time
             ce_output.ce_cycle.experiment = experiment
@@ -302,6 +310,7 @@ class ChaosEater:
                     cb.on_experiment_start()
 
             start_time = time.time()
+            phase_retry_context = initial_retry_context if resume_from == "experiment" else None
             experiment_result = self.experimenter.run(
                 experiment=experiment,
                 kube_context=kube_context,
@@ -309,9 +318,11 @@ class ChaosEater:
                 on_agent_start=on_agent_start,
                 on_agent_end=on_agent_end,
                 resume_from_agent=experiment_resume_agent,
+                initial_retry_context=phase_retry_context,
             )
-            # Clear resume_from_agent after first iteration to prevent repeated resume attempts
+            # Clear resume_from_agent and retry_context after first iteration
             experiment_resume_agent = None
+            initial_retry_context = None  # Prevent reuse in loop
             ce_output.run_time["experiment_execution"].append(time.time() - start_time)
             ce_output.ce_cycle.result_history.append(experiment_result)
             save_json(f"{output_dir}/output.json", ce_output.dict())

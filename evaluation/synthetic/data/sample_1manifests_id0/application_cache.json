@@ -1,0 +1,11 @@
+{
+    "title": "Simple Nginx Web Server",
+    "description": "This service deploys a simple Nginx web server on a Kubernetes cluster. The deployment consists of a single pod running the Nginx container. This is a basic example to demonstrate how to deploy a web server using Kubernetes.",
+    "k8s_manifests": [
+        {
+            "id": 0,
+            "file_name": "nginx-deployment.yaml",
+            "content": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: nginx-deployment\nspec:\n  replicas: 1\n  selector:\n    matchLabels:\n      app: nginx\n  template:\n    metadata:\n      labels:\n        app: nginx\n    spec:\n      containers:\n      - name: nginx\n        image: nginx:latest\n        ports:\n        - containerPort: 80"
+        }
+    ]
+}
