@@ -1421,9 +1421,11 @@ async def resume_job(
     # Handle feedback for resume
     initial_retry_context = None
     initial_feedback_instructions = None
+    has_partial_output_for_resume = False  # Track stop type for later use
     if resume_request.feedback:
         logger.info(f"Resume request received with feedback: {resume_request.feedback[:100]}...")
         feedback_info = job_mgr.get_resume_feedback_info(job_id)
+        has_partial_output_for_resume = feedback_info["has_partial_output"]  # Save before clearing
         logger.info(f"Feedback info: has_partial_output={feedback_info['has_partial_output']}, partial_output_len={len(feedback_info.get('partial_output') or '')}")
         if feedback_info["has_partial_output"]:
             # Stopped mid-stream: use retry_context with partial output + feedback
@@ -1458,8 +1460,9 @@ async def resume_job(
     # Determine resume_from_agent based on stop type:
     # - has_partial_output=True (mid-stream stop): resume from current_agent (retry with feedback)
     # - has_partial_output=False (cancel at approval): agent completed, resume from NEXT agent
-    feedback_info = job_mgr.get_resume_feedback_info(job_id)
-    if feedback_info["has_partial_output"]:
+    # Note: Use saved has_partial_output_for_resume instead of calling get_resume_feedback_info()
+    # again, because clear_partial_output() was already called above
+    if has_partial_output_for_resume:
         # Mid-stream stop: resume from current agent
         resume_from_agent = job.current_agent
         logger.info(f"Mid-stream stop detected, will resume from {resume_from_agent}")
