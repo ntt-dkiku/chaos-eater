@@ -2291,6 +2291,30 @@ export default function ChaosEaterApp() {
               if (!approvalDialog) e.currentTarget.style.borderColor = colors.border;
             }}
           >
+            {/* Paused state banner showing next agent */}
+            {runState === 'paused' && pausedAgentInfo && (
+              <div style={{
+                padding: '8px 12px',
+                backgroundColor: 'rgba(132, 204, 22, 0.1)',
+                borderBottom: `1px solid ${colors.border}`,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+              }}>
+                <span style={{ color: colors.textSecondary, fontSize: '12px' }}>
+                  {pausedAgentInfo.hasPartialOutput ? 'Retry:' : 'Next up:'}
+                </span>
+                <span style={{
+                  color: '#84cc16',
+                  fontFamily: 'monospace',
+                  fontSize: '13px',
+                  fontWeight: 500,
+                }}>
+                  {pausedAgentInfo.agentName}
+                </span>
+              </div>
+            )}
+
             {/* Upper section - Text area */}
             <div style={{ position: 'relative' }} key={composerKey}>
               {/* Custom placeholder text positioned left aligned */}
