@@ -521,7 +521,7 @@ class ChaosEater:
                 agent_logger=agent_logger,
                 on_agent_start=on_agent_start,
                 on_agent_end=on_agent_end,
-                iteration=mod_k8s_count,
+                iteration=len(ce_output.ce_cycle.reconfig_history) - 1,
             )
             ce_output.run_time["experiment_replan"] = time.time() - start_time
             ce_output.ce_cycle.experiment = experiment
