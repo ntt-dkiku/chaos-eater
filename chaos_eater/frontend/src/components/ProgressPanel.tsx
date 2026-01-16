@@ -174,15 +174,15 @@ interface ProgressPanelProps {
 }
 
 /**
- * Status icon for phases (larger)
+ * Status icon for phases
  */
 const PhaseStatusIcon: React.FC<{ status: StatusType }> = ({ status }) => {
   if (status === 'completed') {
     return (
       <div
         style={{
-          width: 16,
-          height: 16,
+          width: 12,
+          height: 12,
           borderRadius: '50%',
           backgroundColor: '#84cc16',
         }}
@@ -193,8 +193,8 @@ const PhaseStatusIcon: React.FC<{ status: StatusType }> = ({ status }) => {
     return (
       <div
         style={{
-          width: 16,
-          height: 16,
+          width: 12,
+          height: 12,
           borderRadius: '50%',
           backgroundColor: '#84cc16',
           animation: 'progress-pulse 1.5s ease-in-out infinite',
@@ -205,10 +205,11 @@ const PhaseStatusIcon: React.FC<{ status: StatusType }> = ({ status }) => {
   return (
     <div
       style={{
-        width: 16,
-        height: 16,
+        width: 12,
+        height: 12,
         borderRadius: '50%',
-        border: '2px solid #4b5563',
+        border: '1.5px solid #4b5563',
+        boxSizing: 'border-box',
       }}
     />
   );
@@ -285,22 +286,24 @@ export const ProgressPanel: React.FC<ProgressPanelProps> = ({
       return 'pending';
     }
 
-    if (currentIndex === -1) {
-      // No current phase - all pending or check if agents completed
-      if (phase) {
-        const hasCompletedAgent = phase.agents.some((agent) => {
-          if (agent.pattern) {
-            return [...completedAgents].some((a) => agent.pattern!.test(a));
-          }
-          return completedAgents.has(agent.id);
-        });
-        if (hasCompletedAgent) return 'completed';
+    // Check if any agent in this phase is currently active
+    const isPhaseActive = phase?.agents.some((agent) => {
+      if (agent.pattern) {
+        return currentAgent && agent.pattern.test(currentAgent);
       }
-      return 'pending';
-    }
+      return agent.id === currentAgent;
+    });
 
-    if (phaseIndex < currentIndex) return 'completed';
-    if (phaseIndex === currentIndex) return 'active';
+    // Check if any agent in this phase has completed
+    const hasCompletedAgent = phase?.agents.some((agent) => {
+      if (agent.pattern) {
+        return [...completedAgents].some((a) => agent.pattern!.test(a));
+      }
+      return completedAgents.has(agent.id);
+    });
+
+    if (isPhaseActive) return 'active';
+    if (hasCompletedAgent) return 'completed';
     return 'pending';
   };
 
@@ -372,7 +375,6 @@ export const ProgressPanel: React.FC<ProgressPanelProps> = ({
             <div
               style={{
                 display: 'flex',
-                gap: '16px',
                 overflowX: 'auto',
                 paddingBottom: '4px',
               }}
@@ -389,14 +391,15 @@ export const ProgressPanel: React.FC<ProgressPanelProps> = ({
                       flexDirection: 'column',
                       alignItems: 'flex-start',
                       minWidth: 'fit-content',
+                      flex: index < PHASE_CONFIG.length - 1 ? 1 : 'none',
                     }}
                   >
-                    {/* Phase header with arrow */}
+                    {/* Phase header with connector line */}
                     <div
                       style={{
                         display: 'flex',
                         alignItems: 'center',
-                        gap: '8px',
+                        width: '100%',
                         marginBottom: showAgents ? '8px' : '0',
                       }}
                     >
@@ -431,11 +434,12 @@ export const ProgressPanel: React.FC<ProgressPanelProps> = ({
                       {index < PHASE_CONFIG.length - 1 && (
                         <div
                           style={{
-                            width: '12px',
+                            flex: 1,
                             height: '1px',
                             backgroundColor: '#6b7280',
-                            marginLeft: '4px',
-                            marginRight: '-4px',
+                            marginLeft: '8px',
+                            marginRight: '8px',
+                            minWidth: '12px',
                           }}
                         />
                       )}
