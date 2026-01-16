@@ -46,3 +46,15 @@ html, body, #root {
   border-color: #84cc16 !important;
   border-radius: 8px;
 }
+
+/* Progress panel pulse animation */
+@keyframes progress-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(0.85);
+  }
+}

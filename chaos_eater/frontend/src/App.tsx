@@ -23,6 +23,7 @@ import {
   ExternalLink,
   RotateCcw,
   XCircle,
+  Clock,
 } from 'lucide-react';
 import {
   ensureSession,
@@ -43,6 +44,8 @@ import LandingMessage from './components/LandingMessage';
 import CleanClusterButton from './components/CleanClusterButton';
 import StatsPanel from './components/StatsPanel';
 import AgentSettingsDialog from './components/AgentSettingsDialog';
+import ProgressPanel from './components/ProgressPanel';
+import { getPhaseForAgent } from './config/phaseConfig';
 // ApprovalDialog is now inline in MessagesPanel
 
 // API modules
@@ -243,6 +246,11 @@ export default function ChaosEaterApp() {
   } | null>(null);
   // Agent settings dialog state
   const [agentSettingsOpen, setAgentSettingsOpen] = useState(false);
+  // Progress panel state
+  const [completedAgents, setCompletedAgents] = useState<Set<string>>(new Set());
+  const [currentPhase, setCurrentPhase] = useState<string | null>(null);
+  const [currentAgent, setCurrentAgent] = useState<string | null>(null);
+  const [showProgressPanel, setShowProgressPanel] = useState(false);
   // model list
   const models = [
     'openai/gpt-4.1',
@@ -726,6 +734,7 @@ export default function ChaosEaterApp() {
       // Keep existing messages (completed agents' output)
       // Backend clears old events on resume, so only new events arrive
       currentAgentRef.current = null;
+      setCurrentAgent(null);
       partialStateRef.current = null;
 
       // Reconnect WebSocket for streaming
@@ -785,6 +794,9 @@ export default function ChaosEaterApp() {
     setBackendProjectPath(null);
     setCurrentSnapshotId(null);  // Detach from current snapshot
     setPausedAgentInfo(null);  // Clear paused agent info
+    setCompletedAgents(new Set());  // Reset progress state
+    setCurrentPhase(null);
+    setCurrentAgent(null);
     partialStateRef.current = null;
     messageQueueRef.current = [];
     currentAgentRef.current = null;
@@ -967,6 +979,10 @@ export default function ChaosEaterApp() {
         model: formData.model || undefined,
       });
       setJobId(data.job_id);
+
+      // Reset progress state for new job
+      setCompletedAgents(new Set());
+      setCurrentPhase(null);
 
       // display dialog
       setPanelVisible(true);
@@ -1301,10 +1317,22 @@ export default function ChaosEaterApp() {
             setMessages(prev => prev.filter(msg => msg.agentId !== agentName));
             partialStateRef.current = null;
             currentAgentRef.current = agentName;
+            setCurrentAgent(agentName);  // Update state for re-render
+            // Update current phase for progress panel
+            const phase = getPhaseForAgent(agentName);
+            if (phase) {
+              setCurrentPhase(phase);
+            }
             return;
           }
           if (ev.type === 'agent_end') {
+            const agentName = ev.agent;
+            // Track completed agents for progress panel
+            if (agentName) {
+              setCompletedAgents(prev => new Set([...prev, agentName]));
+            }
             currentAgentRef.current = null;
+            setCurrentAgent(null);  // Clear current agent state
             return;
           }
           if (ev.type === 'resume_start') {
@@ -1315,6 +1343,7 @@ export default function ChaosEaterApp() {
             }
             partialStateRef.current = null;
             currentAgentRef.current = null;
+            setCurrentAgent(null);
             return;
           }
           if (ev.type === 'approval_request') {
@@ -2377,7 +2406,21 @@ export default function ChaosEaterApp() {
             </div>
             
             {/* Lower section - Controls */}
-            <div style={composerStyles.controls}>
+            <div style={mergeStyles(composerStyles.controls, { position: 'relative' })}>
+              {/* Progress Panel - positioned absolute to not affect layout */}
+              <div
+                style={{ position: 'absolute', bottom: '100%', left: 0, right: 0, zIndex: 1000, pointerEvents: showProgressPanel ? 'auto' : 'none' }}
+                onMouseEnter={() => setShowProgressPanel(true)}
+                onMouseLeave={() => setShowProgressPanel(false)}
+              >
+                <ProgressPanel
+                  currentPhase={currentPhase}
+                  currentAgent={currentAgent}
+                  completedAgents={completedAgents}
+                  isVisible={showProgressPanel}
+                />
+              </div>
+
               {/* Left group */}
               <div style={composerStyles.controlGroup}>
                 <button
@@ -2387,6 +2430,19 @@ export default function ChaosEaterApp() {
                   title="Add files"
                 >
                   <Paperclip size={18} />
+                </button>
+
+                {/* Progress indicator button */}
+                <button
+                  style={mergeStyles(buttonStyles.icon, {
+                    padding: 0,
+                    color: runState === 'running' ? '#84cc16' : colors.textSecondary,
+                  })}
+                  title="View progress"
+                  onMouseEnter={() => setShowProgressPanel(true)}
+                  onMouseLeave={() => setShowProgressPanel(false)}
+                >
+                  <Clock size={18} />
                 </button>
               </div>
 
