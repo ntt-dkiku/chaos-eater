@@ -61,7 +61,7 @@ class Analyzer:
 
         # Step 1: Analyze the experiment result
         runner.add_step(AgentStep(
-            name="analysis_agent",
+            name=f"analysis_{mod_count}",
             run_fn=lambda retry_context=None: self._run_analysis(
                 input_data, hypothesis, experiment,
                 reconfig_history, experiment_result, agent_logger, retry_context

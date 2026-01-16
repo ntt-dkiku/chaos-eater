@@ -1,5 +1,5 @@
 import os
-from typing import List, Optional
+from typing import Any, Callable, List, Optional
 
 from .llm_agents.reconfiguration_agent import ReconfigurationAgent, ReconfigurationResult
 from ..analysis.analyzer import Analysis
@@ -42,10 +42,20 @@ class Improver:
         kube_context: str,
         work_dir: str,
         max_retries: int = 3,
-        agent_logger: Optional[AgentLogger] = None
+        agent_logger: Optional[AgentLogger] = None,
+        on_agent_start: Optional[Callable[[str], None]] = None,
+        on_agent_end: Optional[Callable[[str, Any], Any]] = None,
     ) -> ReconfigurationResult:
         improvement_dir = f"{work_dir}/improvement"
         os.makedirs(improvement_dir, exist_ok=True)
+
+        # Compute iteration index for agent naming
+        iteration = len(reconfig_history)
+        agent_name = f"improvement_{iteration}"
+
+        # Notify agent start
+        if on_agent_start:
+            on_agent_start(agent_name)
 
         mod_k8s_yamls = self.agent.reconfigure(
             input_data=input_data,
@@ -62,7 +72,11 @@ class Improver:
             agent_logger=agent_logger
         )
 
-        mod_count = len(reconfig_history)
         reconfig_result = ReconfigurationResult(mod_k8s_yamls=mod_k8s_yamls)
-        save_json(f"{improvement_dir}/improvment{mod_count}.json", reconfig_result.dict())
+        save_json(f"{improvement_dir}/improvment{iteration}.json", reconfig_result.dict())
+
+        # Notify agent end
+        if on_agent_end:
+            on_agent_end(agent_name, reconfig_result)
+
         return reconfig_result
