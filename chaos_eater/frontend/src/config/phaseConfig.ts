@@ -70,6 +70,7 @@ export const IMPROVEMENT_LOOP_PATTERNS = {
   experiment: /^experiment_runner$/,
   analysis: /^analysis_\d+$/,
   improvement: /^improvement_\d+(_\d+)?$/,  // improvement_0 or improvement_0_1 (with retry)
+  replanning: /^replanning_\d+$/,
 };
 
 /**
@@ -79,7 +80,8 @@ export function isImprovementLoopAgent(agentId: string): boolean {
   return (
     IMPROVEMENT_LOOP_PATTERNS.experiment.test(agentId) ||
     IMPROVEMENT_LOOP_PATTERNS.analysis.test(agentId) ||
-    IMPROVEMENT_LOOP_PATTERNS.improvement.test(agentId)
+    IMPROVEMENT_LOOP_PATTERNS.improvement.test(agentId) ||
+    IMPROVEMENT_LOOP_PATTERNS.replanning.test(agentId)
   );
 }
 

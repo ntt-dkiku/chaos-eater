@@ -518,7 +518,10 @@ class ChaosEater:
                 kube_context=kube_context,
                 work_dir=work_dir,
                 max_retries=max_retries,
-                agent_logger=agent_logger
+                agent_logger=agent_logger,
+                on_agent_start=on_agent_start,
+                on_agent_end=on_agent_end,
+                iteration=mod_k8s_count,
             )
             ce_output.run_time["experiment_replan"] = time.time() - start_time
             ce_output.ce_cycle.experiment = experiment

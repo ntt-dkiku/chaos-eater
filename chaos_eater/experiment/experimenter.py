@@ -227,11 +227,21 @@ class Experimenter:
         kube_context: str,
         work_dir: str,
         max_retries: int = 3,
-        agent_logger: Optional[AgentLogger] = None
+        agent_logger: Optional[AgentLogger] = None,
+        on_agent_start: Optional[Callable[[str], None]] = None,
+        on_agent_end: Optional[Callable[[str, Any], None]] = None,
+        iteration: int = 0,
     ) -> ChaosExperiment:
         # prepare a working directory
         experiment_dir = f"{work_dir}/experiment"
         os.makedirs(experiment_dir, exist_ok=True)
+
+        # Compute agent name for callbacks
+        agent_name = f"replanning_{iteration}"
+
+        # Notify agent start
+        if on_agent_start:
+            on_agent_start(agent_name)
 
         #----------------------------------------------------------
         # 1. replan a CE experiment with the steady state and faults
@@ -259,6 +269,11 @@ class Experimenter:
             workflow_name=workflow_name,
             workflow=workflow
         )
+
+        # Notify agent end
+        if on_agent_end:
+            on_agent_end(agent_name, chaos_experiment)
+
         return chaos_experiment
 
     def run(

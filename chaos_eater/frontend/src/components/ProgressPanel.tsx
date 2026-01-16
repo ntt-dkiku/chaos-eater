@@ -16,7 +16,7 @@ interface DynamicAgent {
 
 /**
  * Generate dynamic agents for the improvement loop phase.
- * Orders them: Experiment → Analysis N → Improvement N → Experiment → Analysis N+1 → ...
+ * Orders them: Experiment → Analysis N → Improvement N → Replanning N → Experiment (N+2) → ...
  *
  * Note: experiment_runner is always the same name, so we track runs by:
  * - Number of completed analyses = number of completed experiment runs
@@ -33,15 +33,10 @@ function getDynamicLoopAgents(
   const experimentCompleted = completedAgents.has('experiment_runner');
   const experimentActive = currentAgent === 'experiment_runner';
 
-  // Parse analyses and improvements
+  // Parse analyses, improvements, and replannings
   const analyses: { id: string; iteration: number; status: StatusType }[] = [];
   const improvements: { id: string; iteration: number; retry?: number; status: StatusType }[] = [];
-
-  const getStatus = (agentId: string): StatusType => {
-    if (currentAgent === agentId) return 'active';
-    if (completedAgents.has(agentId)) return 'completed';
-    return 'pending';
-  };
+  const replannings: { id: string; iteration: number; status: StatusType }[] = [];
 
   for (const agentId of completedAgents) {
     if (IMPROVEMENT_LOOP_PATTERNS.analysis.test(agentId)) {
@@ -59,10 +54,15 @@ function getDynamicLoopAgents(
           status: 'completed',
         });
       }
+    } else if (IMPROVEMENT_LOOP_PATTERNS.replanning.test(agentId)) {
+      const match = agentId.match(/^replanning_(\d+)$/);
+      if (match) {
+        replannings.push({ id: agentId, iteration: parseInt(match[1], 10), status: 'completed' });
+      }
     }
   }
 
-  // Add current agent if it's analysis or improvement
+  // Add current agent if it's analysis, improvement, or replanning
   if (currentAgent && IMPROVEMENT_LOOP_PATTERNS.analysis.test(currentAgent)) {
     const match = currentAgent.match(/^analysis_(\d+)$/);
     if (match) {
@@ -78,6 +78,11 @@ function getDynamicLoopAgents(
         status: 'active',
       });
     }
+  } else if (currentAgent && IMPROVEMENT_LOOP_PATTERNS.replanning.test(currentAgent)) {
+    const match = currentAgent.match(/^replanning_(\d+)$/);
+    if (match) {
+      replannings.push({ id: currentAgent, iteration: parseInt(match[1], 10), status: 'active' });
+    }
   }
 
   // Sort by iteration
@@ -86,18 +91,20 @@ function getDynamicLoopAgents(
     if (a.iteration !== b.iteration) return a.iteration - b.iteration;
     return (a.retry ?? -1) - (b.retry ?? -1);
   });
+  replannings.sort((a, b) => a.iteration - b.iteration);
 
   // Determine max iteration
   const maxAnalysis = analyses.length > 0 ? Math.max(...analyses.map((a) => a.iteration)) : -1;
   const maxImprovement = improvements.length > 0 ? Math.max(...improvements.map((i) => i.iteration)) : -1;
-  let maxIteration = Math.max(maxAnalysis, maxImprovement);
+  const maxReplanning = replannings.length > 0 ? Math.max(...replannings.map((r) => r.iteration)) : -1;
+  let maxIteration = Math.max(maxAnalysis, maxImprovement, maxReplanning);
 
   // If experiment is running but no analysis yet, show iteration 0
   if (hasExperiment && maxIteration < 0) {
     maxIteration = 0;
   }
 
-  // Build sequence: for each iteration, add Experiment → Analysis → Improvement
+  // Build sequence: for each iteration, add Experiment → Analysis → Improvement → Replanning
   for (let i = 0; i <= maxIteration; i++) {
     // Determine experiment status for this iteration
     // - Experiment for iteration N is completed if analysis_N exists (or later)
@@ -142,6 +149,16 @@ function getDynamicLoopAgents(
         id: imp.id,
         label: `Improvement ${i}${retryLabel}`,
         status: imp.status,
+      });
+    }
+
+    // Replanning for this iteration
+    const replanningForIteration = replannings.find((r) => r.iteration === i);
+    if (replanningForIteration) {
+      agents.push({
+        id: replanningForIteration.id,
+        label: `Replanning ${i}`,
+        status: replanningForIteration.status,
       });
     }
   }
