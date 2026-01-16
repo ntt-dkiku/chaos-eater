@@ -1,8 +1,9 @@
 .PHONY: setup-sandbox set-mode-sandbox start-sandbox cluster-sandbox
 .PHONY: setup-standard set-mode-standard start-standard cluster-standard
 .PHONY: reload stop redis-flush
-.PHONY: test test-cov test-watch test-file test-match build-test clean-test
-.PHONY: frontend-test frontend-test-watch frontend-test-coverage build-frontend-test clean-frontend-test
+.PHONY: test-backend test-backend-cov test-backend-watch build-test-backend clean-test-backend
+.PHONY: test-frontend test-frontend-watch test-frontend-cov build-test-frontend clean-test-frontend
+.PHONY: test-all
 .PHONY: open-jupyter stop-jupyter
 .PHONY: eval-ase2025 _eval-ase2025-run
 
@@ -119,38 +120,28 @@ endif
 #--------
 TEST_COMPOSE := docker compose -f docker/docker-compose.test.yaml
 
-# Run all tests (no coverage for speed)
-test:
+# Run backend tests: make test-backend [FILE=tests/test_xxx.py]
+test-backend:
+ifdef FILE
+	@$(TEST_COMPOSE) run --rm test sh -c "uv sync --extra dev && pytest $(FILE)"
+else
 	@$(TEST_COMPOSE) run --rm test sh -c "uv sync --extra dev && pytest"
+endif
 
-# Run all tests with coverage
-test-cov:
+# Run backend tests with coverage
+test-backend-cov:
 	@$(TEST_COMPOSE) run --rm test
 
-# Run tests in watch mode
-test-watch:
+# Run backend tests in watch mode
+test-backend-watch:
 	@$(TEST_COMPOSE) run --rm test-watch
 
-# Run specific test file: make test-file FILE=tests/test_xxx.py
-test-file:
-ifndef FILE
-	$(error FILE is required. Usage: make test-file FILE=tests/test_xxx.py)
-endif
-	@$(TEST_COMPOSE) run --rm test sh -c "uv sync --extra dev && pytest $(FILE)"
-
-# Run tests matching pattern: make test-match PATTERN=test_parse
-test-match:
-ifndef PATTERN
-	$(error PATTERN is required. Usage: make test-match PATTERN=test_parse)
-endif
-	@$(TEST_COMPOSE) run --rm test sh -c "uv sync --extra dev && pytest -k '$(PATTERN)'"
-
-# Build test container
-build-test:
+# Build backend test container
+build-test-backend:
 	@$(TEST_COMPOSE) build
 
-# Clean up test containers
-clean-test:
+# Clean up backend test containers
+clean-test-backend:
 	@$(TEST_COMPOSE) down --rmi local -v
 
 
@@ -159,26 +150,33 @@ clean-test:
 #-----------------
 FRONTEND_TEST_COMPOSE := docker compose -f docker/docker-compose.frontend-test.yaml
 
-# Run frontend tests with coverage
-frontend-test:
+# Run frontend tests
+test-frontend:
 	@$(FRONTEND_TEST_COMPOSE) run --rm frontend-test
 
 # Run frontend tests in watch mode
-frontend-test-watch:
+test-frontend-watch:
 	@$(FRONTEND_TEST_COMPOSE) run --rm frontend-test-watch
 
 # Run frontend tests with coverage report
-frontend-test-coverage:
+test-frontend-cov:
 	@$(FRONTEND_TEST_COMPOSE) run --rm frontend-test
 	@echo "Coverage report: chaos_eater/frontend/coverage/index.html"
 
 # Build frontend test container
-build-frontend-test:
+build-test-frontend:
 	@$(FRONTEND_TEST_COMPOSE) build
 
 # Clean up frontend test containers
-clean-frontend-test:
+clean-test-frontend:
 	@$(FRONTEND_TEST_COMPOSE) down --rmi local -v
+
+
+#-----------
+# all tests
+#-----------
+# Run all tests (backend + frontend)
+test-all: test-backend test-frontend
 
 
 #--------------------

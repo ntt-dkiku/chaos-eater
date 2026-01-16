@@ -89,18 +89,19 @@ make stop
 ### EX2. Test ChaosEater (Experimental)
 Run unit tests with the following commands:
 ```bash
-make test          # Run all unit tests
-make test-cov      # Run tests with coverage report
-```
+# Run backend tests (pytest)
+make test-backend
 
-To run specific tests:
-```bash
-make test-file FILE=tests/test_api.py           # Run a specific test file
-make test-match PATTERN=test_parse              # Run tests matching a pattern
-```
+# Run a specific test file
+make test-backend FILE=tests/test_api.py
 
-> [!TIP]
-> To run integration tests that require API keys, create `docker/.env` with your API keys and set `RUN_INTEGRATION_TESTS=1`.
+# Run frontend tests (vitest)
+make test-frontend
+
+# Run all tests (backend + frontend)
+make test-all
+```
+To run integration tests that require API keys, create `docker/.env` with your API keys and set `RUN_INTEGRATION_TESTS=1`.
 
 ## 🕹️ GUI usage
 <img src="./docs/static/images/gui_preview.png">
