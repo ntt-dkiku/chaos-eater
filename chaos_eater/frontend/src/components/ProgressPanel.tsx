@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import { PHASE_CONFIG, AgentConfig, IMPROVEMENT_LOOP_PATTERNS, isImprovementLoopAgent } from '../config/phaseConfig';
+import { PHASE_CONFIG, AgentConfig, IMPROVEMENT_LOOP_PATTERNS, isImprovementLoopAgent, STEADY_STATE_PATTERNS, isSteadyStateAgent } from '../config/phaseConfig';
 
 type StatusType = 'completed' | 'active' | 'pending';
 
@@ -166,6 +166,128 @@ function getDynamicLoopAgents(
   return agents;
 }
 
+/**
+ * Generate dynamic agents for the steady state proposal in hypothesis phase.
+ * Orders them: Draft (1) → Inspection (1) → Threshold (1) → Unittest (1) → Completion Check (1)
+ *           → Draft (2) → Inspection (2) → ...
+ */
+function getDynamicSteadyStateAgents(
+  completedAgents: Set<string>,
+  currentAgent: string | null
+): DynamicAgent[] {
+  const agents: DynamicAgent[] = [];
+
+  // Parse agents by type
+  interface AgentInfo { id: string; iteration: number; status: StatusType }
+  const drafts: AgentInfo[] = [];
+  const inspections: AgentInfo[] = [];
+  const thresholds: AgentInfo[] = [];
+  const unittests: AgentInfo[] = [];
+  const completionChecks: AgentInfo[] = [];
+
+  // Helper to parse and add agent
+  const parseAgent = (agentId: string, status: StatusType) => {
+    let match = agentId.match(/^draft_agent_(\d+)$/);
+    if (match) {
+      drafts.push({ id: agentId, iteration: parseInt(match[1], 10), status });
+      return;
+    }
+    match = agentId.match(/^inspection_agent_(\d+)$/);
+    if (match) {
+      inspections.push({ id: agentId, iteration: parseInt(match[1], 10), status });
+      return;
+    }
+    match = agentId.match(/^threshold_agent_(\d+)$/);
+    if (match) {
+      thresholds.push({ id: agentId, iteration: parseInt(match[1], 10), status });
+      return;
+    }
+    match = agentId.match(/^unittest_agent_(\d+)$/);
+    if (match) {
+      unittests.push({ id: agentId, iteration: parseInt(match[1], 10), status });
+      return;
+    }
+    match = agentId.match(/^completion_check_agent_(\d+)$/);
+    if (match) {
+      completionChecks.push({ id: agentId, iteration: parseInt(match[1], 10), status });
+      return;
+    }
+  };
+
+  // Parse completed agents
+  for (const agentId of completedAgents) {
+    if (isSteadyStateAgent(agentId)) {
+      parseAgent(agentId, 'completed');
+    }
+  }
+
+  // Parse current agent
+  if (currentAgent && isSteadyStateAgent(currentAgent)) {
+    parseAgent(currentAgent, 'active');
+  }
+
+  // Find max iteration
+  const allIterations = [
+    ...drafts.map((a) => a.iteration),
+    ...inspections.map((a) => a.iteration),
+    ...thresholds.map((a) => a.iteration),
+    ...unittests.map((a) => a.iteration),
+    ...completionChecks.map((a) => a.iteration),
+  ];
+  if (allIterations.length === 0) return agents;
+
+  const maxIteration = Math.max(...allIterations);
+
+  // Build sequence by iteration
+  for (let i = 0; i <= maxIteration; i++) {
+    const draft = drafts.find((a) => a.iteration === i);
+    const inspection = inspections.find((a) => a.iteration === i);
+    const threshold = thresholds.find((a) => a.iteration === i);
+    const unittest = unittests.find((a) => a.iteration === i);
+    const completionCheck = completionChecks.find((a) => a.iteration === i);
+
+    const suffix = ` (${i + 1})`;
+
+    if (draft) {
+      agents.push({
+        id: draft.id,
+        label: `Draft${suffix}`,
+        status: draft.status,
+      });
+    }
+    if (inspection) {
+      agents.push({
+        id: inspection.id,
+        label: `Inspection${suffix}`,
+        status: inspection.status,
+      });
+    }
+    if (threshold) {
+      agents.push({
+        id: threshold.id,
+        label: `Threshold${suffix}`,
+        status: threshold.status,
+      });
+    }
+    if (unittest) {
+      agents.push({
+        id: unittest.id,
+        label: `Unittest${suffix}`,
+        status: unittest.status,
+      });
+    }
+    if (completionCheck) {
+      agents.push({
+        id: completionCheck.id,
+        label: `Completion Check${suffix}`,
+        status: completionCheck.status,
+      });
+    }
+  }
+
+  return agents;
+}
+
 interface ProgressPanelProps {
   currentPhase: string | null;
   currentAgent: string | null;
@@ -283,6 +405,24 @@ export const ProgressPanel: React.FC<ProgressPanelProps> = ({
       // Check if any improvement loop agent is completed
       const hasCompletedLoopAgent = [...completedAgents].some(isImprovementLoopAgent);
       if (hasCompletedLoopAgent) return 'completed';
+      return 'pending';
+    }
+
+    // Handle hypothesis phase with dynamic steady state agents
+    if (phase?.dynamicSteadyStateAgents) {
+      // Check if any steady state agent is current
+      if (currentAgent && isSteadyStateAgent(currentAgent)) {
+        return 'active';
+      }
+      // Check if any static agent in this phase is currently active
+      const isStaticAgentActive = phase.agents.some((agent) => agent.id === currentAgent);
+      if (isStaticAgentActive) return 'active';
+
+      // Check if any steady state agent is completed
+      const hasCompletedSteadyStateAgent = [...completedAgents].some(isSteadyStateAgent);
+      // Check if any static agent in this phase has completed
+      const hasCompletedStaticAgent = phase.agents.some((agent) => completedAgents.has(agent.id));
+      if (hasCompletedSteadyStateAgent || hasCompletedStaticAgent) return 'completed';
       return 'pending';
     }
 
@@ -456,6 +596,98 @@ export const ProgressPanel: React.FC<ProgressPanelProps> = ({
 
                             return dynamicAgents.map((agent, agentIndex) => {
                               const isLastAgent = agentIndex === dynamicAgents.length - 1;
+                              const showConnector = !isLastAgent;
+
+                              return (
+                                <div key={agent.id}>
+                                  {/* Agent row */}
+                                  <div
+                                    style={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      fontSize: '10px',
+                                      color:
+                                        agent.status === 'active'
+                                          ? '#84cc16'
+                                          : agent.status === 'completed'
+                                          ? '#6b7280'
+                                          : '#4b5563',
+                                    }}
+                                  >
+                                    <div
+                                      style={{
+                                        width: '12px',
+                                        display: 'flex',
+                                        justifyContent: 'center',
+                                        flexShrink: 0,
+                                      }}
+                                    >
+                                      <AgentStatusIcon status={agent.status} />
+                                    </div>
+                                    <span style={{ marginLeft: '4px', whiteSpace: 'nowrap' }}>{agent.label}</span>
+                                  </div>
+
+                                  {/* Connector line */}
+                                  {showConnector && (
+                                    <div
+                                      style={{
+                                        width: '12px',
+                                        display: 'flex',
+                                        justifyContent: 'center',
+                                      }}
+                                    >
+                                      <div
+                                        style={{
+                                          width: '1px',
+                                          height: '8px',
+                                          backgroundColor: '#6b7280',
+                                        }}
+                                      />
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            });
+                          }
+
+                          // For phases with dynamic steady state agents (hypothesis)
+                          if (phase.dynamicSteadyStateAgents) {
+                            const dynamicSSAgents = getDynamicSteadyStateAgents(completedAgents, currentAgent);
+                            // Build combined list: steady_state_definer, then dynamic agents, then fault agents
+                            const steadyStateDefiner = phase.agents.find((a) => a.id === 'steady_state_definer');
+                            const faultAgents = phase.agents.filter((a) =>
+                              ['fault_definer', 'fault_scenario_agent', 'fault_refiner'].includes(a.id)
+                            );
+
+                            // Build combined agents list for rendering
+                            type RenderAgent = { id: string; label: string; status: StatusType; isDynamic?: boolean };
+                            const combinedAgents: RenderAgent[] = [];
+
+                            // Add steady_state_definer
+                            if (steadyStateDefiner) {
+                              combinedAgents.push({
+                                id: steadyStateDefiner.id,
+                                label: steadyStateDefiner.label,
+                                status: getAgentStatus(steadyStateDefiner),
+                              });
+                            }
+
+                            // Add dynamic steady state agents
+                            for (const da of dynamicSSAgents) {
+                              combinedAgents.push({ ...da, isDynamic: true });
+                            }
+
+                            // Add fault agents
+                            for (const fa of faultAgents) {
+                              combinedAgents.push({
+                                id: fa.id,
+                                label: fa.label,
+                                status: getAgentStatus(fa),
+                              });
+                            }
+
+                            return combinedAgents.map((agent, agentIndex) => {
+                              const isLastAgent = agentIndex === combinedAgents.length - 1;
                               const showConnector = !isLastAgent;
 
                               return (

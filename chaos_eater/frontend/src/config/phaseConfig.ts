@@ -14,6 +14,7 @@ export interface PhaseConfig {
   label: string;
   agents: AgentConfig[];
   dynamicAgents?: boolean;  // For phases with dynamically generated agents (e.g., improvement_loop)
+  dynamicSteadyStateAgents?: boolean;  // For hypothesis phase with dynamic steady state agents
 }
 
 export const PHASE_CONFIG: PhaseConfig[] = [
@@ -32,15 +33,12 @@ export const PHASE_CONFIG: PhaseConfig[] = [
     label: 'Hypothesis',
     agents: [
       { id: 'steady_state_definer', label: 'Steady State' },
-      { id: 'draft_agent', label: 'Draft', pattern: /^draft_agent/ },
-      { id: 'inspection_agent', label: 'Inspection', pattern: /^inspection_agent/ },
-      { id: 'threshold_agent', label: 'Threshold', pattern: /^threshold_agent/ },
-      { id: 'unittest_agent', label: 'Unittest', pattern: /^unittest_agent/ },
-      { id: 'completion_check_agent', label: 'Completion Check', pattern: /^completion_check_agent/ },
+      // Dynamic steady state agents (draft, inspection, threshold, unittest, completion_check) are inserted here
       { id: 'fault_definer', label: 'Fault Definer' },
       { id: 'fault_scenario_agent', label: 'Fault Scenario' },
       { id: 'fault_refiner', label: 'Fault Refiner' },
     ],
+    dynamicSteadyStateAgents: true,
   },
   {
     id: 'experiment_plan',
@@ -73,6 +71,28 @@ export const IMPROVEMENT_LOOP_PATTERNS = {
   replanning: /^replanning_\d+$/,
 };
 
+// Patterns for steady state dynamic agents in hypothesis phase
+export const STEADY_STATE_PATTERNS = {
+  draft: /^draft_agent_(\d+)$/,
+  inspection: /^inspection_agent_(\d+)$/,
+  threshold: /^threshold_agent_(\d+)$/,
+  unittest: /^unittest_agent_(\d+)$/,
+  completion_check: /^completion_check_agent_(\d+)$/,
+};
+
+/**
+ * Check if an agent is a steady state proposal agent
+ */
+export function isSteadyStateAgent(agentId: string): boolean {
+  return (
+    STEADY_STATE_PATTERNS.draft.test(agentId) ||
+    STEADY_STATE_PATTERNS.inspection.test(agentId) ||
+    STEADY_STATE_PATTERNS.threshold.test(agentId) ||
+    STEADY_STATE_PATTERNS.unittest.test(agentId) ||
+    STEADY_STATE_PATTERNS.completion_check.test(agentId)
+  );
+}
+
 /**
  * Check if an agent belongs to the improvement loop
  */
@@ -92,6 +112,11 @@ export function getPhaseForAgent(agentId: string): string | null {
   // Check improvement_loop first (dynamic agents)
   if (isImprovementLoopAgent(agentId)) {
     return 'improvement_loop';
+  }
+
+  // Check steady state agents (hypothesis phase)
+  if (isSteadyStateAgent(agentId)) {
+    return 'hypothesis';
   }
 
   for (const phase of PHASE_CONFIG) {
