@@ -14,7 +14,7 @@
 <p>
   This repo is the official implementation of 
   
-  - <a href="https://arxiv.org/abs/2511.07865" target="_blank">LLM-Powered Fully Automated Chaos Engineering: Towards Enabling Anyone to Build Resilient Software Systems at Low Cost</a> (to appear in ASE 2025 proceedings)
+  - <a href="https://ieeexplore.ieee.org/document/11334278" target="_blank">LLM-Powered Fully Automated Chaos Engineering: Towards Enabling Anyone to Build Resilient Software Systems at Low Cost</a> (ASE 2025 proceedings, <a href="https://arxiv.org/abs/2511.07865" target="_blank">preprint</a>)
   - <a href="https://arxiv.org/abs/2501.11107" target="_blank">ChaosEater: Fully Automating Chaos Engineering with Large Language Models</a> (extended technical report)
   
   ChaosEater is an LLM-based system that ***fully*** automates the Chaos Engineering (CE) cycle in Kubernetes systems.
@@ -346,6 +346,23 @@ ChaosEater is built upon numerous excellent projects. Big thank you to the follo
 
 ## 🤝 Citation
 If you find this work useful, please cite our paper as follows:
+
+ASE 2025 proceeding version:
+```
+@INPROCEEDINGS{11334278,
+    author={Kikuta, Daisuke and Ikeuchi, Hiroki and Tajiri, Kengo},
+    booktitle={2025 40th IEEE/ACM International Conference on Automated Software Engineering (ASE)}, 
+    title={LLM-Powered Fully Automated Chaos Engineering: Towards Enabling Anyone to Build Resilient Software Systems at Low Cost}, 
+    year={2025},
+    volume={},
+    number={},
+    pages={3861-3865},
+    keywords={Chaos;Costs;Systematics;Large language models;Production;Manuals;Software systems;Planning;Resilience;Software engineering;Large Language Models;AI Agents;AIOps;Chaos Engineering;Failure Management;Software Systems},
+    doi={10.1109/ASE63991.2025.00331}
+}
+```
+
+or extended technical report:
 ```
 @misc{dkiku2025chaoseater,
     title={ChaosEater: Fully Automating Chaos Engineering with Large Language Models}, 
