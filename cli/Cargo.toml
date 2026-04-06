@@ -1,0 +1,28 @@
+[package]
+name = "chaos-eater-cli"
+version = "0.1.0"
+edition = "2021"
+description = "CLI for ChaosEater - Kubernetes Chaos Engineering automation"
+license = "MIT"
+
+[[bin]]
+name = "chaos-eater"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive", "env"] }
+reqwest = { version = "0.12", features = ["json", "blocking", "multipart"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
+futures-util = "0.3"
+colored = "3"
+comfy-table = "7"
+url = "2"
+ctrlc = "3"
+
+[profile.release]
+strip = true
+lto = true
+opt-level = "z"

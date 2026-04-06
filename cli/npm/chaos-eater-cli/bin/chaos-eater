@@ -1,0 +1,97 @@
+#!/usr/bin/env node
+
+/**
+ * ChaosEater CLI launcher.
+ *
+ * Resolves the platform-specific native binary from optional dependencies.
+ * No postinstall hooks — binary resolution happens at runtime to avoid
+ * supply-chain attack vectors via npm lifecycle scripts.
+ */
+
+"use strict";
+
+const { execFileSync } = require("child_process");
+const path = require("path");
+const fs = require("fs");
+const crypto = require("crypto");
+
+// Platform → npm package mapping
+const PLATFORMS = {
+  "darwin-arm64":  "@chaos-eater/cli-darwin-arm64",
+  "darwin-x64":    "@chaos-eater/cli-darwin-x64",
+  "linux-x64":     "@chaos-eater/cli-linux-x64",
+  "linux-arm64":   "@chaos-eater/cli-linux-arm64",
+};
+
+// SHA-256 checksums of release binaries (updated at release time)
+const CHECKSUMS = {
+  // Populated by the build/release script:
+  // "@chaos-eater/cli-darwin-arm64": "<sha256>",
+  // "@chaos-eater/cli-darwin-x64":   "<sha256>",
+  // "@chaos-eater/cli-linux-x64":    "<sha256>",
+  // "@chaos-eater/cli-linux-arm64":  "<sha256>",
+};
+
+function getBinaryPath() {
+  const platformKey = `${process.platform}-${process.arch}`;
+  const pkg = PLATFORMS[platformKey];
+  if (!pkg) {
+    console.error(
+      `Error: Unsupported platform ${platformKey}.\n` +
+      `Supported: ${Object.keys(PLATFORMS).join(", ")}`
+    );
+    process.exit(1);
+  }
+
+  // Resolve the platform package — npm installs it as an optionalDependency
+  let pkgDir;
+  try {
+    pkgDir = path.dirname(require.resolve(`${pkg}/package.json`));
+  } catch {
+    console.error(
+      `Error: Platform package ${pkg} not found.\n` +
+      `Run: npm install (or install the platform package manually)`
+    );
+    process.exit(1);
+  }
+
+  const binPath = path.join(pkgDir, "bin", "chaos-eater");
+  if (!fs.existsSync(binPath)) {
+    console.error(`Error: Binary not found at ${binPath}`);
+    process.exit(1);
+  }
+
+  // Verify checksum if available (supply-chain protection)
+  const expectedHash = CHECKSUMS[pkg];
+  if (expectedHash) {
+    const fileBuffer = fs.readFileSync(binPath);
+    const actualHash = crypto
+      .createHash("sha256")
+      .update(fileBuffer)
+      .digest("hex");
+    if (actualHash !== expectedHash) {
+      console.error(
+        `Error: Binary checksum mismatch for ${pkg}!\n` +
+        `  Expected: ${expectedHash}\n` +
+        `  Actual:   ${actualHash}\n` +
+        `This may indicate a compromised package. Aborting.`
+      );
+      process.exit(1);
+    }
+  }
+
+  return binPath;
+}
+
+try {
+  const binPath = getBinaryPath();
+  const result = execFileSync(binPath, process.argv.slice(2), {
+    stdio: "inherit",
+    env: process.env,
+  });
+} catch (e) {
+  if (e.status !== undefined) {
+    process.exit(e.status);
+  }
+  throw e;
+}

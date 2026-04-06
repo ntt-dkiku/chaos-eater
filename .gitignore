@@ -14,3 +14,15 @@ evaluation/ase2025/results/*/logs/
 evaluation/synthetic/data/
 evaluation/synthetic/data_weak/
 evaluation/synthetic/results/
+
+# Rust / Cargo
+cli/target/
+cli/checksums.txt
+
+# npm - platform binaries (built artifacts, not the JS wrapper)
+cli/npm/cli-*/bin/chaos-eater
+cli/npm/*/node_modules/
+node_modules/
+
+# Python egg-info
+*.egg-info/

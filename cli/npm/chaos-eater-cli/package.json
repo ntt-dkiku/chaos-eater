@@ -1,0 +1,26 @@
+{
+  "name": "@chaos-eater/cli",
+  "version": "0.1.0",
+  "description": "ChaosEater CLI - Automate Kubernetes Chaos Engineering from the terminal",
+  "license": "MIT",
+  "bin": {
+    "chaos-eater": "bin/chaos-eater"
+  },
+  "files": [
+    "bin/",
+    "README.md"
+  ],
+  "optionalDependencies": {
+    "@chaos-eater/cli-darwin-arm64": "0.1.0",
+    "@chaos-eater/cli-darwin-x64": "0.1.0",
+    "@chaos-eater/cli-linux-x64": "0.1.0",
+    "@chaos-eater/cli-linux-arm64": "0.1.0"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ntt-dkiku/chaos-eater"
+  }
+}
