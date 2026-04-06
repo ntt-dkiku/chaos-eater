@@ -296,6 +296,423 @@ impl ChaosEaterClient {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mockito::{Matcher, Server};
+
+    fn mock_client(server: &Server) -> ChaosEaterClient {
+        ChaosEaterClient::new(&server.url(), 5.0).unwrap()
+    }
+
+    // -- Health --
+    #[test]
+    fn test_health() {
+        let mut server = Server::new();
+        let m = server
+            .mock("GET", "/health")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"status":"healthy","timestamp":"2025-01-01T00:00:00"}"#)
+            .create();
+        let client = mock_client(&server);
+        let result = client.health().unwrap();
+        assert_eq!(result["status"], "healthy");
+        m.assert();
+    }
+
+    #[test]
+    fn test_health_server_error() {
+        let mut server = Server::new();
+        server
+            .mock("GET", "/health")
+            .with_status(500)
+            .with_body(r#"{"detail":"Internal Server Error"}"#)
+            .create();
+        let client = mock_client(&server);
+        let err = client.health().unwrap_err();
+        assert!(err.message.contains("500"));
+        assert_eq!(err.code, 1);
+    }
+
+    #[test]
+    fn test_connection_error() {
+        // Connect to a port that nothing listens on
+        let client = ChaosEaterClient::new("http://127.0.0.1:1", 1.0).unwrap();
+        let err = client.health().unwrap_err();
+        assert_eq!(err.code, 3);
+        assert!(err.message.contains("Cannot connect") || err.message.contains("Request failed"));
+    }
+
+    // -- Jobs --
+    #[test]
+    fn test_create_job() {
+        let mut server = Server::new();
+        let m = server
+            .mock("POST", "/jobs")
+            .match_body(Matcher::PartialJsonString(
+                r#"{"kube_context":"ctx"}"#.to_string(),
+            ))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"job_id":"j-1","status":"pending","message":"created"}"#)
+            .create();
+        let client = mock_client(&server);
+        let body = serde_json::json!({"kube_context": "ctx", "project_path": "/p"});
+        let result = client.create_job(&body).unwrap();
+        assert_eq!(result["job_id"], "j-1");
+        m.assert();
+    }
+
+    #[test]
+    fn test_list_jobs_empty() {
+        let mut server = Server::new();
+        server
+            .mock("GET", "/jobs")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body("[]")
+            .create();
+        let client = mock_client(&server);
+        let result = client.list_jobs(None).unwrap();
+        assert_eq!(result.as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_list_jobs_with_status_filter() {
+        let mut server = Server::new();
+        server
+            .mock("GET", "/jobs")
+            .match_query(Matcher::UrlEncoded("status".into(), "running".into()))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"[{"job_id":"j-1","status":"running"}]"#)
+            .create();
+        let client = mock_client(&server);
+        let result = client.list_jobs(Some("running")).unwrap();
+        assert_eq!(result.as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_get_job() {
+        let mut server = Server::new();
+        server
+            .mock("GET", "/jobs/j-1")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"job_id":"j-1","status":"running","current_phase":"hypothesis"}"#)
+            .create();
+        let client = mock_client(&server);
+        let result = client.get_job("j-1").unwrap();
+        assert_eq!(result["status"], "running");
+    }
+
+    #[test]
+    fn test_get_job_not_found() {
+        let mut server = Server::new();
+        server
+            .mock("GET", "/jobs/nonexistent")
+            .with_status(404)
+            .with_body(r#"{"detail":"Job not found"}"#)
+            .create();
+        let client = mock_client(&server);
+        let err = client.get_job("nonexistent").unwrap_err();
+        assert!(err.message.contains("404"));
+    }
+
+    #[test]
+    fn test_cancel_job() {
+        let mut server = Server::new();
+        server
+            .mock("DELETE", "/jobs/j-1")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"job_id":"j-1","status":"cancelled","message":"ok"}"#)
+            .create();
+        let client = mock_client(&server);
+        let result = client.cancel_job("j-1").unwrap();
+        assert_eq!(result["status"], "cancelled");
+    }
+
+    #[test]
+    fn test_pause_job() {
+        let mut server = Server::new();
+        server
+            .mock("POST", "/jobs/j-1/pause")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"status":"paused"}"#)
+            .create();
+        let client = mock_client(&server);
+        let result = client.pause_job("j-1").unwrap();
+        assert_eq!(result["status"], "paused");
+    }
+
+    #[test]
+    fn test_resume_job_with_feedback() {
+        let mut server = Server::new();
+        server
+            .mock("POST", "/jobs/j-1/resume")
+            .match_body(Matcher::PartialJsonString(
+                r#"{"feedback":"try again"}"#.to_string(),
+            ))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"status":"running"}"#)
+            .create();
+        let client = mock_client(&server);
+        let result = client.resume_job("j-1", Some("try again")).unwrap();
+        assert_eq!(result["status"], "running");
+    }
+
+    #[test]
+    fn test_resume_job_without_feedback() {
+        let mut server = Server::new();
+        server
+            .mock("POST", "/jobs/j-1/resume")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"status":"running"}"#)
+            .create();
+        let client = mock_client(&server);
+        let result = client.resume_job("j-1", None).unwrap();
+        assert_eq!(result["status"], "running");
+    }
+
+    #[test]
+    fn test_approve() {
+        let mut server = Server::new();
+        server
+            .mock("POST", "/jobs/j-1/approval")
+            .match_body(Matcher::PartialJsonString(
+                r#"{"action":"approve","message":"looks good"}"#.to_string(),
+            ))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"status":"ok"}"#)
+            .create();
+        let client = mock_client(&server);
+        let result = client
+            .approve("j-1", "approve", Some("looks good"))
+            .unwrap();
+        assert_eq!(result["status"], "ok");
+    }
+
+    #[test]
+    fn test_approve_without_message() {
+        let mut server = Server::new();
+        server
+            .mock("POST", "/jobs/j-1/approval")
+            .match_body(Matcher::PartialJsonString(
+                r#"{"action":"retry"}"#.to_string(),
+            ))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"status":"ok"}"#)
+            .create();
+        let client = mock_client(&server);
+        let result = client.approve("j-1", "retry", None).unwrap();
+        assert_eq!(result["status"], "ok");
+    }
+
+    // -- Data --
+    #[test]
+    fn test_get_logs() {
+        let mut server = Server::new();
+        server
+            .mock("GET", "/jobs/j-1/logs")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"logs":"some log data"}"#)
+            .create();
+        let client = mock_client(&server);
+        let result = client.get_logs("j-1").unwrap();
+        assert_eq!(result["logs"], "some log data");
+    }
+
+    #[test]
+    fn test_get_output() {
+        let mut server = Server::new();
+        server
+            .mock("GET", "/jobs/j-1/output")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"summary":"test passed"}"#)
+            .create();
+        let client = mock_client(&server);
+        let result = client.get_output("j-1").unwrap();
+        assert_eq!(result["summary"], "test passed");
+    }
+
+    #[test]
+    fn test_download_artifact() {
+        let mut server = Server::new();
+        server
+            .mock("GET", "/jobs/j-1/artifact")
+            .with_status(200)
+            .with_body(b"PK\x03\x04fake-zip-content")
+            .create();
+        let client = mock_client(&server);
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("out.zip");
+        let path = client
+            .download_artifact("j-1", dest.to_str().unwrap())
+            .unwrap();
+        assert!(std::path::Path::new(&path).exists());
+        let content = std::fs::read(&path).unwrap();
+        assert!(content.starts_with(b"PK\x03\x04"));
+    }
+
+    // -- Upload --
+    #[test]
+    fn test_upload_nonexistent() {
+        let server = Server::new();
+        let client = mock_client(&server);
+        let err = client.upload("/nonexistent/file.zip").unwrap_err();
+        assert!(err.message.contains("not found"));
+    }
+
+    #[test]
+    fn test_upload() {
+        let mut server = Server::new();
+        server
+            .mock("POST", "/upload")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"project_path":"/uploads/test"}"#)
+            .create();
+        let client = mock_client(&server);
+        let dir = tempfile::tempdir().unwrap();
+        let zip = dir.path().join("test.zip");
+        std::fs::write(&zip, b"PK\x03\x04fake").unwrap();
+        let result = client.upload(zip.to_str().unwrap()).unwrap();
+        assert_eq!(result["project_path"], "/uploads/test");
+    }
+
+    // -- Clusters --
+    #[test]
+    fn test_list_clusters() {
+        let mut server = Server::new();
+        server
+            .mock("GET", "/clusters")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"[{"context":"kind-ce"}]"#)
+            .create();
+        let client = mock_client(&server);
+        let result = client.list_clusters(None).unwrap();
+        assert_eq!(result.as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_claim_cluster() {
+        let mut server = Server::new();
+        server
+            .mock("POST", "/clusters/claim")
+            .match_body(Matcher::PartialJsonString(
+                r#"{"session_id":"s1","preferred_context":"kind-ce"}"#.to_string(),
+            ))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"context":"kind-ce"}"#)
+            .create();
+        let client = mock_client(&server);
+        let result = client.claim_cluster("s1", Some("kind-ce")).unwrap();
+        assert_eq!(result["context"], "kind-ce");
+    }
+
+    #[test]
+    fn test_release_cluster() {
+        let mut server = Server::new();
+        server
+            .mock("POST", "/clusters/release")
+            .match_body(Matcher::PartialJsonString(
+                r#"{"session_id":"s1"}"#.to_string(),
+            ))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"released":true}"#)
+            .create();
+        let client = mock_client(&server);
+        let result = client.release_cluster("s1").unwrap();
+        assert_eq!(result["released"], true);
+    }
+
+    #[test]
+    fn test_clean_cluster() {
+        let mut server = Server::new();
+        server
+            .mock("POST", "/clusters/clean")
+            .match_body(Matcher::PartialJsonString(
+                r#"{"kube_context":"ctx","namespace":"ns","project_name":"proj"}"#.to_string(),
+            ))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"cleaned":true}"#)
+            .create();
+        let client = mock_client(&server);
+        let result = client.clean_cluster("ctx", "ns", "proj").unwrap();
+        assert_eq!(result["cleaned"], true);
+    }
+
+    // -- Config --
+    #[test]
+    fn test_set_api_key() {
+        let mut server = Server::new();
+        server
+            .mock("POST", "/config/api-key")
+            .match_body(Matcher::PartialJsonString(
+                r#"{"provider":"openai","api_key":"sk-test"}"#.to_string(),
+            ))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"status":"ok"}"#)
+            .create();
+        let client = mock_client(&server);
+        let result = client.set_api_key("openai", "sk-test").unwrap();
+        assert_eq!(result["status"], "ok");
+    }
+
+    #[test]
+    fn test_get_api_key() {
+        let mut server = Server::new();
+        server
+            .mock("GET", "/config/api-key")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"provider":"openai","masked":"sk-...test"}"#)
+            .create();
+        let client = mock_client(&server);
+        let result = client.get_api_key().unwrap();
+        assert_eq!(result["provider"], "openai");
+    }
+
+    #[test]
+    fn test_get_providers_status() {
+        let mut server = Server::new();
+        server
+            .mock("GET", "/providers/status")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"openai":true,"anthropic":false}"#)
+            .create();
+        let client = mock_client(&server);
+        let result = client.get_providers_status().unwrap();
+        assert_eq!(result["openai"], true);
+        assert_eq!(result["anthropic"], false);
+    }
+
+    // -- ws_url --
+    #[test]
+    fn test_ws_url() {
+        let client = ChaosEaterClient::new("http://localhost:8000", 5.0).unwrap();
+        assert_eq!(client.ws_url(), "ws://localhost:8000");
+
+        let client = ChaosEaterClient::new("https://example.com:443/", 5.0).unwrap();
+        assert_eq!(client.ws_url(), "wss://example.com:443");
+    }
+}
+
 fn conn_error(base_url: &str, e: reqwest::Error) -> CliError {
     if e.is_connect() {
         CliError {

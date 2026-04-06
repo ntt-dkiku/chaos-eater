@@ -22,6 +22,12 @@ comfy-table = "7"
 url = "2"
 ctrlc = "3"
 
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+mockito = "1"
+tempfile = "3"
+
 [profile.release]
 strip = true
 lto = true
